@@ -277,11 +277,25 @@ class IconThemeHook : XposedModule() {
                 source = SOURCE_NATIVE
                 android.util.Log.d(TAG, "[toBitmap] source=NATIVE")
             } else {
-                // ② Foreground extraction (Phase 3.1 实现)
-                // ③ Fallback to whole drawable
-                maskBitmap = DrawableConverter.toBitmap(d)
-                source = SOURCE_LUMINANCE
-                android.util.Log.d(TAG, "[toBitmap] source=LUMINANCE")
+                // ② Foreground extraction (Phase 3.1)
+                val fg = d.foreground
+                if (fg != null) {
+                    // 安全设置 bounds（不用 intrinsic，可能为 -1）
+                    val srcBounds = d.bounds
+                    val w = if (srcBounds.width() > 0) srcBounds.width()
+                            else d.intrinsicWidth.coerceAtLeast(1)
+                    val h = if (srcBounds.height() > 0) srcBounds.height()
+                            else d.intrinsicHeight.coerceAtLeast(1)
+                    fg.setBounds(0, 0, w, h)
+                    maskBitmap = DrawableConverter.toBitmap(fg)
+                    source = SOURCE_FOREGROUND
+                    android.util.Log.d(TAG, "[toBitmap] source=FOREGROUND")
+                } else {
+                    // ③ Fallback to whole drawable
+                    maskBitmap = DrawableConverter.toBitmap(d)
+                    source = SOURCE_LUMINANCE
+                    android.util.Log.d(TAG, "[toBitmap] source=LUMINANCE")
+                }
             }
         } else {
             maskBitmap = DrawableConverter.toBitmap(d)
