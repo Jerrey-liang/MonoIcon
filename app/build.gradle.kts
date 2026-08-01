@@ -66,9 +66,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
-    // LSPosed — libxposed API 101 + service (XposedProvider)
+    // LSPosed — libxposed API 101 (compileOnly: framework 运行时提供)
     compileOnly(libs.libxposed.api)
-    compileOnly(libs.libxposed.service)
+    // libxposed service (XposedProvider) 必须打包进 APK — Android 系统直接实例化 provider
+    implementation(libs.libxposed.service)
 
     // Debug
     debugImplementation(libs.androidx.compose.ui.tooling)
