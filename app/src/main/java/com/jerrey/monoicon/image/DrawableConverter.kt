@@ -36,6 +36,9 @@ object DrawableConverter {
 
     private const val TAG = "MonoIcon.Convert"
 
+    // Phase 2.5 性能优化：复用绘制对象，避免每次分配 Canvas/Bitmap 位图分配
+    private val reusableCanvas = Canvas()
+
     /**
      * Converts [drawable] into a monochrome silhouette [Bitmap], or returns
      * `null` if the drawable type is not (yet) supported or conversion fails.
@@ -81,8 +84,11 @@ object DrawableConverter {
         // Copying into a fresh ARGB_8888 bitmap is safe even if `inner` is
         // immutable or shared with other drawables.
         val copy = Bitmap.createBitmap(inner.width, inner.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(copy)
-        canvas.drawBitmap(inner, 0f, 0f, null)
+        synchronized(reusableCanvas) {
+            reusableCanvas.setBitmap(copy)
+            reusableCanvas.drawBitmap(inner, 0f, 0f, null)
+            reusableCanvas.setBitmap(null)
+        }
         return copy
     }
 
@@ -97,10 +103,12 @@ object DrawableConverter {
         val height = drawable.intrinsicHeight.coerceAtLeast(1)
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-
-        drawable.setBounds(0, 0, width, height)
-        drawable.draw(canvas)
+        synchronized(reusableCanvas) {
+            reusableCanvas.setBitmap(bitmap)
+            drawable.setBounds(0, 0, width, height)
+            drawable.draw(reusableCanvas)
+            reusableCanvas.setBitmap(null)
+        }
 
         return bitmap
     }

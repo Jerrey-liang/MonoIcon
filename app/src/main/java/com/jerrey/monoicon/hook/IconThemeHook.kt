@@ -263,18 +263,30 @@ class IconThemeHook : XposedModule() {
      *
      * 调用链：`thisObject.getShortcutInfo().getPackageName()`。
      * 任何一步失败都返回 null，让调用方回落原始行为。
+     *
+     * ## 性能优化（Phase 2.5）
+     * 缓存的 [Method] 引用避免每次调用都执行 `javaClass.methods` 全量
+     * 反射扫描。首次找到后固定复用，后续调用仅 `invoke`（快一个数量级）。
+     * 缓存字段位于 [companion object]（见文件底部）。
      */
     private fun resolvePackageName(target: Any?): String? {
         if (target == null) return null
         return try {
-            val getShortcutInfo = target.javaClass.methods
-                .firstOrNull { it.name == "getShortcutInfo" && it.parameterCount == 0 }
-                ?: return null
+            val getShortcutInfo = cachedGetShortcutInfo ?: run {
+                target.javaClass.methods
+                    .firstOrNull { it.name == "getShortcutInfo" && it.parameterCount == 0 }
+                    ?.also { cachedGetShortcutInfo = it }
+                    ?: return null
+            }
             val shortcutInfo = getShortcutInfo.invoke(target)
                 ?: return null
-            val getPackageName = shortcutInfo.javaClass.methods
-                .firstOrNull { it.name == "getPackageName" && it.parameterCount == 0 }
-                ?: return null
+
+            val getPackageName = cachedGetPackageName ?: run {
+                shortcutInfo.javaClass.methods
+                    .firstOrNull { it.name == "getPackageName" && it.parameterCount == 0 }
+                    ?.also { cachedGetPackageName = it }
+                    ?: return null
+            }
             getPackageName.invoke(shortcutInfo) as? String
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "[setIconDrawable] resolvePackageName failed: ${t.message}")
@@ -287,6 +299,13 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
 
     companion object {
+        // Phase 2.5: 反射 Method 缓存，避免每次全量扫描 javaClass.methods
+        // 首次 use 后只读；null 表示待解析
+        @Volatile
+        private var cachedGetShortcutInfo: java.lang.reflect.Method? = null
+        @Volatile
+        private var cachedGetPackageName: java.lang.reflect.Method? = null
+
         fun describeDrawable(d: Drawable?): String {
             if (d == null) return "drawable=null"
             val sb = StringBuilder("drawable=").append(d.javaClass.simpleName)
