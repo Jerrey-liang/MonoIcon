@@ -262,12 +262,34 @@ class IconThemeHook : XposedModule() {
      */
     private fun processIconReplacement(chain: Chain): BitmapDrawable? {
         val d = chain.getArg(0) as? Drawable ?: return null
-
-        // 缓存优先 — 同一组件+相同视觉内容直接命中
         val identity = resolveIdentity(chain.thisObject)
 
-        // 先转换 Drawable → Bitmap mask
-        val maskBitmap = DrawableConverter.toBitmap(d) ?: return null
+        // Phase 3: 源优先级 — NATIVE > FOREGROUND > LUMINANCE
+        val maskBitmap: Bitmap?
+        val source: Int
+
+        if (d is AdaptiveIconDrawable) {
+            // ① Native monochrome layer (API 33+, 反射 hidden API)
+            val mono = DrawableConverter.getMonochromeLayer(d)
+            if (mono != null) {
+                val raw = DrawableConverter.toRawBitmap(mono)
+                maskBitmap = if (raw != null) DrawableConverter.normalizeNativeMonochrome(raw) else null
+                source = SOURCE_NATIVE
+                android.util.Log.d(TAG, "[toBitmap] source=NATIVE")
+            } else {
+                // ② Foreground extraction (Phase 3.1 实现)
+                // ③ Fallback to whole drawable
+                maskBitmap = DrawableConverter.toBitmap(d)
+                source = SOURCE_LUMINANCE
+                android.util.Log.d(TAG, "[toBitmap] source=LUMINANCE")
+            }
+        } else {
+            maskBitmap = DrawableConverter.toBitmap(d)
+            source = SOURCE_LUMINANCE
+            android.util.Log.d(TAG, "[toBitmap] source=LUMINANCE")
+        }
+
+        if (maskBitmap == null) return null
 
         val cacheKey = monochromeCache.buildKey(identity, maskBitmap)
         if (cacheKey == null) return null
@@ -282,6 +304,8 @@ class IconThemeHook : XposedModule() {
         monochromeCache.put(cacheKey, maskBitmap)
         return MonochromeGenerator.create(maskBitmap)
     }
+
+    // ── Source constants (Phase 3) — 见 companion object ─────────────
 
     /**
      * 通过反射解析组件身份标识，优先级：
@@ -361,5 +385,10 @@ class IconThemeHook : XposedModule() {
         private var cachedGetClassName: java.lang.reflect.Method? = null
         @Volatile
         private var cachedGetPackageName: java.lang.reflect.Method? = null
+
+        // Phase 3 source constants
+        const val SOURCE_NATIVE = 1
+        const val SOURCE_FOREGROUND = 2
+        const val SOURCE_LUMINANCE = 3
     }
 }

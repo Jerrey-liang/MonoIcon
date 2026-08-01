@@ -71,6 +71,100 @@ object DrawableConverter {
         }
     }
 
+    /**
+     * Renders [drawable] to a raw ARGB_8888 [Bitmap] **without** applying
+     * [toLuminanceMask] or any other mask generation.
+     *
+     * Used for native monochrome layers and foreground extractions that
+     * are already in the correct visual form or will be processed by a
+     * different mask strategy.
+     *
+     * @param drawable The drawable to render.
+     * @return A raw ARGB_8888 bitmap, or `null` on failure.
+     */
+    fun toRawBitmap(drawable: Drawable): Bitmap? {
+        try {
+            return when (drawable) {
+                is BitmapDrawable -> copyBitmapDrawable(drawable)
+                is VectorDrawable -> renderToBitmap(drawable)
+                is AdaptiveIconDrawable -> renderToBitmap(drawable)
+                else -> {
+                    Log.d(TAG, "toRawBitmap unsupported type: ${drawable.javaClass.simpleName}")
+                    null
+                }
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "toRawBitmap failed: ${e.message}", e)
+            return null
+        }
+    }
+
+    /**
+     * Retrieves the native monochrome layer from an [AdaptiveIconDrawable]
+     * via reflection.
+     *
+     * [AdaptiveIconDrawable.getMonochrome] is a hidden API (added in API 33).
+     * On API < 33 or if reflection fails, returns `null` silently.
+     *
+     * @param drawable The adaptive icon to query.
+     * @return The monochrome [Drawable], or `null` if unavailable.
+     */
+    fun getMonochromeLayer(drawable: AdaptiveIconDrawable): Drawable? {
+        if (android.os.Build.VERSION.SDK_INT < 33) return null
+        return try {
+            val method = AdaptiveIconDrawable::class.java.getDeclaredMethod("getMonochrome")
+            method.isAccessible = true
+            method.invoke(drawable) as? Drawable
+        } catch (t: Throwable) {
+            Log.d(TAG, "getMonochromeLayer failed (no-op): ${t.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /**
+     * Normalizes a native monochrome bitmap into a pure alpha mask.
+     *
+     * Native monochrome Drawables may carry shape information in RGB
+     * channels rather than as pure alpha. This method converts them:
+     *
+     * ```
+     * newAlpha = sourceAlpha * luminance(RGB) / 255
+     * RGB = 0
+     * ```
+     *
+     * This preserves monochrome shape details while producing a
+     * clean ARGB_8888 mask compatible with the cache and the
+     * [MonochromeGenerator] pipeline.
+     *
+     * @param bitmap Raw bitmap rendered from a native monochrome Drawable.
+     * @return A new ARGB_8888 alpha-only mask bitmap.
+     */
+    fun normalizeNativeMonochrome(bitmap: Bitmap): Bitmap {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        for (i in pixels.indices) {
+            val color = pixels[i]
+            val a = (color ushr 24) and 0xFF
+            if (a == 0) {
+                pixels[i] = 0x00000000
+                continue
+            }
+            val r = (color ushr 16) and 0xFF
+            val g = (color ushr 8) and 0xFF
+            val b = color and 0xFF
+            val y = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+            val newAlpha = (a * y) / 255
+            pixels[i] = (newAlpha shl 24) or 0x00000000
+        }
+
+        val mask = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        mask.setPixels(pixels, 0, w, 0, 0, w, h)
+        return mask
+    }
+
     // ── Per-type converters ─────────────────────────────────────────
 
     /**
