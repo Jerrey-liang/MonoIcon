@@ -1,0 +1,26 @@
+# MonoIcon — LSPosed Module Keep Rules (API 101)
+
+# Entry point (referenced in META-INF/xposed/java_init.list)
+-keep class com.jerrey.monoicon.hook.IconThemeHook {
+    public <init>();
+    *;
+}
+
+# Hook utilities
+-keep class com.jerrey.monoicon.hook.HookStats { *; }
+
+# Core types
+-keep class com.jerrey.monoicon.core.Result { *; }
+-keep class com.jerrey.monoicon.core.Result$Success { *; }
+-keep class com.jerrey.monoicon.core.Result$Error { *; }
+
+# Logging
+-keep class com.jerrey.monoicon.logging.** { *; }
+
+# libxposed API (provided at runtime)
+-dontwarn io.github.libxposed.**
+-keep class io.github.libxposed.** { *; }
+
+# General
+-keepattributes *Annotation*
+-keepattributes SourceFile,LineNumberTable

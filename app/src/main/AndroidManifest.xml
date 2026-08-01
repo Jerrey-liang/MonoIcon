@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MonoIcon"
+        tools:targetApi="36">
+
+        <!-- LSPosed 模块标识 metadata（必需：LSPosed Manager 通过它识别模块） -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Convert HyperOS app icons to monochrome Material You themed icons" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="101" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+        <!-- libxposed 模块初始化 ContentProvider（框架提供，处理 SEND_BINDER） -->
+        <provider
+            android:name="io.github.libxposed.service.XposedProvider"
+            android:authorities="com.jerrey.monoicon.XposedService"
+            android:exported="true"
+            android:enabled="true" />
+        <meta-data
+            android:name="de.robv.android.xposed.category.MODULE_SETTINGS"
+            android:value="com.jerrey.monoicon.MainActivity" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.MonoIcon">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+    </application>
+
+</manifest>
