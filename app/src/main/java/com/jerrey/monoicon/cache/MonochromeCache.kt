@@ -49,13 +49,39 @@ class MonochromeCache(private val maxSize: Int) {
      *               same component.
      * @return Cache key, or `null` if [identity] is blank or [bitmap] is recycled.
      */
-    fun buildKey(identity: String?, bitmap: Bitmap?): String? {
+    /**
+     * Builds a stable cache key from component identity, bitmap content,
+     * and icon source type.
+     *
+     * Format: `"$identity|${w}x${h}@$fp|$src"`
+     *
+     * Source suffix prevents cache collisions between different icon sources
+     * (e.g. NATIVE monochrome vs LUMINANCE fallback for the same component).
+     *
+     * @param identity Resolved component identity.
+     * @param bitmap The monochrome mask bitmap (for fingerprint).
+     * @param source Source type: [SOURCE_NATIVE], [SOURCE_FOREGROUND], or [SOURCE_LUMINANCE].
+     * @return Cache key, or `null` if identity/bitmap invalid.
+     */
+    fun buildKey(identity: String?, bitmap: Bitmap?, source: Int): String? {
         if (identity.isNullOrBlank()) return null
         if (bitmap == null || bitmap.isRecycled) return null
         val w = bitmap.width
         val h = bitmap.height
         val fp = computeFingerprint(bitmap)
-        return "$identity|${w}x${h}@$fp"
+        val src = when (source) {
+            SOURCE_NATIVE -> "NATIVE"
+            SOURCE_FOREGROUND -> "FG"
+            else -> "LUMA"
+        }
+        return "$identity|${w}x${h}@$fp|$src"
+    }
+
+    // ── Source constants (synced with IconThemeHook) ──────────────────
+    companion object {
+        const val SOURCE_NATIVE = 1
+        const val SOURCE_FOREGROUND = 2
+        const val SOURCE_LUMINANCE = 3
     }
 
     // ── Cache operations ──────────────────────────────────────────────

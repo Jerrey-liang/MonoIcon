@@ -305,7 +305,7 @@ class IconThemeHook : XposedModule() {
 
         if (maskBitmap == null) return null
 
-        val cacheKey = monochromeCache.buildKey(identity, maskBitmap)
+        val cacheKey = monochromeCache.buildKey(identity, maskBitmap, source)
         if (cacheKey == null) return null
 
         // 缓存命中 → 直接包装为 Drawable
