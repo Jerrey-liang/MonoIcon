@@ -6,6 +6,8 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
+import com.jerrey.monoicon.image.DrawableConverter
+import com.jerrey.monoicon.image.MonochromeGenerator
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedModule
@@ -102,18 +104,39 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val start = System.nanoTime()
-                val drawable = chain.getArg(0) as? AdaptiveIconDrawable
-                val desc = if (drawable != null) {
-                    "${drawable.javaClass.simpleName}(w=${drawable.intrinsicWidth},h=${drawable.intrinsicHeight})"
+                val adaptiveIcon = chain.getArg(0) as? AdaptiveIconDrawable
+                val desc = if (adaptiveIcon != null) {
+                    "${adaptiveIcon.javaClass.simpleName}(w=${adaptiveIcon.intrinsicWidth},h=${adaptiveIcon.intrinsicHeight})"
                 } else "null"
                 android.util.Log.d(TAG, "[getMonochrome] drawable=$desc")
 
-                val result = chain.proceed()
+                // Step 1: 复用系统原生 monochrome layer（若应用自带）
+                val original = try {
+                    chain.proceed()
+                } catch (t: Throwable) {
+                    android.util.Log.e(TAG, "[getMonochrome] proceed threw: ${t.message}", t)
+                    null
+                }
+                if (original != null) {
+                    val elapsed = (System.nanoTime() - start) / 1_000_000L
+                    android.util.Log.i(TAG, "[getMonochrome] native monochrome reused null=false cost=${elapsed}ms")
+                    stats.record("getMonochrome", elapsed)
+                    return@intercept original
+                }
+
+                // Step 2: 原生为空 → 自行生成 alpha-mask monochrome
+                val generated = if (adaptiveIcon != null) {
+                    val bitmap = DrawableConverter.toBitmap(adaptiveIcon)
+                    MonochromeGenerator.create(bitmap)
+                } else {
+                    null
+                }
+
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
-                val isNull = result == null
-                android.util.Log.i(TAG, "[getMonochrome] null=$isNull cost=${elapsed}ms")
+                val isNull = generated == null
+                android.util.Log.i(TAG, "[getMonochrome] generated null=$isNull type=${generated?.javaClass?.simpleName} cost=${elapsed}ms")
                 stats.record("getMonochrome", elapsed)
-                result
+                generated
             }
     }
 
