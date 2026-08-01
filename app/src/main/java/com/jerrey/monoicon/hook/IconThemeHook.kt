@@ -230,50 +230,57 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val start = System.nanoTime()
-                val d = chain.getArg(0) as? Drawable
-                val b = chain.getArg(1) as? Bitmap
-                val desc = describeDrawable(d)
-                val bmp = if (b != null) "${b.width}x${b.height}" else "null"
 
-                // 获取包名（反射 thisObject → getShortcutInfo → getPackageName）
-                val packageName = resolvePackageName(chain.thisObject)
-
-                // Phase 2.6: 缓存优先 — 同一应用图标多次显示时直接命中
-                val iconW = d?.intrinsicWidth ?: 0
-                val iconH = d?.intrinsicHeight ?: 0
-                val cacheKey = monochromeCache.buildKey(packageName, iconW, iconH)
-
-                var generated = if (cacheKey != null) {
-                    monochromeCache.get(cacheKey)
-                } else {
+                // Phase 2.7: 生成逻辑整体 try/catch，任何异常回落原始 drawable
+                val replacement = try {
+                    processIconReplacement(chain)
+                } catch (t: Throwable) {
+                    // 绝不 crash launcher：记录后回落原始行为
+                    android.util.Log.e(TAG, "[setIconDrawable] process failed, falling back: ${t.message}")
                     null
                 }
 
-                // 未命中 → 生成并存入缓存
-                if (generated == null && cacheKey != null && d != null) {
-                    val bitmap = DrawableConverter.toBitmap(d)
-                    generated = MonochromeGenerator.create(bitmap)
-                    if (generated != null) {
-                        monochromeCache.put(cacheKey, generated)
-                    }
-                }
-
-                android.util.Log.d(
-                    TAG,
-                    "[setIconDrawable] pkg=$packageName $desc bitmap=$bmp generated=${generated?.javaClass?.simpleName} cacheKey=$cacheKey"
-                )
-
-                val result = if (generated != null) {
-                    // 替换第一个参数（Drawable）为生成的 monochrome，保持 Bitmap 参数不变
-                    chain.proceed(arrayOf<Any>(generated, b ?: generated.bitmap))
+                val result = if (replacement != null) {
+                    val b = chain.getArg(1) as? Bitmap
+                    chain.proceed(arrayOf<Any>(replacement, b ?: replacement.bitmap))
                 } else {
                     chain.proceed()
                 }
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
-                android.util.Log.i(TAG, "[setIconDrawable] replaced=${generated != null} cost=${elapsed}ms")
+                // Phase 2.7: 降噪 — 仅记录替换与否，完整描述交给 HookStats 统计
+                android.util.Log.i(TAG, "[setIconDrawable] replaced=${replacement != null} cost=${elapsed}ms")
                 stats.record("setIconDrawable", elapsed)
                 result
             }
+    }
+
+    /**
+     * 生成 monochrome 替换 drawable，或返回 null（不可替换/失败）。
+     *
+     * 流程：解析包名 → 缓存查找 → 未命中则转换并存入缓存。
+     * 抛出异常由调用方 catch，回落原始 drawable。
+     */
+    private fun processIconReplacement(chain: Chain): BitmapDrawable? {
+        val d = chain.getArg(0) as? Drawable ?: return null
+
+        // 获取包名（反射 thisObject → getShortcutInfo → getPackageName）
+        val packageName = resolvePackageName(chain.thisObject)
+
+        // 缓存优先 — 同一应用图标多次显示时直接命中
+        val iconW = d.intrinsicWidth
+        val iconH = d.intrinsicHeight
+        val cacheKey = monochromeCache.buildKey(packageName, iconW, iconH)
+        if (cacheKey == null) return null
+
+        monochromeCache.get(cacheKey)?.let { return it }
+
+        // 未命中 → 生成并存入缓存
+        val bitmap = DrawableConverter.toBitmap(d)
+        val generated = MonochromeGenerator.create(bitmap)
+        if (generated != null) {
+            monochromeCache.put(cacheKey, generated)
+        }
+        return generated
     }
 
     /**
@@ -323,20 +330,5 @@ class IconThemeHook : XposedModule() {
         private var cachedGetShortcutInfo: java.lang.reflect.Method? = null
         @Volatile
         private var cachedGetPackageName: java.lang.reflect.Method? = null
-
-        fun describeDrawable(d: Drawable?): String {
-            if (d == null) return "drawable=null"
-            val sb = StringBuilder("drawable=").append(d.javaClass.simpleName)
-            val flags = mutableListOf<String>()
-            if (d is AdaptiveIconDrawable) flags.add("AdaptiveIcon")
-            if (d is android.graphics.drawable.LayerDrawable) flags.add("Layer(${d.numberOfLayers})")
-            if (d is BitmapDrawable) {
-                val bmp = d.bitmap
-                flags.add(if (bmp != null) "${bmp.width}x${bmp.height}" else "bitmap=null")
-            }
-            if (flags.isNotEmpty()) sb.append("(${flags.joinToString()})")
-            sb.append(" w=${d.intrinsicWidth},h=${d.intrinsicHeight}")
-            return sb.toString()
-        }
     }
 }
