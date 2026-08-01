@@ -135,35 +135,160 @@ object DrawableConverter {
      * @param bitmap Input ARGB_8888 bitmap (not recycled).
      * @return A new ARGB_8888 black silhouette mask, alpha from luminance.
      */
+    /**
+     * Derives a monochrome silhouette mask from [bitmap] using **background-estimation
+     * polarity detection** (Phase 2.8).
+     *
+     * Instead of a fixed `alpha = 255 - luminance` direction, this method:
+     * 1. estimates the dominant background luminance range (3-bin histogram)
+     * 2. checks whether non-background details are darker or lighter than that background
+     * 3. picks the appropriate alpha direction per-pixel
+     *
+     * This prevents "white logo on black background" icons from inverting into
+     * a solid black square.
+     *
+     * ## Fallback safeguards
+     * - No dominant background (ratio < 35%, dominance < 1.25) → current DARK_FG behavior
+     * - Too few foreground pixels (< 8%) → FALLBACK
+     * - Polarity ambiguous (< 60% direction dominance) → FALLBACK
+     *
+     * @param bitmap Input ARGB_8888 bitmap (not recycled).
+     * @return A new ARGB_8888 black silhouette mask.
+     */
     fun toLuminanceMask(bitmap: Bitmap): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
+        // ═══════════════════════════════════════════════════════════════
+        // Pass 1: background estimation (3-bin luminance histogram)
+        // ═══════════════════════════════════════════════════════════════
+        var darkCount = 0
+        var midCount = 0
+        var lightCount = 0
+        var midLuminanceSum = 0.0
+
+        for (i in pixels.indices) {
+            val color = pixels[i]
+            val a = (color ushr 24) and 0xFF
+            if (a <= 32) continue
+
+            val y = luminance(color)
+            when {
+                y <= 85  -> { darkCount++ }
+                y <= 170 -> { midCount++; midLuminanceSum += y }
+                else     -> { lightCount++ }
+            }
+        }
+
+        val totalCount = darkCount + midCount + lightCount
+        if (totalCount == 0) {
+            // 完全透明 → 返回全透明 bitmap
+            val empty = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            empty.eraseColor(0x00000000)
+            return empty
+        }
+
+        // 确定背景箱
+        val maxBin = maxOf(darkCount, midCount, lightCount)
+        val backgroundBin = when (maxBin) {
+            darkCount  -> BG_DARK
+            lightCount -> BG_LIGHT
+            else       -> BG_MID
+        }
+        val backgroundCount = maxBin
+        val secondLargestCount = when (backgroundBin) {
+            BG_DARK  -> maxOf(midCount, lightCount)
+            BG_MID   -> maxOf(darkCount, lightCount)
+            BG_LIGHT -> maxOf(darkCount, midCount)
+            else     -> 1 // unreachable, satisfies exhaustiveness
+        }
+        val backgroundRatio = backgroundCount.toDouble() / totalCount.toDouble()
+        val dominanceRatio = backgroundCount.toDouble() / maxOf(secondLargestCount, 1).toDouble()
+        val midMean = if (midCount > 0) midLuminanceSum / midCount else 128.0
+
+        // Fallback: 无主导背景
+        val decision = if (backgroundRatio < 0.35 || dominanceRatio < 1.25) {
+            FALLBACK
+        } else {
+            null // 待 Pass 2 确定
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // Pass 2: foreground polarity estimation
+        // ═══════════════════════════════════════════════════════════════
+        var darkerThanBg = 0
+        var lighterThanBg = 0
+
+        // 前景比较基准
+        val foregroundReference = when {
+            decision != null           -> 128.0 // 已 fallback，不会用到
+            backgroundBin == BG_LIGHT -> 170.0
+            backgroundBin == BG_DARK  -> 85.0
+            else                       -> midMean // BG_MID
+        }
+
+        val midTolerance = 32.0
+
+        for (i in pixels.indices) {
+            val color = pixels[i]
+            val a = (color ushr 24) and 0xFF
+            if (a <= 32) continue
+
+            val y = luminance(color)
+
+            // 跳过背景像素
+            val isBg = when (backgroundBin) {
+                BG_DARK  -> y <= 85
+                BG_LIGHT -> y > 170
+                else     -> Math.abs(y - midMean) <= midTolerance
+            }
+            if (isBg) continue
+
+            // 分类
+            if (y < foregroundReference) darkerThanBg++ else lighterThanBg++
+        }
+
+        val finalDecision = if (decision != null) {
+            decision
+        } else {
+            val foregroundCount = darkerThanBg + lighterThanBg
+            val foregroundRatio = foregroundCount.toDouble() / totalCount.toDouble()
+            if (foregroundRatio < 0.08) {
+                FALLBACK
+            } else {
+                val darkerRatio = darkerThanBg.toDouble() / foregroundCount.toDouble()
+                val lighterRatio = lighterThanBg.toDouble() / foregroundCount.toDouble()
+                if (darkerRatio >= 0.6) DARK_FG
+                else if (lighterRatio >= 0.6) LIGHT_FG
+                else FALLBACK
+            }
+        }
+
+        // Temporary debug log (Phase 2.8, remove after verification)
+        val bgStr = when (backgroundBin) {
+            BG_DARK -> "DARK"; BG_MID -> "MID"; BG_LIGHT -> "LIGHT"; else -> "?"
+        }
+        val decisionStr = when (finalDecision) {
+            DARK_FG -> "DARK_FG"; LIGHT_FG -> "LIGHT_FG"; FALLBACK -> "FALLBACK"; else -> "?"
+        }
+        Log.i(TAG, "[toLuminanceMask] bg=$bgStr\tratio=${"%.2f".format(backgroundRatio)}\tdom=${"%.1f".format(dominanceRatio)}\t→ $decisionStr")
+
+        // ═══════════════════════════════════════════════════════════════
+        // Pass 3: alpha mask generation
+        // ═══════════════════════════════════════════════════════════════
         for (i in pixels.indices) {
             val color = pixels[i]
             val a = (color ushr 24) and 0xFF
             if (a == 0) {
-                // 源像素完全透明 → 保持透明
                 pixels[i] = 0x00000000
                 continue
             }
 
-            val r = (color ushr 16) and 0xFF
-            val g = (color ushr 8) and 0xFF
-            val b = color and 0xFF
-
-            // 亮度 (Rec. 601 系数)，0-255
-            val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
-
-            // 深色 → 不透明（前景），浅色 → 透明（背景）
-            val luminanceAlpha = 255 - luminance
-
-            // 与源 alpha 结合，尊重原始半透明
-            val finalAlpha = luminanceAlpha * a / 255
-
-            // RGB 填黑：setIconDrawable 路径无 launcher tint，需自带颜色
+            val y = luminance(color)
+            val alpha = if (finalDecision == LIGHT_FG) y else 255 - y
+            val finalAlpha = (alpha * a) / 255
             pixels[i] = (finalAlpha shl 24) or 0x00000000
         }
 
@@ -171,4 +296,22 @@ object DrawableConverter {
         mask.setPixels(pixels, 0, width, 0, 0, width, height)
         return mask
     }
+
+    /** Rec.601 luminance from an ARGB pixel. */
+    private fun luminance(color: Int): Int {
+        val r = (color ushr 16) and 0xFF
+        val g = (color ushr 8) and 0xFF
+        val b = color and 0xFF
+        return (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+    }
+
+    // ── Decision constants ──────────────────────────────────────────
+    private const val DARK_FG = 0
+    private const val LIGHT_FG = 1
+    private const val FALLBACK = 3
+
+    // ── Background bin constants ─────────────────────────────────────
+    private const val BG_DARK = 10
+    private const val BG_MID = 11
+    private const val BG_LIGHT = 12
 }
