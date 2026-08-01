@@ -6,6 +6,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
+import com.jerrey.monoicon.cache.MonochromeCache
 import com.jerrey.monoicon.image.DrawableConverter
 import com.jerrey.monoicon.image.MonochromeGenerator
 import io.github.libxposed.api.XposedInterface
@@ -29,6 +30,9 @@ private const val MODULE_VERSION = "1.0.1"
 class IconThemeHook : XposedModule() {
 
     private val stats = HookStats(TAG)
+
+    // Phase 2.6: 生成的 monochrome drawable 缓存（基于 packageName|size）
+    private val monochromeCache = MonochromeCache(maxSize = 512)
 
     // ═══════════════════════════════════════════════════════════════
     // Bootstrap
@@ -233,16 +237,30 @@ class IconThemeHook : XposedModule() {
 
                 // 获取包名（反射 thisObject → getShortcutInfo → getPackageName）
                 val packageName = resolvePackageName(chain.thisObject)
-                val generated = if (packageName != null && d != null) {
-                    val bitmap = DrawableConverter.toBitmap(d)
-                    MonochromeGenerator.create(bitmap)
+
+                // Phase 2.6: 缓存优先 — 同一应用图标多次显示时直接命中
+                val iconW = d?.intrinsicWidth ?: 0
+                val iconH = d?.intrinsicHeight ?: 0
+                val cacheKey = monochromeCache.buildKey(packageName, iconW, iconH)
+
+                var generated = if (cacheKey != null) {
+                    monochromeCache.get(cacheKey)
                 } else {
                     null
                 }
 
+                // 未命中 → 生成并存入缓存
+                if (generated == null && cacheKey != null && d != null) {
+                    val bitmap = DrawableConverter.toBitmap(d)
+                    generated = MonochromeGenerator.create(bitmap)
+                    if (generated != null) {
+                        monochromeCache.put(cacheKey, generated)
+                    }
+                }
+
                 android.util.Log.d(
                     TAG,
-                    "[setIconDrawable] pkg=$packageName $desc bitmap=$bmp generated=${generated?.javaClass?.simpleName}"
+                    "[setIconDrawable] pkg=$packageName $desc bitmap=$bmp generated=${generated?.javaClass?.simpleName} cacheKey=$cacheKey"
                 )
 
                 val result = if (generated != null) {
