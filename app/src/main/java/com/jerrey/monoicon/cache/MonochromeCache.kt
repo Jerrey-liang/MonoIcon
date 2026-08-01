@@ -1,69 +1,81 @@
 package com.jerrey.monoicon.cache
 
-import android.graphics.drawable.BitmapDrawable
+import android.graphics.Bitmap
 import android.util.LruCache
 import com.jerrey.monoicon.logging.logd
 
 private const val TAG = "MonoIcon.MonoCache"
 
 /**
- * In-memory LRU cache for generated monochrome [BitmapDrawable]s.
+ * In-memory LRU cache for generated monochrome mask [Bitmap]s.
  *
- * Keyed by a stable identifier derived from the app's **package name**
- * plus the icon size (`packageName|widthxheight`). The package name is
- * resolved at hook time via `ShortcutIcon.getShortcutInfo().getPackageName()`
- * and is stable across icon redraws for the same app.
+ * Key format (Phase 2.9):
+ * `identity + "|" + width + "x" + height + "@" + fingerprint`
+ * Example: `com.pkg/.MainActivity|108x108@A3F29E4D`
  *
- * This deliberately avoids unstable keys:
- * - `Drawable.hashCode()` — instance identity changes on every redraw
- * - width/height alone — collides across different apps at the same size
+ * **Stores raw [Bitmap] masks**, not [android.graphics.drawable.Drawable]
+ * instances. Drawable objects may carry state and should not be blindly
+ * shared; the caller wraps the cached bitmap each time.
  *
- * Backed by [android.util.LruCache] (thread-safe). The launcher's
- * icon redraws occur on the main thread, so access is single-threaded
- * in practice, but the underlying LruCache provides safety regardless.
+ * Identity resolution (package/component name) is done in the hook layer
+ * ([com.jerrey.monoicon.hook.IconThemeHook]) and passed in as [identity].
+ *
+ * Fingerprint is computed from the bitmap content via **FNV-1a 32-bit**
+ * to distinguish different visuals from the same component.
  *
  * @param maxSize Maximum number of cached entries.
  */
 class MonochromeCache(private val maxSize: Int) {
 
-    private val cache = object : LruCache<String, BitmapDrawable>(maxSize) {
-        override fun sizeOf(key: String, value: BitmapDrawable): Int = 1
+    /** Stores [Bitmap] masks, keyed by identity + size + fingerprint. */
+    private val cache = object : LruCache<String, Bitmap>(maxSize) {
+        override fun sizeOf(key: String, value: Bitmap): Int = 1
     }
 
     /** Current number of cached entries. */
     val size: Int get() = cache.size()
 
-    /**
-     * Builds a stable cache key from [packageName] and icon dimensions.
-     *
-     * @param packageName The app package name (may be null → no cache).
-     * @param width Icon width in px.
-     * @param height Icon height in px.
-     * @return Cache key, or `null` if [packageName] is null/blank.
-     */
-    fun buildKey(packageName: String?, width: Int, height: Int): String? {
-        if (packageName.isNullOrBlank()) return null
-        return "$packageName|${width}x${height}"
-    }
+    // ── Key construction ──────────────────────────────────────────────
 
     /**
-     * Returns the cached monochrome drawable for [key], or `null`.
+     * Builds a stable cache key from component identity and bitmap content.
+     *
+     * Format: `"$identity|${width}x${height}@$fingerprint"`
+     *
+     * @param identity Resolved component identity (e.g. "com.pkg/.MainActivity"
+     *                 or a fallback such as "com.pkg").
+     * @param bitmap The monochrome mask bitmap whose content fingerprint
+     *               is used to distinguish different visual states of the
+     *               same component.
+     * @return Cache key, or `null` if [identity] is blank or [bitmap] is recycled.
      */
-    fun get(key: String): BitmapDrawable? {
-        val drawable = cache.get(key)
-        if (drawable != null) {
+    fun buildKey(identity: String?, bitmap: Bitmap?): String? {
+        if (identity.isNullOrBlank()) return null
+        if (bitmap == null || bitmap.isRecycled) return null
+        val w = bitmap.width
+        val h = bitmap.height
+        val fp = computeFingerprint(bitmap)
+        return "$identity|${w}x${h}@$fp"
+    }
+
+    // ── Cache operations ──────────────────────────────────────────────
+
+    /**
+     * Returns the cached monochrome mask [Bitmap] for [key], or `null`.
+     */
+    fun get(key: String): Bitmap? {
+        val bmp = cache.get(key)
+        if (bmp != null) {
             logd(TAG, "Cache HIT: $key (size=${cache.size()}/${cache.maxSize()})")
         } else {
             logd(TAG, "Cache MISS: $key")
         }
-        return drawable
+        return bmp
     }
 
-    /**
-     * Stores [drawable] under [key]. Replaces any existing entry.
-     */
-    fun put(key: String, drawable: BitmapDrawable) {
-        cache.put(key, drawable)
+    /** Stores [maskBitmap] under [key]. Replaces any existing entry. */
+    fun put(key: String, maskBitmap: Bitmap) {
+        cache.put(key, maskBitmap)
         logd(TAG, "Cache PUT: $key (size=${cache.size()}/${cache.maxSize()})")
     }
 
@@ -71,5 +83,52 @@ class MonochromeCache(private val maxSize: Int) {
     fun clear() {
         cache.evictAll()
         logd(TAG, "Cache CLEARED")
+    }
+
+    // ── Fingerprint ───────────────────────────────────────────────────
+
+    /**
+     * Computes a deterministic 32-bit content fingerprint of [bitmap]
+     * using the **FNV-1a** hash algorithm.
+     *
+     * ## Inclusion
+     * - Bitmap width and height
+     * - Sampled ARGB pixel values (step = max(1, min(w,h) / 16))
+     *
+     * ## Not included
+     * - [Bitmap.hashCode()] — object identity, not content
+     * - [android.graphics.drawable.Drawable.hashCode()] — same reason
+     *
+     * ## Collision resistance
+     * 32-bit space is sufficient for icon-scale datasets (hundreds of
+     * entries per process). The same visual input always produces the
+     * same hash; different inputs are very likely to produce different
+     * hashes.
+     *
+     * Internal operations use [Long] and an explicit 32-bit mask
+     * (`and 0xFFFFFFFFL`) to avoid Kotlin UInt dependency.
+     */
+    fun computeFingerprint(bitmap: Bitmap): String {
+        var hash = 0x811c9dc5L
+
+        // Include dimensions
+        hash = ((hash xor bitmap.width.toLong()) * 0x01000193L) and 0xFFFFFFFFL
+        hash = ((hash xor bitmap.height.toLong()) * 0x01000193L) and 0xFFFFFFFFL
+
+        val w = bitmap.width
+        val h = bitmap.height
+        val step = maxOf(1, minOf(w, h) / 16)
+
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                hash = ((hash xor bitmap.getPixel(x, y).toLong()) * 0x01000193L) and 0xFFFFFFFFL
+                x += step
+            }
+            y += step
+        }
+
+        return hash.toString(16).padStart(8, '0')
     }
 }

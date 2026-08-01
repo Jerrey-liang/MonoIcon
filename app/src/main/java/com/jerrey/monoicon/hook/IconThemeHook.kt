@@ -257,65 +257,92 @@ class IconThemeHook : XposedModule() {
     /**
      * 生成 monochrome 替换 drawable，或返回 null（不可替换/失败）。
      *
-     * 流程：解析包名 → 缓存查找 → 未命中则转换并存入缓存。
+     * 流程：解析 identity → 缓存查找（Bitmap mask） → 未命中则转换并存入缓存。
      * 抛出异常由调用方 catch，回落原始 drawable。
      */
     private fun processIconReplacement(chain: Chain): BitmapDrawable? {
         val d = chain.getArg(0) as? Drawable ?: return null
 
-        // 获取包名（反射 thisObject → getShortcutInfo → getPackageName）
-        val packageName = resolvePackageName(chain.thisObject)
+        // 缓存优先 — 同一组件+相同视觉内容直接命中
+        val identity = resolveIdentity(chain.thisObject)
 
-        // 缓存优先 — 同一应用图标多次显示时直接命中
-        val iconW = d.intrinsicWidth
-        val iconH = d.intrinsicHeight
-        val cacheKey = monochromeCache.buildKey(packageName, iconW, iconH)
+        // 先转换 Drawable → Bitmap mask
+        val maskBitmap = DrawableConverter.toBitmap(d) ?: return null
+
+        val cacheKey = monochromeCache.buildKey(identity, maskBitmap)
         if (cacheKey == null) return null
 
-        monochromeCache.get(cacheKey)?.let { return it }
-
-        // 未命中 → 生成并存入缓存
-        val bitmap = DrawableConverter.toBitmap(d)
-        val generated = MonochromeGenerator.create(bitmap)
-        if (generated != null) {
-            monochromeCache.put(cacheKey, generated)
+        // 缓存命中 → 直接包装为 Drawable
+        val cached = monochromeCache.get(cacheKey)
+        if (cached != null) {
+            return MonochromeGenerator.create(cached)
         }
-        return generated
+
+        // 未命中 → 存储 mask Bitmap，包装为 Drawable
+        monochromeCache.put(cacheKey, maskBitmap)
+        return MonochromeGenerator.create(maskBitmap)
     }
 
     /**
-     * 通过反射从 [ShortcutIcon] 实例解析应用包名。
+     * 通过反射解析组件身份标识，优先级：
+     * 1. getComponentName() → "pkg/cls"
+     * 2. getClassName() → "pkg/cls"
+     * 3. getPackageName() → "pkg"
+     * 4. "unknown"
      *
-     * 调用链：`thisObject.getShortcutInfo().getPackageName()`。
-     * 任何一步失败都返回 null，让调用方回落原始行为。
-     *
-     * ## 性能优化（Phase 2.5）
-     * 缓存的 [Method] 引用避免每次调用都执行 `javaClass.methods` 全量
-     * 反射扫描。首次找到后固定复用，后续调用仅 `invoke`（快一个数量级）。
-     * 缓存字段位于 [companion object]（见文件底部）。
+     * 任何步骤失败静默回退到下一级。
      */
-    private fun resolvePackageName(target: Any?): String? {
-        if (target == null) return null
+    private fun resolveIdentity(target: Any?): String {
+        if (target == null) return "unknown"
         return try {
             val getShortcutInfo = cachedGetShortcutInfo ?: run {
                 target.javaClass.methods
                     .firstOrNull { it.name == "getShortcutInfo" && it.parameterCount == 0 }
                     ?.also { cachedGetShortcutInfo = it }
-                    ?: return null
+                    ?: return "unknown"
             }
             val shortcutInfo = getShortcutInfo.invoke(target)
-                ?: return null
+                ?: return "unknown"
 
-            val getPackageName = cachedGetPackageName ?: run {
-                shortcutInfo.javaClass.methods
-                    .firstOrNull { it.name == "getPackageName" && it.parameterCount == 0 }
-                    ?.also { cachedGetPackageName = it }
-                    ?: return null
+            // 1. getComponentName()
+            val componentName = try {
+                val method = cachedGetComponentName ?: run {
+                    shortcutInfo.javaClass.methods
+                        .firstOrNull { it.name == "getComponentName" && it.parameterCount == 0 }
+                        ?: null
+                }
+                if (method != null) { cachedGetComponentName = method; method.invoke(shortcutInfo) } else null
+            } catch (_: Throwable) { null }
+            if (componentName != null) {
+                val cls = componentName.javaClass.getMethod("getClassName").invoke(componentName) as? String ?: ""
+                val pkg = componentName.javaClass.getMethod("getPackageName").invoke(componentName) as? String ?: ""
+                return "$pkg/$cls"
             }
-            getPackageName.invoke(shortcutInfo) as? String
+
+            // 2. getClassName()
+            val className = try {
+                val method = cachedGetClassName ?: run {
+                    shortcutInfo.javaClass.methods
+                        .firstOrNull { it.name == "getClassName" && it.parameterCount == 0 }
+                        ?: null
+                }
+                if (method != null) { cachedGetClassName = method; method.invoke(shortcutInfo) as? String } else null
+            } catch (_: Throwable) { null }
+            if (!className.isNullOrBlank()) return className
+
+            // 3. getPackageName()
+            val pkg = try {
+                val method = cachedGetPackageName ?: run {
+                    shortcutInfo.javaClass.methods
+                        .firstOrNull { it.name == "getPackageName" && it.parameterCount == 0 }
+                        ?: null
+                }
+                if (method != null) { cachedGetPackageName = method; method.invoke(shortcutInfo) as? String } else null
+            } catch (_: Throwable) { null }
+            pkg ?: "unknown"
         } catch (t: Throwable) {
-            android.util.Log.e(TAG, "[setIconDrawable] resolvePackageName failed: ${t.message}")
-            null
+            android.util.Log.e(TAG, "[setIconDrawable] resolveIdentity failed: ${t.message}")
+            "unknown"
         }
     }
 
@@ -328,6 +355,10 @@ class IconThemeHook : XposedModule() {
         // 首次 use 后只读；null 表示待解析
         @Volatile
         private var cachedGetShortcutInfo: java.lang.reflect.Method? = null
+        @Volatile
+        private var cachedGetComponentName: java.lang.reflect.Method? = null
+        @Volatile
+        private var cachedGetClassName: java.lang.reflect.Method? = null
         @Volatile
         private var cachedGetPackageName: java.lang.reflect.Method? = null
     }
