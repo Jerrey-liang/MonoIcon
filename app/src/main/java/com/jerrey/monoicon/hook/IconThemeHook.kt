@@ -206,6 +206,15 @@ class IconThemeHook : XposedModule() {
 
     // ═══════════════════════════════════════════════════════════════
     // Hook 5: ShortcutIcon.setIconDrawable(Drawable, Bitmap)
+    //
+    // Phase 2 架构调整后的唯一主入口：getMonochrome() 在 HyperOS 桌面
+    // 图标加载中从不被调用（桌面图标是 FancyDrawable/BitmapDrawable，
+    // 不走 AdaptiveIconDrawable 分支）。setIconDrawable 是每个图标
+    // 显示时必定调用的方法，因此在拦截器中把 drawable 替换为生成的
+    // monochrome 版本。
+    //
+    // packageName 通过反射 ShortcutIcon.getShortcutInfo().getPackageName()
+    // 获取（链上已有：thisObject → getShortcutInfo → getPackageName）。
     // ═══════════════════════════════════════════════════════════════
 
     private fun installSetIconDrawable(cl: ClassLoader) {
@@ -221,14 +230,56 @@ class IconThemeHook : XposedModule() {
                 val b = chain.getArg(1) as? Bitmap
                 val desc = describeDrawable(d)
                 val bmp = if (b != null) "${b.width}x${b.height}" else "null"
-                android.util.Log.d(TAG, "[setIconDrawable] $desc bitmap=$bmp")
 
-                val result = chain.proceed()
+                // 获取包名（反射 thisObject → getShortcutInfo → getPackageName）
+                val packageName = resolvePackageName(chain.thisObject)
+                val generated = if (packageName != null && d != null) {
+                    val bitmap = DrawableConverter.toBitmap(d)
+                    MonochromeGenerator.create(bitmap)
+                } else {
+                    null
+                }
+
+                android.util.Log.d(
+                    TAG,
+                    "[setIconDrawable] pkg=$packageName $desc bitmap=$bmp generated=${generated?.javaClass?.simpleName}"
+                )
+
+                val result = if (generated != null) {
+                    // 替换第一个参数（Drawable）为生成的 monochrome，保持 Bitmap 参数不变
+                    chain.proceed(arrayOf<Any>(generated, b ?: generated.bitmap))
+                } else {
+                    chain.proceed()
+                }
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
-                android.util.Log.i(TAG, "[setIconDrawable] cost=${elapsed}ms")
+                android.util.Log.i(TAG, "[setIconDrawable] replaced=${generated != null} cost=${elapsed}ms")
                 stats.record("setIconDrawable", elapsed)
                 result
             }
+    }
+
+    /**
+     * 通过反射从 [ShortcutIcon] 实例解析应用包名。
+     *
+     * 调用链：`thisObject.getShortcutInfo().getPackageName()`。
+     * 任何一步失败都返回 null，让调用方回落原始行为。
+     */
+    private fun resolvePackageName(target: Any?): String? {
+        if (target == null) return null
+        return try {
+            val getShortcutInfo = target.javaClass.methods
+                .firstOrNull { it.name == "getShortcutInfo" && it.parameterCount == 0 }
+                ?: return null
+            val shortcutInfo = getShortcutInfo.invoke(target)
+                ?: return null
+            val getPackageName = shortcutInfo.javaClass.methods
+                .firstOrNull { it.name == "getPackageName" && it.parameterCount == 0 }
+                ?: return null
+            getPackageName.invoke(shortcutInfo) as? String
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "[setIconDrawable] resolvePackageName failed: ${t.message}")
+            null
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

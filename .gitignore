@@ -23,3 +23,7 @@ local.properties
 app/build/
 app/.cxx/
 .kotlin/
+
+# IDE 自动生成
+/.idea/vcs.xml
+/.idea/*.xml

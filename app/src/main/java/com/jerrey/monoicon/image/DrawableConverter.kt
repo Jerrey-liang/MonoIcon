@@ -9,17 +9,16 @@ import android.graphics.drawable.VectorDrawable
 import android.util.Log
 
 /**
- * Converts a [Drawable] into a monochrome alpha-mask [Bitmap].
+ * Converts a [Drawable] into a monochrome silhouette [Bitmap].
  *
- * The output bitmap is **ARGB_8888** with:
- * - `RGB = white (0xFFFFFFFF)`
- * - `Alpha = original drawable's alpha channel`
+ * The output bitmap is **ARGB_8888**:
+ * - `Alpha` derived from per-pixel luminance (dark → opaque, light → transparent)
+ * - `RGB` filled black (0xFF000000)
  *
- * The launcher tints the final drawable black
- * ([android.graphics.drawable.Drawable.setTint] with 0xFF000000),
- * so only the alpha channel determines the final icon shape.
- * Filling RGB with white is the most compatible baseline; it will be
- * overwritten by the launcher's black tint regardless.
+ * The `setIconDrawable` hook path (the actual Phase 2 entry point) has NO
+ * launcher-applied black tint, so the mask must carry its own color.
+ * A black silhouette on a transparent background is self-sufficient and
+ * directly displayable by the launcher.
  *
  * ## Supported types (Phase 2.1 scope)
  * - [AdaptiveIconDrawable] — renders the **whole** drawable
@@ -38,13 +37,11 @@ object DrawableConverter {
     private const val TAG = "MonoIcon.Convert"
 
     /**
-     * Converts [drawable] into a monochrome alpha-mask [Bitmap], or returns
+     * Converts [drawable] into a monochrome silhouette [Bitmap], or returns
      * `null` if the drawable type is not (yet) supported or conversion fails.
      *
-     * The returned bitmap is ARGB_8888, RGB = white, alpha preserved.
-     *
      * @param drawable The drawable to convert. Must not be recycled.
-     * @return An ARGB_8888 alpha-mask bitmap, or `null` on failure.
+     * @return An ARGB_8888 black silhouette bitmap, or `null` on failure.
      */
     fun toBitmap(drawable: Drawable): Bitmap? {
         try {
@@ -63,7 +60,8 @@ object DrawableConverter {
                 }
             } ?: return null
 
-            return toWhiteAlphaMask(rendered)
+            // Phase 2.3b: 用亮度掩码（替代纯 alpha，避免不透明图标退化为实心方块）
+            return toLuminanceMask(rendered)
         } catch (e: Throwable) {
             Log.e(TAG, "toBitmap failed for ${drawable.javaClass.simpleName}: ${e.message}", e)
             return null
@@ -108,26 +106,57 @@ object DrawableConverter {
     }
 
     /**
-     * Rewrites every pixel of [bitmap] to RGB = white while preserving
-     * each pixel's alpha channel.
+     * Derives a monochrome silhouette mask from [bitmap] using **luminance**.
      *
-     * This is the "alpha mask" transformation: shape (alpha) is kept,
-     * color is neutralized. It is NOT grayscale — color information is
-     * discarded in favor of a pure alpha-defined silhouette, which is
-     * exactly what the launcher's monochrome path consumes.
+     * This is the Phase 2.3b strategy (user-approved, replacing the pure-alpha
+     * approach which degenerated to a solid white square on opaque icons):
+     *
+     * - **Alpha** is derived from per-pixel luminance:
+     *   - dark pixels (low luminance) → opaque (foreground shape kept)
+     *   - light pixels (high luminance) → transparent (background dropped)
+     * - **RGB** is filled black (0xFF000000), because the `setIconDrawable`
+     *   hook path has NO launcher-applied black tint (unlike the
+     *   `getMonochrome` path). The mask must therefore be self-sufficient.
+     * - Pixels that were fully transparent in the source stay transparent.
+     *
+     * This is NOT a grayscale output — the result is a black silhouette whose
+     * alpha defines the recognizable icon shape. It is a runtime verification
+     * point: if some icons are inverted (dark background + light glyph), the
+     * luminance direction may need adjustment per-icon.
      *
      * @param bitmap Input ARGB_8888 bitmap (not recycled).
-     * @return A new ARGB_8888 bitmap, RGB = 0xFFFFFF, alpha preserved.
+     * @return A new ARGB_8888 black silhouette mask, alpha from luminance.
      */
-    fun toWhiteAlphaMask(bitmap: Bitmap): Bitmap {
+    fun toLuminanceMask(bitmap: Bitmap): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
         for (i in pixels.indices) {
-            val a = (pixels[i] ushr 24) and 0xFF
-            pixels[i] = (a shl 24) or 0x00FFFFFF
+            val color = pixels[i]
+            val a = (color ushr 24) and 0xFF
+            if (a == 0) {
+                // 源像素完全透明 → 保持透明
+                pixels[i] = 0x00000000
+                continue
+            }
+
+            val r = (color ushr 16) and 0xFF
+            val g = (color ushr 8) and 0xFF
+            val b = color and 0xFF
+
+            // 亮度 (Rec. 601 系数)，0-255
+            val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+
+            // 深色 → 不透明（前景），浅色 → 透明（背景）
+            val luminanceAlpha = 255 - luminance
+
+            // 与源 alpha 结合，尊重原始半透明
+            val finalAlpha = luminanceAlpha * a / 255
+
+            // RGB 填黑：setIconDrawable 路径无 launcher tint，需自带颜色
+            pixels[i] = (finalAlpha shl 24) or 0x00000000
         }
 
         val mask = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
