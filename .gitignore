@@ -15,7 +15,7 @@
 local.properties
 # MonoIcon 附加忽略
 /res_apk_decoded/
-/lsposed_log/
+/res_lsposed_log/
 /res_original_apk_pkg/
 *.log
 *.zip
