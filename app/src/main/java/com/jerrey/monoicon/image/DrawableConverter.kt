@@ -52,11 +52,11 @@ object DrawableConverter {
                 is BitmapDrawable -> copyBitmapDrawable(drawable)
                 is VectorDrawable -> renderToBitmap(drawable)
                 is AdaptiveIconDrawable ->
-                    // Initial scope: render the whole adaptive icon. The mask
-                    // is applied by AdaptiveIconDrawable itself during draw().
-                    // Runtime-verification point: if whole-render produces
-                    // wrong masks, switch to foreground-only rendering.
-                    renderToBitmap(drawable)
+                    // Phase 3.10: 只渲染前景（logo），不含背景。
+                    // 整图渲染会包含不透明背景，导致亮度掩码找不到形状 → 全不透明。
+                    // 前景提取避免背景主导亮度掩码，产生正确剪影。
+                    drawable.foreground?.let { renderToBitmap(it) }
+                        ?: renderToBitmap(drawable)
                 else -> {
                     Log.d(TAG, "Unsupported drawable type: ${drawable.javaClass.simpleName}")
                     null

@@ -298,13 +298,6 @@ class IconThemeHook : XposedModule() {
 
 
     /**
-     * Phase 3.5: Diagnostic logging for folder preview bitmap inspection.
-     * Collects alpha/RGB statistics to identify why NATIVE/FOREGROUND
-     * render as black rectangles while LUMINANCE works correctly.
-     *
-     * Does NOT modify the bitmap. Passes through unchanged.
-     */
-    /**
      * 生成 monochrome 替换 drawable，或返回 null（不可替换/失败）。
      *
      * 流程：解析 identity → 缓存查找（Bitmap mask） → 未命中则转换并存入缓存。
