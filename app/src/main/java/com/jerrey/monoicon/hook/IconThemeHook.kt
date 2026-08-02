@@ -281,6 +281,9 @@ class IconThemeHook : XposedModule() {
                     val mask = DrawableConverter.toBitmap(d)
                     if (mask == null) return@intercept chain.proceed()
 
+                    // Phase 3.5: Diagnostic logging — inspect mask before rendering
+                    logFolderPreviewDiagnostics(mask)
+
                     // 掩码格式: RGB=0, alpha=shape — 与 ImageView 渲染兼容
                     val replacement = MonochromeGenerator.create(mask)
                     return@intercept chain.proceed(
@@ -296,6 +299,51 @@ class IconThemeHook : XposedModule() {
             }
     }
 
+
+    /**
+     * Phase 3.5: Diagnostic logging for folder preview bitmap inspection.
+     * Collects alpha/RGB statistics to identify why NATIVE/FOREGROUND
+     * render as black rectangles while LUMINANCE works correctly.
+     *
+     * Does NOT modify the bitmap. Passes through unchanged.
+     */
+    private fun logFolderPreviewDiagnostics(bmp: Bitmap) {
+        val w = bmp.width
+        val h = bmp.height
+        var alphaMin = 255
+        var alphaMax = 0
+        var alpha255 = 0
+        var alpha0 = 0
+        var alphaNonZero = 0
+        var rgbNonZero = 0
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val pixel = bmp.getPixel(x, y)
+                val a = (pixel ushr 24) and 0xFF
+                if (a < alphaMin) alphaMin = a
+                if (a > alphaMax) alphaMax = a
+                if (a == 255) alpha255++
+                if (a == 0) alpha0++
+                if (a > 0) alphaNonZero++
+                val r = (pixel ushr 16) and 0xFF
+                val g = (pixel ushr 8) and 0xFF
+                val b = pixel and 0xFF
+                if (r != 0 || g != 0 || b != 0) rgbNonZero++
+            }
+        }
+
+        val center = bmp.getPixel(w / 2, h / 2)
+        val corner = bmp.getPixel(0, 0)
+
+        android.util.Log.e(TAG, "[FolderPreview]" +
+            " w=$w h=$h config=${bmp.config}" +
+            " alphaMin=$alphaMin alphaMax=$alphaMax" +
+            " alpha255=$alpha255 alpha0=$alpha0 alphaNonZero=$alphaNonZero" +
+            " rgbNonZero=$rgbNonZero" +
+            " center=0x${center.toUInt().toString(16).uppercase().padStart(8, '0')}" +
+            " corner=0x${corner.toUInt().toString(16).uppercase().padStart(8, '0')}")
+    }
 
     /**
      * 生成 monochrome 替换 drawable，或返回 null（不可替换/失败）。
