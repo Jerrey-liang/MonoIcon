@@ -281,9 +281,8 @@ class IconThemeHook : XposedModule() {
                     val mask = DrawableConverter.toBitmap(d)
                     if (mask == null) return@intercept chain.proceed()
 
-                    // 黑→白填充: ImageView 不 tint，需要可视图标
-                    val whiteMask = whiteFill(mask)
-                    val replacement = MonochromeGenerator.create(whiteMask)
+                    // 掩码格式: RGB=0, alpha=shape — 与 ImageView 渲染兼容
+                    val replacement = MonochromeGenerator.create(mask)
                     return@intercept chain.proceed(
                         if (replacement != null) arrayOf<Any>(replacement) else chain.args.toTypedArray()
                     )
@@ -297,20 +296,6 @@ class IconThemeHook : XposedModule() {
             }
     }
 
-    /** RGB=0x000000 → RGB=0xFFFFFF (for ImageView fold preview). */
-    private fun whiteFill(blackMask: Bitmap): Bitmap {
-        val w = blackMask.width
-        val h = blackMask.height
-        val pixels = IntArray(w * h)
-        blackMask.getPixels(pixels, 0, w, 0, 0, w, h)
-        for (i in pixels.indices) {
-            val a = (pixels[i] ushr 24) and 0xFF
-            pixels[i] = (a shl 24) or 0x00FFFFFF
-        }
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        out.setPixels(pixels, 0, w, 0, 0, w, h)
-        return out
-    }
 
     /**
      * 生成 monochrome 替换 drawable，或返回 null（不可替换/失败）。
