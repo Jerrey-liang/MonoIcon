@@ -268,6 +268,29 @@ class IconThemeHook : XposedModule() {
     private val pendingReplacements = java.util.WeakHashMap<android.view.View, Runnable>()
 
     private fun installFolderSetImageDrawable(cl: ClassLoader) {
+        // Phase 3.9 Step 3: hook ImageView.setImageDrawable to detect overwrites
+        try {
+            val imgHook = cl.loadClass("android.widget.ImageView")
+                .getDeclaredMethod("setImageDrawable", Drawable::class.java)
+            deoptimize(imgHook)
+            hook(imgHook)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { imgChain ->
+                    val result = imgChain.proceed()
+                    if (imgChain.thisObject is android.widget.ImageView &&
+                        imgChain.thisObject.javaClass.name.contains("FolderPreviewIconView")) {
+                        val d = imgChain.getArg(0) as? Drawable
+                        android.util.Log.e(TAG, "[FolderPreviewFinalSet]" +
+                            " class=${d?.javaClass?.simpleName}" +
+                            " hash=${System.identityHashCode(d)}" +
+                            " time=${System.currentTimeMillis()}")
+                    }
+                    result
+                }
+        } catch (_: Throwable) {
+            // ImageView setImageDrawable hook optional — silent fallback
+        }
+
         val method = cl.loadClass("com.miui.home.folder.FolderPreviewIconView")
             .getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
         deoptimize(method)
@@ -289,9 +312,35 @@ class IconThemeHook : XposedModule() {
                     // Phase 3.8: 检查 view 是否已 layout
                     val view = chain.thisObject as? android.view.View
                     if (view != null && view.width > 0 && view.height > 0) {
+                        // Phase 3.9: identity tracing
+                        android.util.Log.e(TAG, "[FolderPreviewBefore]" +
+                            " class=${d.javaClass.simpleName} hash=${System.identityHashCode(d)}" +
+                            " bounds=${d.bounds} intrinsic=${d.intrinsicWidth}x${d.intrinsicHeight}")
+
+                        // Phase 3.9: 红色测试（临时：true=红色, false=正常monochrome）
+                        val tmpRed = false
+                        val finalReplace = if (tmpRed) {
+                            val redBmp = Bitmap.createBitmap(mask.width, mask.height, Bitmap.Config.ARGB_8888)
+                            redBmp.eraseColor(0xFFFF0000.toInt())
+                            BitmapDrawable(null, redBmp)
+                        } else {
+                            replacement
+                        }
+
+                        android.util.Log.e(TAG, "[FolderPreviewReplacement]" +
+                            " class=${finalReplace.javaClass.simpleName} hash=${System.identityHashCode(finalReplace)}" +
+                            " bounds=${finalReplace.bounds} intrinsic=${finalReplace.intrinsicWidth}x${finalReplace.intrinsicHeight}")
+
                         // 已 layout → 立即替换
-                        android.util.Log.i(TAG, "[FolderPreviewDeferred] width=${view.width} height=${view.height} deferred=false")
-                        return@intercept chain.proceed(arrayOf<Any>(replacement))
+                        val result = chain.proceed(arrayOf<Any>(finalReplace))
+
+                        // 替换后立即读取 view.drawable
+                        val after = (view as? android.widget.ImageView)?.drawable
+                        android.util.Log.e(TAG, "[FolderPreviewAfter]" +
+                            " class=${after?.javaClass?.simpleName} hash=${System.identityHashCode(after)}" +
+                            " sameAsReplacement=${after === finalReplace}")
+
+                        return@intercept result
                     }
 
                     // 未 layout → 延迟替换
