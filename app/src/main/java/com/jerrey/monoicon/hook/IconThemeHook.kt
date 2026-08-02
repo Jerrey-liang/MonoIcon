@@ -259,38 +259,13 @@ class IconThemeHook : XposedModule() {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
     // Hook 6: FolderPreviewIconView.refreshIconDrawable(Drawable)
     //
-    // Phase 3.8: 延迟替换 — view=0x0 时不立即替换，等 layout 后再应用。
+    // Phase 3.10: 直接替换参数 → chain.proceed(replacement)
     // ═══════════════════════════════════════════════════════════════
 
-    /** Phase 3.8: 待执行的延迟替换回调, key=View, value=Runnable */
-    private val pendingReplacements = java.util.WeakHashMap<android.view.View, Runnable>()
-
     private fun installFolderSetImageDrawable(cl: ClassLoader) {
-        // Phase 3.9 Step 3: hook ImageView.setImageDrawable to detect overwrites
-        try {
-            val imgHook = cl.loadClass("android.widget.ImageView")
-                .getDeclaredMethod("setImageDrawable", Drawable::class.java)
-            deoptimize(imgHook)
-            hook(imgHook)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { imgChain ->
-                    val result = imgChain.proceed()
-                    if (imgChain.thisObject is android.widget.ImageView &&
-                        imgChain.thisObject.javaClass.name.contains("FolderPreviewIconView")) {
-                        val d = imgChain.getArg(0) as? Drawable
-                        android.util.Log.e(TAG, "[FolderPreviewFinalSet]" +
-                            " class=${d?.javaClass?.simpleName}" +
-                            " hash=${System.identityHashCode(d)}" +
-                            " time=${System.currentTimeMillis()}")
-                    }
-                    result
-                }
-        } catch (_: Throwable) {
-            // ImageView setImageDrawable hook optional — silent fallback
-        }
-
         val method = cl.loadClass("com.miui.home.folder.FolderPreviewIconView")
             .getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
         deoptimize(method)
@@ -309,58 +284,8 @@ class IconThemeHook : XposedModule() {
                     val replacement = MonochromeGenerator.create(mask)
                     if (replacement == null) return@intercept chain.proceed()
 
-                    // Phase 3.8: 检查 view 是否已 layout
-                    val view = chain.thisObject as? android.view.View
-                    if (view != null && view.width > 0 && view.height > 0) {
-                        // Phase 3.9: identity tracing
-                        android.util.Log.e(TAG, "[FolderPreviewBefore]" +
-                            " class=${d.javaClass.simpleName} hash=${System.identityHashCode(d)}" +
-                            " bounds=${d.bounds} intrinsic=${d.intrinsicWidth}x${d.intrinsicHeight}")
-
-                        // Phase 3.9: 红色测试（临时：true=红色, false=正常monochrome）
-                        val tmpRed = false
-                        val finalReplace = if (tmpRed) {
-                            val redBmp = Bitmap.createBitmap(mask.width, mask.height, Bitmap.Config.ARGB_8888)
-                            redBmp.eraseColor(0xFFFF0000.toInt())
-                            BitmapDrawable(null, redBmp)
-                        } else {
-                            replacement
-                        }
-
-                        android.util.Log.e(TAG, "[FolderPreviewReplacement]" +
-                            " class=${finalReplace.javaClass.simpleName} hash=${System.identityHashCode(finalReplace)}" +
-                            " bounds=${finalReplace.bounds} intrinsic=${finalReplace.intrinsicWidth}x${finalReplace.intrinsicHeight}")
-
-                        // 已 layout → 立即替换
-                        val result = chain.proceed(arrayOf<Any>(finalReplace))
-
-                        // 替换后立即读取 view.drawable
-                        val after = (view as? android.widget.ImageView)?.drawable
-                        android.util.Log.e(TAG, "[FolderPreviewAfter]" +
-                            " class=${after?.javaClass?.simpleName} hash=${System.identityHashCode(after)}" +
-                            " sameAsReplacement=${after === finalReplace}")
-
-                        return@intercept result
-                    }
-
-                    // 未 layout → 延迟替换
-                    android.util.Log.i(TAG, "[FolderPreviewDeferred] width=${view?.width ?: 0} height=${view?.height ?: 0} deferred=true")
-
-                    // 清除旧的待执行回调，只保留最新的
-                    pendingReplacements[view]?.let { view?.removeCallbacks(it) }
-
-                    val runnable = Runnable {
-                        if (view != null && view.width > 0 && view.height > 0) {
-                            android.util.Log.i(TAG, "[FolderPreviewDeferred] apply width=${view.width} height=${view.height}")
-                            (view as android.widget.ImageView).setImageDrawable(replacement)
-                            pendingReplacements.remove(view)
-                        }
-                    }
-                    pendingReplacements[view] = runnable
-                    view?.post(runnable)
-
-                    // 先传原始 drawable，post 回调后再替换
-                    return@intercept chain.proceed()
+                    android.util.Log.i(TAG, "[FolderPreviewReplace] original=${d.javaClass.simpleName} replacement=BitmapDrawable")
+                    return@intercept chain.proceed(arrayOf<Any>(replacement))
                 } catch (t: Throwable) {
                     android.util.Log.e(TAG, "[folderSetImageDrawable] failed, falling back: ${t.message}")
                     return@intercept chain.proceed()
@@ -379,77 +304,6 @@ class IconThemeHook : XposedModule() {
      *
      * Does NOT modify the bitmap. Passes through unchanged.
      */
-    /**
-     * Phase 3.6: Diagnostic logging for Drawable → ImageView rendering path.
-     * Phase 3.5 proved Bitmap content is identical across sources.
-     * Now investigate whether the Drawable layer (class, bounds, intrinsic size)
-     * or ImageView layer (dimensions, padding, scaleType) differs per source.
-     */
-    private fun logFolderPreviewDiagnostics(bmp: Bitmap, drawable: Drawable, view: Any?) {
-        val w = bmp.width
-        val h = bmp.height
-        var alphaMin = 255
-        var alphaMax = 0
-        var alpha255 = 0
-        var alpha0 = 0
-        var alphaNonZero = 0
-        var rgbNonZero = 0
-
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val pixel = bmp.getPixel(x, y)
-                val a = (pixel ushr 24) and 0xFF
-                if (a < alphaMin) alphaMin = a
-                if (a > alphaMax) alphaMax = a
-                if (a == 255) alpha255++
-                if (a == 0) alpha0++
-                if (a > 0) alphaNonZero++
-                val r = (pixel ushr 16) and 0xFF
-                val g = (pixel ushr 8) and 0xFF
-                val b = pixel and 0xFF
-                if (r != 0 || g != 0 || b != 0) rgbNonZero++
-            }
-        }
-
-        val center = bmp.getPixel(w / 2, h / 2)
-        val corner = bmp.getPixel(0, 0)
-
-        val sb = StringBuilder()
-        sb.append("[FolderPreview]")
-        sb.append(" w=$w h=$h config=${bmp.config}")
-        sb.append(" alphaMin=$alphaMin alphaMax=$alphaMax")
-        sb.append(" alpha255=$alpha255 alpha0=$alpha0 alphaNonZero=$alphaNonZero")
-        sb.append(" rgbNonZero=$rgbNonZero")
-        sb.append(" center=0x${center.toUInt().toString(16).uppercase().padStart(8, '0')}")
-        sb.append(" corner=0x${corner.toUInt().toString(16).uppercase().padStart(8, '0')}")
-
-        // Phase 3.6: Drawable layer diagnostics
-        sb.append(" | drawableClass=${drawable.javaClass.simpleName}")
-        sb.append(" bounds=${drawable.bounds}")
-        sb.append(" intrinsic=${drawable.intrinsicWidth}x${drawable.intrinsicHeight}")
-        try { sb.append(" dAlpha=${drawable.alpha}") } catch (_: Throwable) {}
-
-        if (drawable is BitmapDrawable) {
-            val db = drawable.bitmap
-            if (db != null) {
-                sb.append(" dbmp=${db.width}x${db.height} dbmpConfig=${db.config}")
-            } else {
-                sb.append(" dbmp=null")
-            }
-        }
-
-        // Phase 3.6: ImageView layer diagnostics
-        if (view is android.view.View) {
-            sb.append(" | view=${view.width}x${view.height}")
-            sb.append(" padL=${view.paddingLeft} T=${view.paddingTop} R=${view.paddingRight} B=${view.paddingBottom}")
-            if (view is android.widget.ImageView) {
-                try { sb.append(" scale=${view.scaleType}") } catch (_: Throwable) {}
-            }
-        }
-
-        android.util.Log.e(TAG, sb.toString())
-    }
-
     /**
      * 生成 monochrome 替换 drawable，或返回 null（不可替换/失败）。
      *
@@ -583,49 +437,6 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
     // Utility
     // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * Phase 3.7: Diagnostic Drawable wrapper that traces the lifecycle
-     * of folder preview drawables to identify timing issues between
-     * LayerAdaptiveIconDrawable (Launcher original) and BitmapDrawable
-     * (our generated monochrome replacement).
-     */
-    private class DiagnosticDrawable(
-        private val wrapped: Drawable,
-        private val tag: String
-    ) : Drawable() {
-
-        private fun log(event: String, canvas: Canvas? = null) {
-            val c = if (canvas != null) " canvas=${canvas.width}x${canvas.height}" else ""
-            android.util.Log.e("MonoIcon.Hook", "[FolderPreviewDraw]" +
-                " event=$event tag=$tag drawable=${wrapped.javaClass.simpleName}" +
-                " bounds=$bounds$c")
-        }
-
-        override fun draw(canvas: Canvas) {
-            log("draw", canvas)
-            wrapped.draw(canvas)
-        }
-
-        override fun setBounds(left: Int, top: Int, right: Int, bottom: Int) {
-            super.setBounds(left, top, right, bottom)
-            wrapped.setBounds(left, top, right, bottom)
-            log("setBounds")
-        }
-
-        override fun setBounds(bounds: Rect) {
-            super.setBounds(bounds)
-            wrapped.setBounds(bounds)
-            log("setBounds")
-        }
-
-        override fun setAlpha(alpha: Int) { wrapped.alpha = alpha }
-        override fun setColorFilter(cf: ColorFilter?) { wrapped.colorFilter = cf }
-        override fun getOpacity(): Int = wrapped.opacity
-        override fun getIntrinsicWidth(): Int = wrapped.intrinsicWidth
-        override fun getIntrinsicHeight(): Int = wrapped.intrinsicHeight
-        override fun getConstantState(): ConstantState? = wrapped.constantState
-    }
 
     companion object {
         // Phase 2.5: 反射 Method 缓存，避免每次全量扫描 javaClass.methods
