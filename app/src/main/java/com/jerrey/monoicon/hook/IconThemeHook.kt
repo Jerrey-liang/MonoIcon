@@ -1,6 +1,9 @@
 package com.jerrey.monoicon.hook
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
+import android.graphics.ColorFilter
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
@@ -286,8 +289,14 @@ class IconThemeHook : XposedModule() {
 
                     // 掩码格式: RGB=0, alpha=shape — 与 ImageView 渲染兼容
                     val replacement = MonochromeGenerator.create(mask)
+                    // Phase 3.7: Wrap with lifecycle diagnostic delegate
+                    val wrapped = if (replacement != null) {
+                        DiagnosticDrawable(replacement, replacement.javaClass.simpleName)
+                    } else {
+                        null
+                    }
                     return@intercept chain.proceed(
-                        if (replacement != null) arrayOf<Any>(replacement) else chain.args.toTypedArray()
+                        if (wrapped != null) arrayOf<Any>(wrapped) else chain.args.toTypedArray()
                     )
                 } catch (t: Throwable) {
                     android.util.Log.e(TAG, "[folderSetImageDrawable] failed, falling back: ${t.message}")
@@ -511,6 +520,49 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
     // Utility
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Phase 3.7: Diagnostic Drawable wrapper that traces the lifecycle
+     * of folder preview drawables to identify timing issues between
+     * LayerAdaptiveIconDrawable (Launcher original) and BitmapDrawable
+     * (our generated monochrome replacement).
+     */
+    private class DiagnosticDrawable(
+        private val wrapped: Drawable,
+        private val tag: String
+    ) : Drawable() {
+
+        private fun log(event: String, canvas: Canvas? = null) {
+            val c = if (canvas != null) " canvas=${canvas.width}x${canvas.height}" else ""
+            android.util.Log.e("MonoIcon.Hook", "[FolderPreviewDraw]" +
+                " event=$event tag=$tag drawable=${wrapped.javaClass.simpleName}" +
+                " bounds=$bounds$c")
+        }
+
+        override fun draw(canvas: Canvas) {
+            log("draw", canvas)
+            wrapped.draw(canvas)
+        }
+
+        override fun setBounds(left: Int, top: Int, right: Int, bottom: Int) {
+            super.setBounds(left, top, right, bottom)
+            wrapped.setBounds(left, top, right, bottom)
+            log("setBounds")
+        }
+
+        override fun setBounds(bounds: Rect) {
+            super.setBounds(bounds)
+            wrapped.setBounds(bounds)
+            log("setBounds")
+        }
+
+        override fun setAlpha(alpha: Int) { wrapped.alpha = alpha }
+        override fun setColorFilter(cf: ColorFilter?) { wrapped.colorFilter = cf }
+        override fun getOpacity(): Int = wrapped.opacity
+        override fun getIntrinsicWidth(): Int = wrapped.intrinsicWidth
+        override fun getIntrinsicHeight(): Int = wrapped.intrinsicHeight
+        override fun getConstantState(): ConstantState? = wrapped.constantState
+    }
 
     companion object {
         // Phase 2.5: 反射 Method 缓存，避免每次全量扫描 javaClass.methods
