@@ -281,8 +281,8 @@ class IconThemeHook : XposedModule() {
                     val mask = DrawableConverter.toBitmap(d)
                     if (mask == null) return@intercept chain.proceed()
 
-                    // Phase 3.5: Diagnostic logging — inspect mask before rendering
-                    logFolderPreviewDiagnostics(mask)
+                    // Phase 3.6: Diagnostic logging — inspect Drawable + ImageView layer
+                    logFolderPreviewDiagnostics(mask, d, chain.thisObject)
 
                     // 掩码格式: RGB=0, alpha=shape — 与 ImageView 渲染兼容
                     val replacement = MonochromeGenerator.create(mask)
@@ -307,7 +307,13 @@ class IconThemeHook : XposedModule() {
      *
      * Does NOT modify the bitmap. Passes through unchanged.
      */
-    private fun logFolderPreviewDiagnostics(bmp: Bitmap) {
+    /**
+     * Phase 3.6: Diagnostic logging for Drawable → ImageView rendering path.
+     * Phase 3.5 proved Bitmap content is identical across sources.
+     * Now investigate whether the Drawable layer (class, bounds, intrinsic size)
+     * or ImageView layer (dimensions, padding, scaleType) differs per source.
+     */
+    private fun logFolderPreviewDiagnostics(bmp: Bitmap, drawable: Drawable, view: Any?) {
         val w = bmp.width
         val h = bmp.height
         var alphaMin = 255
@@ -336,13 +342,40 @@ class IconThemeHook : XposedModule() {
         val center = bmp.getPixel(w / 2, h / 2)
         val corner = bmp.getPixel(0, 0)
 
-        android.util.Log.e(TAG, "[FolderPreview]" +
-            " w=$w h=$h config=${bmp.config}" +
-            " alphaMin=$alphaMin alphaMax=$alphaMax" +
-            " alpha255=$alpha255 alpha0=$alpha0 alphaNonZero=$alphaNonZero" +
-            " rgbNonZero=$rgbNonZero" +
-            " center=0x${center.toUInt().toString(16).uppercase().padStart(8, '0')}" +
-            " corner=0x${corner.toUInt().toString(16).uppercase().padStart(8, '0')}")
+        val sb = StringBuilder()
+        sb.append("[FolderPreview]")
+        sb.append(" w=$w h=$h config=${bmp.config}")
+        sb.append(" alphaMin=$alphaMin alphaMax=$alphaMax")
+        sb.append(" alpha255=$alpha255 alpha0=$alpha0 alphaNonZero=$alphaNonZero")
+        sb.append(" rgbNonZero=$rgbNonZero")
+        sb.append(" center=0x${center.toUInt().toString(16).uppercase().padStart(8, '0')}")
+        sb.append(" corner=0x${corner.toUInt().toString(16).uppercase().padStart(8, '0')}")
+
+        // Phase 3.6: Drawable layer diagnostics
+        sb.append(" | drawableClass=${drawable.javaClass.simpleName}")
+        sb.append(" bounds=${drawable.bounds}")
+        sb.append(" intrinsic=${drawable.intrinsicWidth}x${drawable.intrinsicHeight}")
+        try { sb.append(" dAlpha=${drawable.alpha}") } catch (_: Throwable) {}
+
+        if (drawable is BitmapDrawable) {
+            val db = drawable.bitmap
+            if (db != null) {
+                sb.append(" dbmp=${db.width}x${db.height} dbmpConfig=${db.config}")
+            } else {
+                sb.append(" dbmp=null")
+            }
+        }
+
+        // Phase 3.6: ImageView layer diagnostics
+        if (view is android.view.View) {
+            sb.append(" | view=${view.width}x${view.height}")
+            sb.append(" padL=${view.paddingLeft} T=${view.paddingTop} R=${view.paddingRight} B=${view.paddingBottom}")
+            if (view is android.widget.ImageView) {
+                try { sb.append(" scale=${view.scaleType}") } catch (_: Throwable) {}
+            }
+        }
+
+        android.util.Log.e(TAG, sb.toString())
     }
 
     /**
