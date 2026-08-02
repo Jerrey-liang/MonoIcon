@@ -69,13 +69,14 @@ class IconThemeHook : XposedModule() {
 
     private fun installHooks(cl: ClassLoader) {
         var ok = 0
-        val total = 5
+        val total = 6
 
         ok += safeInstall("getMonochrome") { installGetMonochrome(cl) }
         ok += safeInstall("isSupportMonochrome") { installIsSupportMonochrome(cl) }
         ok += safeInstall("isMonoEnable") { installIsMonoEnable(cl) }
         ok += safeInstall("getColor") { installGetColor(cl) }
         ok += safeInstall("setIconDrawable") { installSetIconDrawable(cl) }
+        ok += safeInstall("folderSetImageDrawable") { installFolderSetImageDrawable(cl) }
 
         android.util.Log.i(TAG, "Hooks installed: $ok/$total")
     }
@@ -252,6 +253,63 @@ class IconThemeHook : XposedModule() {
                 stats.record("setIconDrawable", elapsed)
                 result
             }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Hook 6: FolderPreviewIconView.setImageDrawable(Drawable)
+    //
+    // 文件夹预览图标通过 ImageView.setImageDrawable() 设置，绕过
+    // ShortcutIcon.setIconDrawable()。此 hook 生成白色 RGB 掩码
+    // (ImageView 不 tint，需要自带颜色)。
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installFolderSetImageDrawable(cl: ClassLoader) {
+        // refreshIconDrawable is the actual entry point — setImageDrawable delegates
+        // to it, and the super call inside refreshIconDrawable bypasses our hook
+        val method = cl.loadClass("com.miui.home.folder.FolderPreviewIconView")
+            .getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                val start = System.nanoTime()
+                try {
+                    val d = chain.getArg(0) as? Drawable
+                    if (d == null) return@intercept chain.proceed()
+
+                    val mask = DrawableConverter.toBitmap(d)
+                    if (mask == null) return@intercept chain.proceed()
+
+                    // 黑→白填充: ImageView 不 tint，需要可视图标
+                    val whiteMask = whiteFill(mask)
+                    val replacement = MonochromeGenerator.create(whiteMask)
+                    return@intercept chain.proceed(
+                        if (replacement != null) arrayOf<Any>(replacement) else chain.args.toTypedArray()
+                    )
+                } catch (t: Throwable) {
+                    android.util.Log.e(TAG, "[folderSetImageDrawable] failed, falling back: ${t.message}")
+                    return@intercept chain.proceed()
+                } finally {
+                    val elapsed = (System.nanoTime() - start) / 1_000_000L
+                    stats.record("folderSetImageDrawable", elapsed)
+                }
+            }
+    }
+
+    /** RGB=0x000000 → RGB=0xFFFFFF (for ImageView fold preview). */
+    private fun whiteFill(blackMask: Bitmap): Bitmap {
+        val w = blackMask.width
+        val h = blackMask.height
+        val pixels = IntArray(w * h)
+        blackMask.getPixels(pixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val a = (pixels[i] ushr 24) and 0xFF
+            pixels[i] = (a shl 24) or 0x00FFFFFF
+        }
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        out.setPixels(pixels, 0, w, 0, 0, w, h)
+        return out
     }
 
     /**
