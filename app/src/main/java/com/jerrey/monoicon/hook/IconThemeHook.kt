@@ -259,16 +259,15 @@ class IconThemeHook : XposedModule() {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Hook 6: FolderPreviewIconView.setImageDrawable(Drawable)
+    // Hook 6: FolderPreviewIconView.refreshIconDrawable(Drawable)
     //
-    // 文件夹预览图标通过 ImageView.setImageDrawable() 设置，绕过
-    // ShortcutIcon.setIconDrawable()。此 hook 生成白色 RGB 掩码
-    // (ImageView 不 tint，需要自带颜色)。
+    // Phase 3.8: 延迟替换 — view=0x0 时不立即替换，等 layout 后再应用。
     // ═══════════════════════════════════════════════════════════════
 
+    /** Phase 3.8: 待执行的延迟替换回调, key=View, value=Runnable */
+    private val pendingReplacements = java.util.WeakHashMap<android.view.View, Runnable>()
+
     private fun installFolderSetImageDrawable(cl: ClassLoader) {
-        // refreshIconDrawable is the actual entry point — setImageDrawable delegates
-        // to it, and the super call inside refreshIconDrawable bypasses our hook
         val method = cl.loadClass("com.miui.home.folder.FolderPreviewIconView")
             .getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
         deoptimize(method)
@@ -284,20 +283,35 @@ class IconThemeHook : XposedModule() {
                     val mask = DrawableConverter.toBitmap(d)
                     if (mask == null) return@intercept chain.proceed()
 
-                    // Phase 3.6: Diagnostic logging — inspect Drawable + ImageView layer
-                    logFolderPreviewDiagnostics(mask, d, chain.thisObject)
-
-                    // 掩码格式: RGB=0, alpha=shape — 与 ImageView 渲染兼容
                     val replacement = MonochromeGenerator.create(mask)
-                    // Phase 3.7: Wrap with lifecycle diagnostic delegate
-                    val wrapped = if (replacement != null) {
-                        DiagnosticDrawable(replacement, replacement.javaClass.simpleName)
-                    } else {
-                        null
+                    if (replacement == null) return@intercept chain.proceed()
+
+                    // Phase 3.8: 检查 view 是否已 layout
+                    val view = chain.thisObject as? android.view.View
+                    if (view != null && view.width > 0 && view.height > 0) {
+                        // 已 layout → 立即替换
+                        android.util.Log.i(TAG, "[FolderPreviewDeferred] width=${view.width} height=${view.height} deferred=false")
+                        return@intercept chain.proceed(arrayOf<Any>(replacement))
                     }
-                    return@intercept chain.proceed(
-                        if (wrapped != null) arrayOf<Any>(wrapped) else chain.args.toTypedArray()
-                    )
+
+                    // 未 layout → 延迟替换
+                    android.util.Log.i(TAG, "[FolderPreviewDeferred] width=${view?.width ?: 0} height=${view?.height ?: 0} deferred=true")
+
+                    // 清除旧的待执行回调，只保留最新的
+                    pendingReplacements[view]?.let { view?.removeCallbacks(it) }
+
+                    val runnable = Runnable {
+                        if (view != null && view.width > 0 && view.height > 0) {
+                            android.util.Log.i(TAG, "[FolderPreviewDeferred] apply width=${view.width} height=${view.height}")
+                            (view as android.widget.ImageView).setImageDrawable(replacement)
+                            pendingReplacements.remove(view)
+                        }
+                    }
+                    pendingReplacements[view] = runnable
+                    view?.post(runnable)
+
+                    // 先传原始 drawable，post 回调后再替换
+                    return@intercept chain.proceed()
                 } catch (t: Throwable) {
                     android.util.Log.e(TAG, "[folderSetImageDrawable] failed, falling back: ${t.message}")
                     return@intercept chain.proceed()
