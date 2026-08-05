@@ -6,10 +6,13 @@ import android.graphics.Rect
 import android.graphics.ColorFilter
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
 import com.jerrey.monoicon.cache.MonochromeCache
+import com.jerrey.monoicon.color.IconColorExtractor
+import com.jerrey.monoicon.color.PixelStyleColorExtractor
 import com.jerrey.monoicon.image.DrawableConverter
 import com.jerrey.monoicon.image.MonochromeGenerator
 import io.github.libxposed.api.XposedInterface
@@ -18,6 +21,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 
 private const val TAG = "MonoIcon.Hook"
+private const val TAG_COLOR = "MonoIcon.Color"
 private const val MODULE_VERSION = "1.0.1"
 
 /**
@@ -36,6 +40,9 @@ class IconThemeHook : XposedModule() {
 
     // Phase 2.6: 生成的 monochrome drawable 缓存（基于 packageName|size）
     private val monochromeCache = MonochromeCache(maxSize = 512)
+
+    // Phase 3.11: Pixel-style icon color extraction（独立管线，不影响 mask 生成）
+    private val colorExtractor = PixelStyleColorExtractor()
 
     // ═══════════════════════════════════════════════════════════════
     // Bootstrap
@@ -307,6 +314,9 @@ class IconThemeHook : XposedModule() {
         val d = chain.getArg(0) as? Drawable ?: return null
         val identity = resolveIdentity(chain.thisObject)
 
+        // Phase 3.12-A: 在 mask 生成之前提取原始图标颜色
+        extractOriginalIconColor(d, identity)
+
         // Phase 3: 源优先级 — NATIVE > FOREGROUND > LUMINANCE
         val maskBitmap: Bitmap?
         val source: Int
@@ -360,6 +370,224 @@ class IconThemeHook : XposedModule() {
         // 未命中 → 存储 mask Bitmap，包装为 Drawable
         monochromeCache.put(cacheKey, maskBitmap)
         return MonochromeGenerator.create(maskBitmap)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 3.14: 从 LayerAdaptiveIconDrawable 背景层提取原始色彩
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 当背景层为透明 ColorDrawable（monochrome 模式覆盖）时，
+     * 从 LayerState 获取构造时保存的原始背景 drawable。
+     * LayerState 在 LayerAdaptiveIconDrawable 构造时保存了原始 drawable 引用。
+     */
+    private fun extractFromLayerState(drawable: Drawable, identity: String): ExtractResult? {
+        try {
+            val cs = drawable.constantState ?: return null
+            // LayerState 保存了 mBackground / mForeground / mBadge
+            val bgField = cs.javaClass.getDeclaredField("mBackground")
+            bgField.isAccessible = true
+            val origBg = bgField.get(cs) as? Drawable ?: return null
+
+            val w = origBg.intrinsicWidth.coerceAtLeast(1)
+            val h = origBg.intrinsicHeight.coerceAtLeast(1)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            origBg.setBounds(0, 0, w, h)
+            origBg.draw(canvas)
+            val color = colorExtractor.extractDominantColor(bmp)
+            bmp.recycle()
+
+            android.util.Log.d(TAG_COLOR,
+                "[LayerAdaptiveColor] package=$identity " +
+                "layerStateBg=${origBg.javaClass.simpleName} " +
+                "color=0x${color.toUInt().toString(16).uppercase().padStart(8, '0')} " +
+                "source=LayerState renderWidth=$w renderHeight=$h")
+
+            return ExtractResult(color, "LayerState", w, h)
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG_COLOR, "[LayerAdaptiveColor] LayerState extraction failed: ${t.message}")
+            return null
+        }
+    }
+
+    /**
+     * 当背景层为透明 ColorDrawable（monochrome 模式覆盖）时，
+     * 从前景层获取图标 artwork 并提取色彩。
+     *
+     * @return ExtractResult with color from foreground drawable, or null.
+     */
+    private fun extractFromForegroundLayers(drawable: Drawable, identity: String): ExtractResult? {
+        try {
+            val getFgMethod = drawable.javaClass.getMethod("getForegroundLayers")
+            val fgLayers = getFgMethod.invoke(drawable) as? List<*> ?: return null
+            if (fgLayers.isEmpty()) return null
+
+            // 取第一个前景层
+            val firstLayer = fgLayers[0] ?: return null
+            val getDrawableMethod = firstLayer.javaClass.getMethod("getDrawable")
+            val fgDrawable = getDrawableMethod.invoke(firstLayer) as? Drawable ?: return null
+
+            val w = fgDrawable.intrinsicWidth.coerceAtLeast(1)
+            val h = fgDrawable.intrinsicHeight.coerceAtLeast(1)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            fgDrawable.setBounds(0, 0, w, h)
+            fgDrawable.draw(canvas)
+            val color = colorExtractor.extractDominantColor(bmp)
+            bmp.recycle()
+
+            android.util.Log.d(TAG_COLOR,
+                "[LayerAdaptiveColor] package=$identity " +
+                "layerFg=${fgDrawable.javaClass.simpleName} " +
+                "color=0x${color.toUInt().toString(16).uppercase().padStart(8, '0')} " +
+                "source=Foreground renderWidth=$w renderHeight=$h")
+
+            return ExtractResult(color, "Foreground", w, h)
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG_COLOR, "[LayerAdaptiveColor] foreground extraction failed: ${t.message}")
+            return null
+        }
+    }
+
+    /**
+     * 从 [LayerAdaptiveIconDrawable] 的背景层提取图标代表色。
+     *
+     * HyperOS 将原始 AdaptiveIconDrawable 存入 LayerAdaptiveIconDrawable 的
+     * mBackgroundLayer。渲染整个 LayerAdaptiveIconDrawable 会产生黑色（因为
+     * monochrome foreground mask 覆盖在背景之上），所以必须直接访问背景层。
+     *
+     * @return ARGB color int，或 null 表示不是 LayerAdaptiveIconDrawable。
+     */
+    private fun extractLayerAdaptiveColor(drawable: Drawable, identity: String): Int? {
+        // 通过类名字符串检测（避免 instanceof，因为类在 launcher 私有 classloader 中）
+        val className = drawable.javaClass.name
+        if (className != LAYER_ADAPTIVE_CLASS) return null
+
+        try {
+            // 反射获取 backgroundLayer（public API: getBackgroundLayer()）
+            val getBgMethod = drawable.javaClass.getMethod("getBackgroundLayer")
+            val bgLayer = getBgMethod.invoke(drawable) ?: return null
+
+            // 反射获取原始 drawable（public API: Layer.getDrawable()）
+            val getDrawableMethod = bgLayer.javaClass.getMethod("getDrawable")
+            val bgDrawable = getDrawableMethod.invoke(bgLayer) as? Drawable ?: return null
+
+            // 根据背景 drawable 类型提取颜色
+            val result: ExtractResult = when {
+                bgDrawable is AdaptiveIconDrawable -> {
+                    // 原始彩色 AdaptiveIconDrawable — 完整渲染获取色彩
+                    val w = bgDrawable.intrinsicWidth.coerceAtLeast(1)
+                    val h = bgDrawable.intrinsicHeight.coerceAtLeast(1)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    bgDrawable.setBounds(0, 0, w, h)
+                    bgDrawable.draw(canvas)
+                    val color = colorExtractor.extractDominantColor(bmp)
+                    bmp.recycle()
+                    ExtractResult(color, "Adaptive", w, h)
+                }
+                bgDrawable is ColorDrawable && (bgDrawable.color ushr 24) == 0 -> {
+                    // ColorDrawable 背景透明 → monochrome 模式覆盖了颜色
+                    // 尝试从 LayerState 获取原始背景（保存于构造时）
+                    extractFromLayerState(drawable, identity)
+                        ?: ExtractResult(bgDrawable.color, "ColorDrawable", 0, 0)
+                }
+                bgDrawable is ColorDrawable -> {
+                    // ColorDrawable 有不透明颜色 → 系统主题色或 adaptive 背景色
+                    ExtractResult(bgDrawable.color, "ColorDrawable", 0, 0)
+                }
+                else -> {
+                    // 其他类型 — 尝试 Canvas 渲染
+                    val w = bgDrawable.intrinsicWidth.coerceAtLeast(1)
+                    val h = bgDrawable.intrinsicHeight.coerceAtLeast(1)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    bgDrawable.setBounds(0, 0, w, h)
+                    bgDrawable.draw(canvas)
+                    val color = colorExtractor.extractDominantColor(bmp)
+                    bmp.recycle()
+                    ExtractResult(color, "Fallback", w, h)
+                }
+            }
+
+            android.util.Log.d(TAG_COLOR,
+                "[LayerAdaptiveColor] package=$identity " +
+                "layerBg=${bgDrawable.javaClass.simpleName} " +
+                "color=0x${result.color.toUInt().toString(16).uppercase().padStart(8, '0')} " +
+                "source=${result.source}" +
+                (if (result.renderWidth > 0) " renderWidth=${result.renderWidth} renderHeight=${result.renderHeight}" else ""))
+
+            return result.color
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG_COLOR, "[LayerAdaptiveColor] failed for $identity: ${t.message}")
+            return null
+        }
+    }
+
+    /** 颜色提取结果数据类。 */
+    private data class ExtractResult(
+        val color: Int,
+        val source: String,
+        val renderWidth: Int,
+        val renderHeight: Int
+    )
+
+    /**
+     * 从原始 [Drawable]（未经 [DrawableConverter.toBitmap] 或 luminance mask 处理）
+     * 中提取代表色。优先尝试 LayerAdaptive 背景层，回退到通用渲染。
+     *
+     * @param drawable 原始图标 Drawable（色彩未被销毁）。
+     * @param identity 组件标识（用于日志）。
+     */
+    private fun extractOriginalIconColor(drawable: Drawable, identity: String) {
+        try {
+            // Phase 3.14 优先: 从 LayerAdaptiveIconDrawable 背景层提取
+            val layerColor = extractLayerAdaptiveColor(drawable, identity)
+            if (layerColor != null) return
+
+            // 回退: 通用渲染 → PixelStyleColorExtractor
+            val (colorBitmap, sourceLabel) = when {
+                drawable is AdaptiveIconDrawable -> {
+                    val w = drawable.intrinsicWidth.coerceAtLeast(1)
+                    val h = drawable.intrinsicHeight.coerceAtLeast(1)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    drawable.setBounds(0, 0, w, h)
+                    drawable.draw(canvas)
+                    Pair(bmp, "Adaptive")
+                }
+                drawable is BitmapDrawable -> {
+                    Pair(drawable.bitmap, "Bitmap")
+                }
+                else -> {
+                    val w = drawable.intrinsicWidth.coerceAtLeast(1)
+                    val h = drawable.intrinsicHeight.coerceAtLeast(1)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    drawable.setBounds(0, 0, w, h)
+                    drawable.draw(canvas)
+                    Pair(bmp, "Canvas")
+                }
+            }
+
+            if (colorBitmap != null && !colorBitmap.isRecycled) {
+                val extractedColor = colorExtractor.extractDominantColor(colorBitmap)
+                android.util.Log.d(TAG_COLOR,
+                    "[ColorExtract] package=$identity " +
+                    "drawable=${drawable.javaClass.simpleName} " +
+                    "color=0x${extractedColor.toUInt().toString(16).uppercase().padStart(8, '0')} " +
+                    "source=$sourceLabel " +
+                    "width=${colorBitmap.width} " +
+                    "height=${colorBitmap.height}")
+                if (drawable !is BitmapDrawable) {
+                    colorBitmap.recycle()
+                }
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG_COLOR, "[ColorExtract] failed for $identity: ${t.message}")
+        }
     }
 
     // ── Source constants (Phase 3) — 见 companion object ─────────────
@@ -447,5 +675,8 @@ class IconThemeHook : XposedModule() {
         const val SOURCE_NATIVE = 1
         const val SOURCE_FOREGROUND = 2
         const val SOURCE_LUMINANCE = 3
+
+        // Phase 3.14: HyperOS LayerAdaptiveIconDrawable 全限定类名
+        const val LAYER_ADAPTIVE_CLASS = "com.miui.home.common.drawable.LayerAdaptiveIconDrawable"
     }
 }
