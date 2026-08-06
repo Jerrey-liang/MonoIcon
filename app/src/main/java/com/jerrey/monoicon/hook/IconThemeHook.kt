@@ -83,7 +83,7 @@ class IconThemeHook : XposedModule() {
 
     private fun installHooks(cl: ClassLoader) {
         var ok = 0
-        val total = 7
+        val total = 8
 
         ok += safeInstall("getMonochrome") { installGetMonochrome(cl) }
         ok += safeInstall("isSupportMonochrome") { installIsSupportMonochrome(cl) }
@@ -92,6 +92,7 @@ class IconThemeHook : XposedModule() {
         ok += safeInstall("setIconDrawable") { installSetIconDrawable(cl) }
         ok += safeInstall("folderSetImageDrawable") { installFolderSetImageDrawable(cl) }
         ok += safeInstall("getActivityIcon") { installGetActivityIcon(cl) }
+        ok += safeInstall("folderSmallIcon") { installFolderSmallIconDrawable(cl) }
 
         android.util.Log.i(TAG, "Hooks installed: $ok/$total")
     }
@@ -290,13 +291,28 @@ class IconThemeHook : XposedModule() {
                     val d = chain.getArg(0) as? Drawable
                     if (d == null) return@intercept chain.proceed()
 
-                    val mask = DrawableConverter.toBitmap(d)
+                    // Phase 3.16-A: 尝试从缓存获取 raw APK drawable 用于 mask 生成
+                    val identity = resolveFolderIconIdentity(chain.thisObject)
+                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+
+                    val mask = if (rawCached != null) {
+                        // 使用 raw APK AdaptiveIconDrawable（完整色彩）生成 mask
+                        val fullRender = DrawableConverter.toRawBitmap(rawCached)
+                        if (fullRender != null) DrawableConverter.toLuminanceMask(fullRender) else null
+                    } else {
+                        // 回退：尝试 toBitmap → 不支持的类型用 Canvas 渲染
+                        DrawableConverter.toBitmap(d)
+                            ?: renderGenericToMask(d)
+                    }
+
                     if (mask == null) return@intercept chain.proceed()
 
                     val replacement = MonochromeGenerator.create(mask)
                     if (replacement == null) return@intercept chain.proceed()
 
-                    android.util.Log.i(TAG, "[FolderPreviewReplace] original=${d.javaClass.simpleName} replacement=BitmapDrawable")
+                    android.util.Log.d(TAG,
+                        "[FolderPreviewReplace] original=${d.javaClass.simpleName} " +
+                        "replacement=BitmapDrawable rawCached=${rawCached != null}")
                     return@intercept chain.proceed(arrayOf<Any>(replacement))
                 } catch (t: Throwable) {
                     android.util.Log.e(TAG, "[folderSetImageDrawable] failed, falling back: ${t.message}")
@@ -306,6 +322,84 @@ class IconThemeHook : XposedModule() {
                     stats.record("folderSetImageDrawable", elapsed)
                 }
             }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Hook 8: FolderIconPreviewContainer1X1$PreviewIconView.refreshIconDrawable
+    //
+    // 小文件夹预览（1x1 容器内的 PreviewIconView）。
+    // 与 FolderPreviewIconView 共用相同的处理管线。
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installFolderSmallIconDrawable(cl: ClassLoader) {
+        val method = cl.loadClass(
+            "com.miui.home.folder.FolderIconPreviewContainer1X1\$PreviewIconView"
+        ).getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                try {
+                    val d = chain.getArg(0) as? Drawable
+                    if (d == null) return@intercept chain.proceed()
+
+                    val identity = resolveFolderIconIdentity(chain.thisObject)
+                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+
+                    val mask = if (rawCached != null) {
+                        val fullRender = DrawableConverter.toRawBitmap(rawCached)
+                        if (fullRender != null) DrawableConverter.toLuminanceMask(fullRender) else null
+                    } else {
+                        DrawableConverter.toBitmap(d) ?: renderGenericToMask(d)
+                    }
+
+                    if (mask == null) return@intercept chain.proceed()
+
+                    val replacement = MonochromeGenerator.create(mask)
+                    if (replacement == null) return@intercept chain.proceed()
+
+                    android.util.Log.d(TAG,
+                        "[FolderSmallReplace] original=${d.javaClass.simpleName} replacement=BitmapDrawable")
+                    return@intercept chain.proceed(arrayOf<Any>(replacement))
+                } catch (t: Throwable) {
+                    android.util.Log.e(TAG, "[folderSmallIcon] failed: ${t.message}")
+                    return@intercept chain.proceed()
+                }
+            }
+    }
+
+    /**
+     * 从 FolderPreviewIconView 反射获取组件标识。
+     * FolderPreviewIconView 保存了 IShortcutInfo → getPackageName/getComponentName。
+     */
+    private fun resolveFolderIconIdentity(view: Any?): String? {
+        if (view == null) return null
+        return try {
+            val getBuddy = view.javaClass.getMethod("getMBuddyInfo")
+            val buddy = getBuddy.invoke(view) ?: return null
+            val pkg = buddy.javaClass.getMethod("getPackageName").invoke(buddy) as? String ?: return null
+            val intent = buddy.javaClass.getMethod("getIntent").invoke(buddy)
+            val component = intent?.javaClass?.getMethod("getComponent")?.invoke(intent)
+            val cls = component?.javaClass?.getMethod("getClassName")?.invoke(component) as? String
+            if (cls != null) "$pkg/$cls" else pkg
+        } catch (_: Throwable) { null }
+    }
+
+    /**
+     * 通用回退：对 [DrawableConverter.toBitmap] 不支持的类型，
+     * 直接 Canvas 渲染 + toLuminanceMask 生成 monochrome mask。
+     */
+    private fun renderGenericToMask(drawable: Drawable): Bitmap? {
+        return try {
+            val w = drawable.intrinsicWidth.coerceAtLeast(1)
+            val h = drawable.intrinsicHeight.coerceAtLeast(1)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            drawable.setBounds(0, 0, w, h)
+            drawable.draw(canvas)
+            DrawableConverter.toLuminanceMask(bmp)
+        } catch (_: Throwable) { null }
     }
 
 
