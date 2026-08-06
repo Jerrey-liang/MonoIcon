@@ -1,5 +1,6 @@
 package com.jerrey.monoicon.hook
 
+import android.content.pm.LauncherActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
@@ -11,6 +12,7 @@ import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
 import com.jerrey.monoicon.cache.MonochromeCache
+import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconColorExtractor
 import com.jerrey.monoicon.color.PixelStyleColorExtractor
 import com.jerrey.monoicon.image.DrawableConverter
@@ -79,7 +81,7 @@ class IconThemeHook : XposedModule() {
 
     private fun installHooks(cl: ClassLoader) {
         var ok = 0
-        val total = 6
+        val total = 7
 
         ok += safeInstall("getMonochrome") { installGetMonochrome(cl) }
         ok += safeInstall("isSupportMonochrome") { installIsSupportMonochrome(cl) }
@@ -87,6 +89,7 @@ class IconThemeHook : XposedModule() {
         ok += safeInstall("getColor") { installGetColor(cl) }
         ok += safeInstall("setIconDrawable") { installSetIconDrawable(cl) }
         ok += safeInstall("folderSetImageDrawable") { installFolderSetImageDrawable(cl) }
+        ok += safeInstall("getActivityIcon") { installGetActivityIcon(cl) }
 
         android.util.Log.i(TAG, "Hooks installed: $ok/$total")
     }
@@ -310,6 +313,100 @@ class IconThemeHook : XposedModule() {
      * 流程：解析 identity → 缓存查找（Bitmap mask） → 未命中则转换并存入缓存。
      * 抛出异常由调用方 catch，回落原始 drawable。
      */
+        // ═══════════════════════════════════════════════════════════════
+    // Hook 7: IconProvider.getActivityIcon(LauncherActivityInfo)
+    //
+    // Phase 3.15: 在图标加载阶段提取原始色彩。
+    // 此时 AdaptiveIconDrawable 还保留着 APK 中的完整颜色，
+    // HyperOS 的 theme 处理尚未将其替换为 monochrome mask。
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installGetActivityIcon(cl: ClassLoader) {
+        val method = cl.loadClass("com.miui.home.icon.IconProvider")
+            .getDeclaredMethod("getActivityIcon", LauncherActivityInfo::class.java)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                val info = chain.getArg(0) as? LauncherActivityInfo
+                // 在 HyperOS 处理之前，从 APK 直接获取原始彩色图标
+                // launcherActivityInfo.getIcon(0) 返回未经 theme 修改的 AdaptiveIconDrawable
+                if (info != null) {
+                    try {
+                        val rawIcon = info.getIcon(0)
+                        if (rawIcon != null) {
+                            extractEarlyIconColor(info, rawIcon, "RawAPK")
+                        }
+                    } catch (_: Throwable) { }
+                }
+                chain.proceed()
+            }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 3.15: 早期颜色提取（IconProvider 加载阶段）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 从刚加载完成的图标 drawable 中提取代表色并存入 [IconColorCache]。
+     *
+     * 此时 [drawable] 可能是：
+     * - AdaptiveIconDrawable（保留完整色彩，尚未被 HyperOS theme 覆盖）
+     * - BitmapDrawable
+     * - 其他
+     *
+     * @param info LauncherActivityInfo（用于获取组件名）。
+     * @param drawable 刚加载的图标（完整色彩）。
+     */
+    private fun extractEarlyIconColor(info: LauncherActivityInfo, drawable: Drawable, sourceLabel: String = "Adaptive") {
+        try {
+            val cn = info.componentName ?: return
+            val component = "${cn.packageName}/${cn.className}"
+
+            val (colorBitmap, srcLabel) = when {
+                drawable is AdaptiveIconDrawable -> {
+                    val w = drawable.intrinsicWidth.coerceAtLeast(1)
+                    val h = drawable.intrinsicHeight.coerceAtLeast(1)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    drawable.setBounds(0, 0, w, h)
+                    drawable.draw(canvas)
+                    Pair(bmp, sourceLabel)
+                }
+                drawable is BitmapDrawable -> {
+                    Pair(drawable.bitmap, "Bitmap")
+                }
+                else -> {
+                    val w = drawable.intrinsicWidth.coerceAtLeast(1)
+                    val h = drawable.intrinsicHeight.coerceAtLeast(1)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    drawable.setBounds(0, 0, w, h)
+                    drawable.draw(canvas)
+                    Pair(bmp, "Canvas")
+                }
+            }
+
+            if (colorBitmap != null && !colorBitmap.isRecycled) {
+                val extractedColor = colorExtractor.extractDominantColor(colorBitmap)
+                IconColorCache.put(component, extractedColor)
+                android.util.Log.d(TAG_COLOR,
+                    "[EarlyColorExtract] component=$component " +
+                    "drawable=${drawable.javaClass.simpleName} " +
+                    "color=0x${extractedColor.toUInt().toString(16).uppercase().padStart(8, '0')} " +
+                    "source=$srcLabel " +
+                    "width=${colorBitmap.width} " +
+                    "height=${colorBitmap.height}")
+                if (drawable !is BitmapDrawable) {
+                    colorBitmap.recycle()
+                }
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG_COLOR, "[EarlyColorExtractFail] component=${info.componentName} reason=${t.message}")
+        }
+    }
+
     private fun processIconReplacement(chain: Chain): BitmapDrawable? {
         val d = chain.getArg(0) as? Drawable ?: return null
         val identity = resolveIdentity(chain.thisObject)
@@ -543,7 +640,16 @@ class IconThemeHook : XposedModule() {
      */
     private fun extractOriginalIconColor(drawable: Drawable, identity: String) {
         try {
-            // Phase 3.14 优先: 从 LayerAdaptiveIconDrawable 背景层提取
+            // Phase 3.15 优先: 检查早期提取缓存
+            val cachedColor = IconColorCache.get(identity)
+            if (cachedColor != null) {
+                android.util.Log.d(TAG_COLOR,
+                    "[ColorCacheHit] component=$identity " +
+                    "color=0x${cachedColor.toUInt().toString(16).uppercase().padStart(8, '0')}")
+                return
+            }
+
+            // Phase 3.14: 从 LayerAdaptiveIconDrawable 背景层提取
             val layerColor = extractLayerAdaptiveColor(drawable, identity)
             if (layerColor != null) return
 
