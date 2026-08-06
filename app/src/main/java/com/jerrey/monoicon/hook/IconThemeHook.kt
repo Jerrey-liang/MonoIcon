@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Process
 import com.jerrey.monoicon.cache.MonochromeCache
 import com.jerrey.monoicon.color.IconColorCache
+import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.color.IconColorExtractor
 import com.jerrey.monoicon.color.PixelStyleColorExtractor
 import com.jerrey.monoicon.image.DrawableConverter
@@ -24,6 +25,7 @@ import io.github.libxposed.api.XposedModuleInterface
 
 private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
+private const val TAG_MASK = "MonoIcon.Mask"
 private const val MODULE_VERSION = "1.0.1"
 
 /**
@@ -336,7 +338,20 @@ class IconThemeHook : XposedModule() {
                     try {
                         val rawIcon = info.getIcon(0)
                         if (rawIcon != null) {
-                            extractEarlyIconColor(info, rawIcon, "RawAPK")
+                            // mutate() 创建隔离副本 — HyperOS 会在构造
+                            // LayerAdaptiveIconDrawable 时原地修改 foreground。
+                            // 没有 mutate(), our cached reference 会共享 HyperOS 的修改。
+                            val isolated = rawIcon.constantState?.newDrawable()?.mutate()
+                                ?: rawIcon.mutate()
+                            val cn = info.componentName
+                            if (cn != null) {
+                                val ident = "${cn.packageName}/${cn.className}"
+                                // Phase 3.16-A: cache isolated raw drawable for mask generation
+                                IconDrawableCache.put(ident, isolated)
+                                android.util.Log.d(TAG_MASK,
+                                    "[RawDrawableCachePut] component=$ident drawable=${isolated.javaClass.simpleName}")
+                            }
+                            extractEarlyIconColor(info, isolated, "RawAPK")
                         }
                     } catch (_: Throwable) { }
                 }
@@ -407,9 +422,108 @@ class IconThemeHook : XposedModule() {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 3.16: Mask input diagnostics
+    // ═══════════════════════════════════════════════════════════════
+
+    /** 记录生成的 mask bitmap 质量信息。 */
+    private fun diagMaskRender(mask: Bitmap, identity: String, source: Int) {
+        val w = mask.width
+        val h = mask.height
+        var alpha255 = 0
+        var nonZeroAlpha = 0
+        var rgbNonZero = 0
+        var lumSum = 0L
+        val step = maxOf(1, minOf(w, h) / 16)
+        var sampleCount = 0
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                val p = mask.getPixel(x, y)
+                val a = (p shr 24) and 0xFF
+                if (a == 255) alpha255++
+                if (a > 0) {
+                    nonZeroAlpha++
+                    val r = (p shr 16) and 0xFF
+                    val g = (p shr 8) and 0xFF
+                    val b = p and 0xFF
+                    if ((r or g or b) != 0) rgbNonZero++
+                    lumSum += ((0.299 * r + 0.587 * g + 0.114 * b).toInt())
+                }
+                sampleCount++
+                x += step
+            }
+            y += step
+        }
+        val avgLum = if (nonZeroAlpha > 0) lumSum / nonZeroAlpha else 0L
+        val center = mask.getPixel(w / 2, h / 2)
+        val corner = mask.getPixel(0, 0)
+        val srcLabel = when (source) {
+            SOURCE_NATIVE -> "NATIVE"
+            SOURCE_FOREGROUND -> "FOREGROUND"
+            else -> "LUMA"
+        }
+        android.util.Log.d(TAG_MASK,
+            "[MaskRender] package=$identity source=$srcLabel " +
+            "w=$w h=$h alpha255=$alpha255 nonZeroAlpha=$nonZeroAlpha " +
+            "rgbNonZero=$rgbNonZero avgLum=$avgLum " +
+            "center=0x${Integer.toHexString(center)} " +
+            "corner=0x${Integer.toHexString(corner)} " +
+            "sampleCount=$sampleCount")
+    }
+
+    /** 记录进入 mask 生成管线的 drawable 结构信息。 */
+    private fun diagMaskInput(drawable: Drawable, identity: String) {
+        try {
+            val cls = drawable.javaClass.name
+            val bounds = drawable.bounds
+            val sb = StringBuilder()
+            sb.append("[MaskInput] package=$identity ")
+            sb.append("drawable=$cls ")
+            sb.append("intrinsicW=${drawable.intrinsicWidth} intrinsicH=${drawable.intrinsicHeight} ")
+            sb.append("bounds=[${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}] ")
+
+            if (drawable is AdaptiveIconDrawable) {
+                val bg = drawable.background
+                val fg = drawable.foreground
+                sb.append("bg=${bg?.javaClass?.simpleName ?: "null"} ")
+                sb.append("fg=${fg?.javaClass?.simpleName ?: "null"} ")
+                if (bg != null) {
+                    sb.append("bgW=${bg.intrinsicWidth} bgH=${bg.intrinsicHeight} ")
+                }
+                if (fg != null) {
+                    sb.append("fgW=${fg.intrinsicWidth} fgH=${fg.intrinsicHeight} ")
+                }
+
+                // LayerAdaptiveIconDrawable specific diagnostics
+                val lcls = "com.miui.home.common.drawable.LayerAdaptiveIconDrawable"
+                if (cls == lcls) {
+                    try {
+                        val getBgLayer = drawable.javaClass.getMethod("getBackgroundLayer")
+                        val bgLayer = getBgLayer.invoke(drawable)
+                        if (bgLayer != null) {
+                            val getBgDrawable = bgLayer.javaClass.getMethod("getDrawable")
+                            val bgLayerDrawable = getBgDrawable.invoke(bgLayer) as? Drawable
+                            sb.append("layerBg=${bgLayerDrawable?.javaClass?.simpleName ?: "null"} ")
+                        }
+                        val getFgLayers = drawable.javaClass.getMethod("getForegroundLayers")
+                        val fgLayers = getFgLayers.invoke(drawable) as? List<*>
+                        sb.append("fgLayerCount=${fgLayers?.size ?: 0} ")
+                    } catch (_: Throwable) { }
+                }
+            }
+
+            android.util.Log.d(TAG_MASK, sb.toString())
+        } catch (_: Throwable) { }
+    }
+
     private fun processIconReplacement(chain: Chain): BitmapDrawable? {
         val d = chain.getArg(0) as? Drawable ?: return null
         val identity = resolveIdentity(chain.thisObject)
+
+        // Phase 3.16: Mask quality diagnostics — log drawable structure before conversion
+        diagMaskInput(d, identity)
 
         // Phase 3.12-A: 在 mask 生成之前提取原始图标颜色
         extractOriginalIconColor(d, identity)
@@ -427,24 +541,36 @@ class IconThemeHook : XposedModule() {
                 source = SOURCE_NATIVE
                 android.util.Log.d(TAG, "[toBitmap] source=NATIVE")
             } else {
-                // ② Foreground extraction (Phase 3.1)
-                val fg = d.foreground
-                if (fg != null) {
-                    // 安全设置 bounds（不用 intrinsic，可能为 -1）
-                    val srcBounds = d.bounds
-                    val w = if (srcBounds.width() > 0) srcBounds.width()
-                            else d.intrinsicWidth.coerceAtLeast(1)
-                    val h = if (srcBounds.height() > 0) srcBounds.height()
-                            else d.intrinsicHeight.coerceAtLeast(1)
-                    fg.setBounds(0, 0, w, h)
-                    maskBitmap = DrawableConverter.toBitmap(fg)
+                // Phase 3.16-A: 优先使用缓存的 Raw APK Drawable
+                // 避免 HyperOS LayerAdaptiveIconDrawable 前景中已生成的 mask
+                val rawCached = IconDrawableCache.get(identity)
+                if (rawCached != null) {
+                    // 渲染完整 AdaptiveIcon（background + foreground）
+                    // toBitmap() 仅取 foreground → 纯白剪影无色彩对比度 → toLuminanceMask 全透明
+                    // 完整渲染保留 background 色彩，提供 toLuminanceMask 所需的对比度
+                    val fullRender = DrawableConverter.toRawBitmap(rawCached)
+                    maskBitmap = if (fullRender != null) DrawableConverter.toLuminanceMask(fullRender) else null
                     source = SOURCE_FOREGROUND
-                    android.util.Log.d(TAG, "[toBitmap] source=FOREGROUND")
+                    android.util.Log.d(TAG_MASK, "[MaskSource] component=$identity source=RAW_APK_DRAWABLE drawable=${rawCached.javaClass.simpleName}")
                 } else {
-                    // ③ Fallback to whole drawable
-                    maskBitmap = DrawableConverter.toBitmap(d)
-                    source = SOURCE_LUMINANCE
-                    android.util.Log.d(TAG, "[toBitmap] source=LUMINANCE")
+                    // ② Foreground extraction (Phase 3.1)
+                    val fg = d.foreground
+                    if (fg != null) {
+                        val srcBounds = d.bounds
+                        val w = if (srcBounds.width() > 0) srcBounds.width()
+                                else d.intrinsicWidth.coerceAtLeast(1)
+                        val h = if (srcBounds.height() > 0) srcBounds.height()
+                                else d.intrinsicHeight.coerceAtLeast(1)
+                        fg.setBounds(0, 0, w, h)
+                        maskBitmap = DrawableConverter.toBitmap(fg)
+                        source = SOURCE_FOREGROUND
+                        android.util.Log.d(TAG_MASK, "[MaskSource] component=$identity source=FOREGROUND reason=cache_miss")
+                    } else {
+                        // ③ Fallback to whole drawable
+                        maskBitmap = DrawableConverter.toBitmap(d)
+                        source = SOURCE_LUMINANCE
+                        android.util.Log.d(TAG_MASK, "[MaskSource] component=$identity source=LUMA reason=no_foreground")
+                    }
                 }
             }
         } else {
@@ -454,6 +580,9 @@ class IconThemeHook : XposedModule() {
         }
 
         if (maskBitmap == null) return null
+
+        // Phase 3.16: log mask bitmap quality
+        diagMaskRender(maskBitmap, identity, source)
 
         val cacheKey = monochromeCache.buildKey(identity, maskBitmap, source)
         if (cacheKey == null) return null
