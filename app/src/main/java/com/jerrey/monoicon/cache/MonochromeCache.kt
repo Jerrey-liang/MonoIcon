@@ -88,11 +88,19 @@ class MonochromeCache(
         return "$identity|${w}x${h}@$fp|$src"
     }
 
-    // ── Source constants (synced with IconThemeHook) ──────────────────
+    // ── Source constants (synced with IconThemeHook / MaskGenerator) ───
     companion object {
         const val SOURCE_NATIVE = 1
         const val SOURCE_FOREGROUND = 2
         const val SOURCE_LUMINANCE = 3
+
+        /**
+         * Process-wide shared instance (Phase 4.0-A).
+         * Both the mask pipeline (MaskGenerator) and lifecycle management
+         * (CacheManager) operate on this single instance so invalidation
+         * and statistics see the same data.
+         */
+        val shared: MonochromeCache by lazy { MonochromeCache() }
     }
 
     // ── Cache operations ──────────────────────────────────────────────
@@ -120,6 +128,19 @@ class MonochromeCache(
     fun clear() {
         cache.evictAll()
         logd(TAG, "Cache CLEARED")
+    }
+
+    /**
+     * Phase 4.0-A: removes every entry whose key starts with [prefix].
+     * Mask keys are `"identity|WxH@fp|src"` — prefix `"com.pkg/"` matches
+     * all `com.pkg/`-prefixed identities (also removes bare-`pkg` keys).
+     */
+    fun removeByPrefix(prefix: String) {
+        val stale = cache.snapshot().keys.filter { it.startsWith(prefix) }
+        stale.forEach { cache.remove(it) }
+        if (stale.isNotEmpty()) {
+            logd(TAG, "Cache removeByPrefix: $prefix removed=${stale.size}")
+        }
     }
 
     // ── Fingerprint ───────────────────────────────────────────────────

@@ -32,16 +32,63 @@ object IdentityResolver {
     private const val LAYER_ADAPTIVE_CLASS = "com.miui.home.common.drawable.LayerAdaptiveIconDrawable"
 
     // ── Timing bridge (was viewIdentityMap in IconThemeHook) ──────────
+    //
+    // Phase 4.0-A hardening: entries are consumed one-shot by Hooks 6/8,
+    // but views can be recycled without a consume (folder close, container
+    // recreation). Bounded capacity + TTL cleanup prevent unbounded growth
+    // and stale entries; the timing bridge no longer relies solely on
+    // Hook 6/8 consumption.
+
+    /** Max timing-bridge entries before oldest are evicted. */
+    private const val MAX_VIEW_ENTRIES = 512
+
+    /** Entry lifetime before lazy cleanup. */
+    private const val VIEW_TTL_MS = 60_000L
 
     private val viewIdentityMap = ConcurrentHashMap<Int, String>()
+    private val viewBindTime = ConcurrentHashMap<Int, Long>()
 
     /** Stores identity for a folder preview view before Hook 6/8 fires. */
     fun bindView(viewHash: Int, identity: String) {
+        expireOldViews()
         viewIdentityMap[viewHash] = identity
+        viewBindTime[viewHash] = System.currentTimeMillis()
+        // Max-size protection: evict oldest when over capacity
+        while (viewIdentityMap.size > MAX_VIEW_ENTRIES) {
+            val oldest = viewBindTime.minByOrNull { it.value } ?: break
+            viewIdentityMap.remove(oldest.key)
+            viewBindTime.remove(oldest.key)
+        }
     }
 
     /** Removes and returns the identity bound to [viewHash] (one-shot). */
-    fun consumeView(viewHash: Int): String? = viewIdentityMap.remove(viewHash)
+    fun consumeView(viewHash: Int): String? {
+        expireOldViews()
+        viewBindTime.remove(viewHash)
+        return viewIdentityMap.remove(viewHash)
+    }
+
+    /** Phase 4.0-A: clears the timing bridge (cache lifecycle API). */
+    fun clearViews() {
+        viewIdentityMap.clear()
+        viewBindTime.clear()
+    }
+
+    /** Current timing-bridge entry count (diagnostics). */
+    fun viewCount(): Int = viewIdentityMap.size
+
+    /** Lazy TTL sweep — bounded work, runs on bind/consume (not a timer). */
+    private fun expireOldViews() {
+        val now = System.currentTimeMillis()
+        val expired = viewBindTime
+            .filter { now - it.value > VIEW_TTL_MS }
+            .keys
+        if (expired.isEmpty()) return
+        expired.forEach {
+            viewIdentityMap.remove(it)
+            viewBindTime.remove(it)
+        }
+    }
 
     // ── Reflection handle caches (per declaring class) ────────────────
 

@@ -63,6 +63,17 @@ object IconDrawableCache {
         }
     }
 
+    /**
+     * Phase 4.0-A: removes every entry whose key starts with [prefix]
+     * (e.g. `"com.pkg/"` invalidates all `com.pkg/`-prefixed identities).
+     */
+    fun removeByPrefix(prefix: String) {
+        synchronized(lock) {
+            val stale = store.keys.filter { it.startsWith(prefix) }
+            stale.forEach { store.remove(it) }
+        }
+    }
+
     fun clear() {
         synchronized(lock) {
             store.clear()

@@ -65,8 +65,10 @@ object MaskGenerator {
         val cacheHit: Boolean,
     )
 
-    // Phase 3.18-D: byte-based LRU (default = maxMemory/16)
-    private val monochromeCache = MonochromeCache()
+    // Phase 3.18-D: byte-based LRU (default = maxMemory/16).
+    // Phase 4.0-A: shared instance — CacheManager invalidation must see
+    // the same data the pipeline writes.
+    private val monochromeCache = MonochromeCache.shared
 
     /**
      * Generates (or retrieves from cache) the monochrome mask for [d].

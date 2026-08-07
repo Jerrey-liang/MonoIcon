@@ -32,6 +32,15 @@ object IconColorCache {
      */
     fun get(component: String): Int? = store[component]
 
+    /**
+     * Phase 4.0-A: removes every entry whose key starts with [prefix]
+     * (e.g. `"com.pkg/"` invalidates all `com.pkg/`-prefixed identities).
+     */
+    fun removeByPrefix(prefix: String) {
+        val stale = store.keys.filter { it.startsWith(prefix) }
+        stale.forEach { store.remove(it) }
+    }
+
     /** Removes all entries. */
     fun clear() {
         store.clear()

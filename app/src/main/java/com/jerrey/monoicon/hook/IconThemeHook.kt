@@ -103,36 +103,22 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
 
     private fun installHooks(cl: ClassLoader) {
-        var ok = 0
-        val total = 6
-
         // Phase 3.18-E: diagnostic hooks 1–4 (MonochromeUtils) moved to
         // DebugHooks — production default off.
         DebugHooks.install(this, cl)
 
-        ok += safeInstall("setIconDrawable") { installSetIconDrawable(cl) }
-        ok += safeInstall("folderSetImageDrawable") { installFolderSetImageDrawable(cl) }
-        ok += safeInstall("getActivityIcon") { installGetActivityIcon(cl) }
-        ok += safeInstall("folderSmallIcon") { installFolderSmallIconDrawable(cl) }
-        ok += safeInstall("setViewDrawable") { installSetViewDrawable(cl) }
-        ok += safeInstall("setViewDrawable1x1") { installSetViewDrawable1x1(cl) }
+        // Phase 4.0-C: HookRegistry — stable names, required/optional flags,
+        // availability reporting. Same protective install behavior as before.
+        HookRegistry.install("DesktopIcon", required = true) { installSetIconDrawable(cl) }
+        HookRegistry.install("FolderPreview", required = true) { installFolderSetImageDrawable(cl) }
+        HookRegistry.install("RawIconProvider", required = true) { installGetActivityIcon(cl) }
+        HookRegistry.install("SmallFolder", required = true) { installFolderSmallIconDrawable(cl) }
+        HookRegistry.install("FolderIdentity", required = true) { installSetViewDrawable(cl) }
+        // Kotlin synthetic lambda name — fragile across launcher builds → optional
+        HookRegistry.install("FolderIdentity1x1", required = false) { installSetViewDrawable1x1(cl) }
 
-        android.util.Log.i(TAG, "Hooks installed: $ok/$total")
-    }
-
-    private inline fun safeInstall(name: String, block: () -> Unit): Int = try {
-        block()
-        android.util.Log.i(TAG, "  ✓ $name")
-        1
-    } catch (e: ClassNotFoundException) {
-        android.util.Log.w(TAG, "  ✗ $name: class not found — ${e.message}")
-        0
-    } catch (e: NoSuchMethodException) {
-        android.util.Log.w(TAG, "  ✗ $name: method not found — ${e.message}")
-        0
-    } catch (e: Throwable) {
-        android.util.Log.e(TAG, "  ✗ $name: ${e.javaClass.simpleName} — ${e.message}", e)
-        0
+        android.util.Log.i(TAG, "Hooks installed: ${HookRegistry.installedCount}/${HookRegistry.size}")
+        android.util.Log.i(TAG, HookRegistry.statusReport())
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -157,6 +143,9 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val start = System.nanoTime()
+
+                // Phase 4.0-B: lazy package-change receiver registration
+                ensurePackageChangeReceiver(chain.thisObject)
 
                 // Phase 2.7: 生成逻辑整体 try/catch，任何异常回落原始 drawable
                 val replacement = try {
@@ -220,6 +209,35 @@ class IconThemeHook : XposedModule() {
             }
     }
 
+    // Phase 4.0-B: package change receiver (lazy, one-time registration)
+    private val packageReceiverLock = Any()
+    @Volatile
+    private var packageReceiverRegistered = false
+
+    /**
+     * Lazily registers [PackageChangeReceiver] using the first available
+     * view context. No context exists at onPackageLoaded time, so the
+     * registration piggybacks on the first view-based hook invocation.
+     * Silent no-op when the hook target is not a View (e.g. Hook 7).
+     */
+    private fun ensurePackageChangeReceiver(view: Any?) {
+        if (packageReceiverRegistered) return
+        val context = try {
+            (view as? android.view.View)?.context
+        } catch (_: Throwable) {
+            null
+        } ?: return
+        synchronized(packageReceiverLock) {
+            if (packageReceiverRegistered) return
+            try {
+                PackageChangeReceiver.register(context)
+                packageReceiverRegistered = true
+            } catch (_: Throwable) {
+                // isolation — registration must never crash the launcher
+            }
+        }
+    }
+
     /**
      * Returns "set" / "null" / "err" for the view's mBuddyInfo presence
      * (diagnostic log only). Method handle cached per view class.
@@ -262,6 +280,10 @@ class IconThemeHook : XposedModule() {
         val start = if (statsName != null) System.nanoTime() else 0L
         val tMs = relMs()
         val viewHash = System.identityHashCode(chain.thisObject)
+
+        // Phase 4.0-B: lazy package-change receiver registration
+        ensurePackageChangeReceiver(chain.thisObject)
+
         try {
             val d = chain.getArg(0) as? Drawable
             val dClass = d?.javaClass?.simpleName ?: "null"
@@ -353,6 +375,9 @@ class IconThemeHook : XposedModule() {
             .intercept { chain: Chain ->
                 val tMs = relMs()
                 try {
+                    // Phase 4.0-B: lazy package-change receiver registration
+                    ensurePackageChangeReceiver(chain.thisObject)
+
                     val si = chain.getArg(0)  // IShortcutInfo
                     val d = chain.getArg(2) as? Drawable
                     val dClass = d?.javaClass?.simpleName ?: "null"
@@ -419,6 +444,9 @@ class IconThemeHook : XposedModule() {
             .intercept { chain: Chain ->
                 val tMs = relMs()
                 try {
+                    // Phase 4.0-B: lazy package-change receiver registration
+                    ensurePackageChangeReceiver(chain.thisObject)
+
                     val si = chain.getArg(0)  // IShortcutInfo
                     val container = chain.getArg(1)
                     val idx = chain.getArg(2) as? Int ?: 0
