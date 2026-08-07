@@ -14,6 +14,7 @@ import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.color.IconColorExtractor
 import com.jerrey.monoicon.color.PixelStyleColorExtractor
+import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.identity.IdentityResolver
 import com.jerrey.monoicon.image.MonochromeGenerator
 import com.jerrey.monoicon.logging.LogcatLogger
@@ -91,9 +92,17 @@ class IconThemeHook : XposedModule() {
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         if (param.packageName != "com.miui.home") return
 
+        // Phase 4.1: load configuration before installing hooks — a disabled
+        // module installs nothing and leaves the launcher untouched.
+        ConfigManager.initForHooks(this)
+        val enabled = ConfigManager.isEnabled()
+        android.util.Log.i(TAG, "MonoIcon enabled=$enabled — ${if (enabled) "installing hooks" else "skip hooks"}")
+
         val cl = param.getDefaultClassLoader()
         android.util.Log.i(TAG, "onPackageLoaded: package=${param.packageName} firstPackage=${param.isFirstPackage}")
         android.util.Log.i(TAG, "ClassLoader: $cl")
+
+        if (!enabled) return
 
         installHooks(cl)
     }
@@ -143,6 +152,9 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val start = System.nanoTime()
+
+                // Phase 4.1: runtime switch — disabled = original launcher behavior
+                if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
 
                 // Phase 4.0-B: lazy package-change receiver registration
                 ensurePackageChangeReceiver(chain.thisObject)
@@ -281,6 +293,9 @@ class IconThemeHook : XposedModule() {
         val tMs = relMs()
         val viewHash = System.identityHashCode(chain.thisObject)
 
+        // Phase 4.1: runtime switch — disabled = original launcher behavior
+        if (!ConfigManager.isEnabled()) return chain.proceed()
+
         // Phase 4.0-B: lazy package-change receiver registration
         ensurePackageChangeReceiver(chain.thisObject)
 
@@ -374,6 +389,10 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val tMs = relMs()
+
+                // Phase 4.1: runtime switch — disabled = original launcher behavior
+                if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
+
                 try {
                     // Phase 4.0-B: lazy package-change receiver registration
                     ensurePackageChangeReceiver(chain.thisObject)
@@ -443,6 +462,10 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val tMs = relMs()
+
+                // Phase 4.1: runtime switch — disabled = original launcher behavior
+                if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
+
                 try {
                     // Phase 4.0-B: lazy package-change receiver registration
                     ensurePackageChangeReceiver(chain.thisObject)
@@ -511,6 +534,10 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val tMs = relMs()
+
+                // Phase 4.1: runtime switch — disabled = original launcher behavior
+                if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
+
                 val info = chain.getArg(0) as? LauncherActivityInfo
                 // 在 HyperOS 处理之前，从 APK 直接获取原始彩色图标
                 // launcherActivityInfo.getIcon(0) 返回未经 theme 修改的 AdaptiveIconDrawable

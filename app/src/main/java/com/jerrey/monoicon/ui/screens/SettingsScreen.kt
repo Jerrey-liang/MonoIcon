@@ -15,23 +15,29 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.jerrey.monoicon.config.ConfigManager
 
 /**
- * Placeholder settings screen for MonoIcon.
+ * MonoIcon settings screen (Phase 4.1).
  *
- * Phase 1: Displays the module status and basic information.
- * Phase 11+: Fully interactive configuration UI with:
- *   - Global enable/disable toggle
- *   - Icon style selection
- *   - App exclusion list
- *   - Theme color overrides
- *   - Algorithm intensity controls
+ * The single master switch writes the `enabled` flag to SharedPreferences,
+ * which the launcher hook process reads via getRemotePreferences. Changing
+ * the switch takes effect in the launcher within one refresh interval
+ * (~1s); already-replaced drawables refresh on the next launcher bind, so
+ * a launcher restart is recommended for an immediate full apply.
  */
 @Composable
 fun SettingsScreen() {
+    var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
+    var showRestartHint by remember { mutableStateOf(false) }
+
     Scaffold { paddingValues ->
         Column(
             modifier = Modifier
@@ -67,7 +73,24 @@ fun SettingsScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(text = "Monochrome Icons")
-                        Switch(checked = true, onCheckedChange = { /* Phase 11 */ })
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = { value ->
+                                enabled = value
+                                showRestartHint = true
+                                ConfigManager.setEnabled(value)
+                            }
+                        )
+                    }
+
+                    if (showRestartHint) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Configuration changed. Restart HyperOS Launcher " +
+                                    "to apply completely.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }

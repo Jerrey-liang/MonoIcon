@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.ui.MonoIconApp
 
 /**
@@ -21,6 +22,9 @@ import com.jerrey.monoicon.ui.MonoIconApp
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Phase 4.1: bind the module-process SharedPreferences so the UI
+        // switch writes the same file the launcher hook process reads.
+        ConfigManager.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             MonoIconApp()
