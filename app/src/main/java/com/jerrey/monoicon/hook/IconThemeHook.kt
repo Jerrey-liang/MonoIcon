@@ -22,11 +22,17 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
 private const val TAG_MASK = "MonoIcon.Mask"
+private const val TAG_FOLDER = "MonoIcon.FolderLifecycle"
 private const val MODULE_VERSION = "1.0.1"
+
+/** Boot timestamp for relative timing logs (ms since boot approx). */
+private val bootTimeNs: Long = System.nanoTime()
+private fun relMs(): Long = (System.nanoTime() - bootTimeNs) / 1_000_000L
 
 /**
  * MonoIcon — Modern LSPosed API 101 module entry point.
@@ -47,6 +53,13 @@ class IconThemeHook : XposedModule() {
 
     // Phase 3.11: Pixel-style icon color extraction（独立管线，不影响 mask 生成）
     private val colorExtractor = PixelStyleColorExtractor()
+
+    // Phase 3.17: Temporary view→identity map for folder preview lifecycle.
+    // Hook 9 (setViewDrawable) resolves identity from IShortcutInfo but
+    // replaces the drawable — losing the LayerAdaptiveIconDrawable
+    // constantState that could have provided ComponentName. Hook 6/8
+    // look here when resolveFolderIconIdentity returns null.
+    private val viewIdentityMap = ConcurrentHashMap<Int, String>()
 
     // ═══════════════════════════════════════════════════════════════
     // Bootstrap
@@ -83,7 +96,7 @@ class IconThemeHook : XposedModule() {
 
     private fun installHooks(cl: ClassLoader) {
         var ok = 0
-        val total = 8
+        val total = 10
 
         ok += safeInstall("getMonochrome") { installGetMonochrome(cl) }
         ok += safeInstall("isSupportMonochrome") { installIsSupportMonochrome(cl) }
@@ -93,6 +106,8 @@ class IconThemeHook : XposedModule() {
         ok += safeInstall("folderSetImageDrawable") { installFolderSetImageDrawable(cl) }
         ok += safeInstall("getActivityIcon") { installGetActivityIcon(cl) }
         ok += safeInstall("folderSmallIcon") { installFolderSmallIconDrawable(cl) }
+        ok += safeInstall("setViewDrawable") { installSetViewDrawable(cl) }
+        ok += safeInstall("setViewDrawable1x1") { installSetViewDrawable1x1(cl) }
 
         android.util.Log.i(TAG, "Hooks installed: $ok/$total")
     }
@@ -287,12 +302,35 @@ class IconThemeHook : XposedModule() {
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
                 val start = System.nanoTime()
+                val tMs = relMs()
+                val viewHash = System.identityHashCode(chain.thisObject)
                 try {
                     val d = chain.getArg(0) as? Drawable
-                    if (d == null) return@intercept chain.proceed()
+                    val dClass = d?.javaClass?.simpleName ?: "null"
+
+                    // Log hook entry
+                    // Phase 3.17: try mBuddyInfo → drawable constantState → viewIdentityMap (from Hook 9)
+                    val identity = resolveFolderIconIdentity(chain.thisObject)
+                        ?: (d?.let { extractIdentityFromDrawable(it) })
+                        ?: viewIdentityMap.remove(viewHash)
+                    val cacheHit = if (identity != null) IconDrawableCache.get(identity) != null else false
+                    val mBuddyInfoNow = try {
+                        val g = chain.thisObject.javaClass.getMethod("getMBuddyInfo")
+                            .invoke(chain.thisObject)
+                        if (g != null) "set" else "null"
+                    } catch (_: Throwable) { "err" }
+
+                    android.util.Log.i(TAG_FOLDER,
+                        "[Folder6Enter] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                        "dClass=$dClass identity=${identity ?: "NULL"} " +
+                        "cacheHit=$cacheHit mBuddyInfo=$mBuddyInfoNow")
+
+                    if (d == null) {
+                        android.util.Log.d(TAG_FOLDER, "[Folder6Pass] t=$tMs vh=@${Integer.toHexString(viewHash)} reason=drawable_null")
+                        return@intercept chain.proceed()
+                    }
 
                     // Phase 3.16-A: 尝试从缓存获取 raw APK drawable 用于 mask 生成
-                    val identity = resolveFolderIconIdentity(chain.thisObject)
                     val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
 
                     val mask = if (rawCached != null) {
@@ -305,17 +343,32 @@ class IconThemeHook : XposedModule() {
                             ?: renderGenericToMask(d)
                     }
 
-                    if (mask == null) return@intercept chain.proceed()
+                    if (mask == null) {
+                        android.util.Log.w(TAG_FOLDER,
+                            "[Folder6Fail] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                            "identity=${identity ?: "NULL"} reason=mask_null")
+                        return@intercept chain.proceed()
+                    }
 
                     val replacement = MonochromeGenerator.create(mask)
-                    if (replacement == null) return@intercept chain.proceed()
+                    if (replacement == null) {
+                        android.util.Log.w(TAG_FOLDER,
+                            "[Folder6Fail] t=$tMs vh=@${Integer.toHexString(viewHash)} reason=replacement_null")
+                        return@intercept chain.proceed()
+                    }
 
-                    android.util.Log.d(TAG,
-                        "[FolderPreviewReplace] original=${d.javaClass.simpleName} " +
-                        "replacement=BitmapDrawable rawCached=${rawCached != null}")
+                    android.util.Log.i(TAG_FOLDER,
+                        "[Folder6Replace] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                        "identity=${identity ?: "NULL"} " +
+                        "original=$dClass " +
+                        "replacement=${replacement.javaClass.simpleName} " +
+                        "rawCached=${rawCached != null} " +
+                        "maskW=${mask.width} maskH=${mask.height}")
                     return@intercept chain.proceed(arrayOf<Any>(replacement))
                 } catch (t: Throwable) {
-                    android.util.Log.e(TAG, "[folderSetImageDrawable] failed, falling back: ${t.message}")
+                    android.util.Log.e(TAG_FOLDER,
+                        "[Folder6Crash] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                        "error=${t.message}", t)
                     return@intercept chain.proceed()
                 } finally {
                     val elapsed = (System.nanoTime() - start) / 1_000_000L
@@ -340,11 +393,33 @@ class IconThemeHook : XposedModule() {
         hook(method)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
+                val tMs = relMs()
+                val viewHash = System.identityHashCode(chain.thisObject)
                 try {
                     val d = chain.getArg(0) as? Drawable
-                    if (d == null) return@intercept chain.proceed()
+                    val dClass = d?.javaClass?.simpleName ?: "null"
 
+                    // Phase 3.17: try mBuddyInfo → drawable constantState → viewIdentityMap (from Hook 9)
                     val identity = resolveFolderIconIdentity(chain.thisObject)
+                        ?: (d?.let { extractIdentityFromDrawable(it) })
+                        ?: viewIdentityMap.remove(viewHash)
+                    val cacheHit = if (identity != null) IconDrawableCache.get(identity) != null else false
+                    val mBuddyInfoNow = try {
+                        val g = chain.thisObject.javaClass.getMethod("getMBuddyInfo")
+                            .invoke(chain.thisObject)
+                        if (g != null) "set" else "null"
+                    } catch (_: Throwable) { "err" }
+
+                    android.util.Log.i(TAG_FOLDER,
+                        "[Folder8Enter] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                        "dClass=$dClass identity=${identity ?: "NULL"} " +
+                        "cacheHit=$cacheHit mBuddyInfo=$mBuddyInfoNow")
+
+                    if (d == null) {
+                        android.util.Log.d(TAG_FOLDER, "[Folder8Pass] t=$tMs vh=@${Integer.toHexString(viewHash)} reason=drawable_null")
+                        return@intercept chain.proceed()
+                    }
+
                     val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
 
                     val mask = if (rawCached != null) {
@@ -354,35 +429,269 @@ class IconThemeHook : XposedModule() {
                         DrawableConverter.toBitmap(d) ?: renderGenericToMask(d)
                     }
 
-                    if (mask == null) return@intercept chain.proceed()
+                    if (mask == null) {
+                        android.util.Log.w(TAG_FOLDER,
+                            "[Folder8Fail] t=$tMs vh=@${Integer.toHexString(viewHash)} reason=mask_null")
+                        return@intercept chain.proceed()
+                    }
 
                     val replacement = MonochromeGenerator.create(mask)
-                    if (replacement == null) return@intercept chain.proceed()
+                    if (replacement == null) {
+                        android.util.Log.w(TAG_FOLDER,
+                            "[Folder8Fail] t=$tMs vh=@${Integer.toHexString(viewHash)} reason=replacement_null")
+                        return@intercept chain.proceed()
+                    }
 
-                    android.util.Log.d(TAG,
-                        "[FolderSmallReplace] original=${d.javaClass.simpleName} replacement=BitmapDrawable")
+                    android.util.Log.i(TAG_FOLDER,
+                        "[Folder8Replace] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                        "identity=${identity ?: "NULL"} " +
+                        "original=$dClass " +
+                        "replacement=${replacement.javaClass.simpleName} " +
+                        "rawCached=${rawCached != null}")
                     return@intercept chain.proceed(arrayOf<Any>(replacement))
                 } catch (t: Throwable) {
-                    android.util.Log.e(TAG, "[folderSmallIcon] failed: ${t.message}")
+                    android.util.Log.e(TAG_FOLDER,
+                        "[Folder8Crash] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                        "error=${t.message}", t)
                     return@intercept chain.proceed()
                 }
             }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Hook 9: BaseFolderIconPreviewContainer2X2.setViewDrawable
+    //
+    // Phase 3.17: Primary fix for folder preview lifecycle.
+    // setViewDrawable receives IShortcutInfo BEFORE calling setImageDrawable,
+    // but the internal sequence is:
+    //   1. drawable.setColorFilter(iShortcutInfo.getColorFilter())
+    //   2. folderPreviewIconView.setImageDrawable(drawable)  ← our hook 6/8 fires
+    //   3. folderPreviewIconView.setMBuddyInfo(iShortcutInfo)
+    //
+    // This hook intercepts BEFORE step 1 so we can resolve identity from
+    // iShortcutInfo directly. We replace the drawable argument with the
+    // raw APK AdaptiveIconDrawable from IconDrawableCache, which Hook 6/8
+    // then renders into a proper luminance mask.
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installSetViewDrawable(cl: ClassLoader) {
+        val iShortcutInfoClass = cl.loadClass("com.miui.home.data.IShortcutInfo")
+        val folderPreviewIconViewClass = cl.loadClass("com.miui.home.folder.FolderPreviewIconView")
+        val method = cl.loadClass("com.miui.home.folder.BaseFolderIconPreviewContainer2X2")
+            .getDeclaredMethod("setViewDrawable",
+                iShortcutInfoClass,
+                folderPreviewIconViewClass,
+                Drawable::class.java)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                val tMs = relMs()
+                try {
+                    val si = chain.getArg(0)  // IShortcutInfo
+                    val d = chain.getArg(2) as? Drawable
+                    val dClass = d?.javaClass?.simpleName ?: "null"
+                    val identity = resolveIdentityFromShortcutInfo(si)
+                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+
+                    android.util.Log.i(TAG_FOLDER,
+                        "[ViewDrawable] t=$tMs identity=${identity ?: "NULL"} " +
+                        "originalDrawable=$dClass rawCached=${rawCached != null} " +
+                        "cacheSize=${IconDrawableCache.size}")
+
+                    if (rawCached != null && identity != null) {
+                        android.util.Log.i(TAG_FOLDER,
+                            "[ViewDrawableReplace] t=$tMs identity=$identity " +
+                            "replacing $dClass with ${rawCached.javaClass.simpleName}")
+                        // Phase 3.17: store identity for Hook 6/8 to find
+                        // (replacing drawable loses LayerAdaptiveIconDrawable constantState ComponentName)
+                        val view = chain.getArg(1)
+                        if (view != null) {
+                            viewIdentityMap[System.identityHashCode(view)] = identity
+                        }
+                        // Pass all three args, replacing only the drawable
+                        return@intercept chain.proceed(
+                            arrayOf<Any>(chain.getArg(0), chain.getArg(1), rawCached))
+                    }
+
+                    // Cache miss — let original through, Hook 6/8 will fallback
+                    chain.proceed()
+                } catch (t: Throwable) {
+                    android.util.Log.e(TAG_FOLDER,
+                        "[ViewDrawableCrash] t=$tMs error=${t.message}", t)
+                    chain.proceed()
+                }
+            }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Hook 10: FolderIconPreviewContainer1X1.loadItemIcons$lambda$0
+    //
+    // Phase 3.17: 1x1 (small folder) equivalent of Hook 9.
+    // The 1x1 container does NOT use setViewDrawable — it calls
+    // refreshIconDrawable directly on PreviewIconView items.
+    // loadItemIcons$lambda$0 is the Kotlin synthetic that receives
+    // IShortcutInfo (identity) + Drawable before refreshIconDrawable.
+    //
+    // Signature: (IShortcutInfo, FolderIconPreviewContainer1X1, int, Drawable)
+    //   arg 0 = IShortcutInfo → identity source
+    //   arg 1 = container → to access mItemIcons[i]
+    //   arg 2 = index i
+    //   arg 3 = Drawable → to replace
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installSetViewDrawable1x1(cl: ClassLoader) {
+        val iShortcutInfoClass = cl.loadClass("com.miui.home.data.IShortcutInfo")
+        val containerClass = cl.loadClass("com.miui.home.folder.FolderIconPreviewContainer1X1")
+        // Synthetic method: loadItemIcons$lambda$0 — escape $ for Kotlin string interpolation
+        val methodName = "loadItemIcons\$lambda\$0"
+        val method = containerClass.getDeclaredMethod(methodName,
+            iShortcutInfoClass, containerClass, Integer.TYPE, Drawable::class.java)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                val tMs = relMs()
+                try {
+                    val si = chain.getArg(0)  // IShortcutInfo
+                    val container = chain.getArg(1)
+                    val idx = chain.getArg(2) as? Int ?: 0
+                    val d = chain.getArg(3) as? Drawable
+                    val dClass = d?.javaClass?.simpleName ?: "null"
+                    val identity = resolveIdentityFromShortcutInfo(si)
+                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+
+                    android.util.Log.i(TAG_FOLDER,
+                        "[ViewDrawable1x1] t=$tMs idx=$idx identity=${identity ?: "NULL"} " +
+                        "originalDrawable=$dClass rawCached=${rawCached != null} " +
+                        "cacheSize=${IconDrawableCache.size}")
+
+                    if (rawCached != null && identity != null) {
+                        // Get the target PreviewIconView to store identity
+                        try {
+                            val itemIconsField = containerClass.getDeclaredField("mItemIcons")
+                            itemIconsField.isAccessible = true
+                            val itemIcons = itemIconsField.get(container) as? Array<*>
+                            if (itemIcons != null && idx < itemIcons.size) {
+                                val view = itemIcons[idx]
+                                if (view != null) {
+                                    viewIdentityMap[System.identityHashCode(view)] = identity
+                                }
+                            }
+                        } catch (_: Throwable) { }
+
+                        android.util.Log.i(TAG_FOLDER,
+                            "[ViewDrawable1x1Replace] t=$tMs identity=$identity " +
+                            "replacing $dClass with ${rawCached.javaClass.simpleName}")
+                        return@intercept chain.proceed(
+                            arrayOf<Any>(chain.getArg(0), chain.getArg(1), chain.getArg(2), rawCached))
+                    }
+
+                    chain.proceed()
+                } catch (t: Throwable) {
+                    android.util.Log.e(TAG_FOLDER,
+                        "[ViewDrawable1x1Crash] t=$tMs error=${t.message}", t)
+                    chain.proceed()
+                }
+            }
+    }
+
     /**
-     * 从 FolderPreviewIconView 反射获取组件标识。
-     * FolderPreviewIconView 保存了 IShortcutInfo → getPackageName/getComponentName。
+     * Extract component identity from IShortcutInfo.
+     * Uses getPackageName() + getComponentName().getClassName() for full identity,
+     * falls back to package name only.
+     */
+    private fun resolveIdentityFromShortcutInfo(si: Any?): String? {
+        if (si == null) return null
+        return try {
+            val pkg = si.javaClass.getMethod("getPackageName").invoke(si) as? String
+                ?: return null
+            // Try getComponentName() → getClassName()
+            val component = try {
+                val method = si.javaClass.getMethod("getComponentName")
+                method.invoke(si)
+            } catch (_: Throwable) { null }
+            if (component != null) {
+                val cls = component.javaClass.getMethod("getClassName").invoke(component) as? String
+                if (cls != null) return "$pkg/$cls"
+            }
+            // Fallback: just package name
+            pkg
+        } catch (_: Throwable) { null }
+    }
+
+    /**
+     * 从 FolderPreviewIconView / PreviewIconView 反射获取组件标识。
+     *
+     * 优先级：
+     * 1. getMBuddyInfo() → getPackageName() + getIntent().getComponent().getClassName()
+     * 2. 回退：getDrawable().constantState 中反射 ComponentName 字段
+     *    （mBuddyInfo 在 setImageDrawable 之后才设置，导致首帧 identity=null）
      */
     private fun resolveFolderIconIdentity(view: Any?): String? {
         if (view == null) return null
-        return try {
+
+        // Primary: getMBuddyInfo()
+        try {
             val getBuddy = view.javaClass.getMethod("getMBuddyInfo")
-            val buddy = getBuddy.invoke(view) ?: return null
-            val pkg = buddy.javaClass.getMethod("getPackageName").invoke(buddy) as? String ?: return null
-            val intent = buddy.javaClass.getMethod("getIntent").invoke(buddy)
-            val component = intent?.javaClass?.getMethod("getComponent")?.invoke(intent)
-            val cls = component?.javaClass?.getMethod("getClassName")?.invoke(component) as? String
-            if (cls != null) "$pkg/$cls" else pkg
+            val buddy = getBuddy.invoke(view)
+            if (buddy != null) {
+                val pkg = buddy.javaClass.getMethod("getPackageName").invoke(buddy) as? String
+                if (pkg != null) {
+                    val intent = buddy.javaClass.getMethod("getIntent").invoke(buddy)
+                    val component = intent?.javaClass?.getMethod("getComponent")?.invoke(intent)
+                    val cls = component?.javaClass?.getMethod("getClassName")?.invoke(component) as? String
+                    return if (cls != null) "$pkg/$cls" else pkg
+                }
+            }
+        } catch (_: Throwable) { /* fall through to drawable identity */ }
+
+        // Fallback: extract ComponentName from current drawable constantState
+        try {
+            val getDrawable = view.javaClass.getMethod("getDrawable")
+            val d = getDrawable.invoke(view) as? Drawable ?: return null
+
+            // Check if it's a LayerAdaptiveIconDrawable (HyperOS wrapper)
+            val className = d.javaClass.name
+            if (className == LAYER_ADAPTIVE_CLASS) {
+                val cs = d.constantState ?: return null
+                // Scan declared fields for android.content.ComponentName
+                val clz: Class<*> = cs.javaClass
+                for (f: java.lang.reflect.Field in clz.declaredFields) {
+                    if (f.type.name == "android.content.ComponentName") {
+                        f.isAccessible = true
+                        val cn = f.get(cs) as? android.content.ComponentName
+                        if (cn != null) return "${cn.packageName}/${cn.className}"
+                    }
+                }
+            }
+        } catch (_: Throwable) { }
+
+        return null
+    }
+
+    /**
+     * Phase 3.17: Extract component identity from a drawable's constantState.
+     *
+     * Used as a fallback when mBuddyInfo is not yet available
+     * (setViewDrawable fires setMBuddyInfo AFTER setImageDrawable).
+     *
+     * Scans declared fields in the drawable's [Drawable.ConstantState]
+     * for a ComponentName, then reconstructs "pkg/cls" identity.
+     */
+    private fun extractIdentityFromDrawable(d: Drawable): String? {
+        return try {
+            val cs = d.constantState ?: return null
+            for (f in cs.javaClass.declaredFields) {
+                if (f.type.name == "android.content.ComponentName") {
+                    f.isAccessible = true
+                    val cn = f.get(cs) as? android.content.ComponentName
+                    if (cn != null) return "${cn.packageName}/${cn.className}"
+                }
+            }
+            null
         } catch (_: Throwable) { null }
     }
 
@@ -425,6 +734,7 @@ class IconThemeHook : XposedModule() {
         hook(method)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
+                val tMs = relMs()
                 val info = chain.getArg(0) as? LauncherActivityInfo
                 // 在 HyperOS 处理之前，从 APK 直接获取原始彩色图标
                 // launcherActivityInfo.getIcon(0) 返回未经 theme 修改的 AdaptiveIconDrawable
@@ -442,8 +752,10 @@ class IconThemeHook : XposedModule() {
                                 val ident = "${cn.packageName}/${cn.className}"
                                 // Phase 3.16-A: cache isolated raw drawable for mask generation
                                 IconDrawableCache.put(ident, isolated)
-                                android.util.Log.d(TAG_MASK,
-                                    "[RawDrawableCachePut] component=$ident drawable=${isolated.javaClass.simpleName}")
+                                android.util.Log.i(TAG_FOLDER,
+                                    "[CachePut] t=$tMs component=$ident " +
+                                    "drawable=${isolated.javaClass.simpleName} " +
+                                    "cacheSize=${IconDrawableCache.size}")
                             }
                             extractEarlyIconColor(info, isolated, "RawAPK")
                         }
