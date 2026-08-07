@@ -17,22 +17,32 @@ private const val TAG = "MonoIcon.MonoCache"
  * instances. Drawable objects may carry state and should not be blindly
  * shared; the caller wraps the cached bitmap each time.
  *
- * Identity resolution (package/component name) is done in the hook layer
- * ([com.jerrey.monoicon.hook.IconThemeHook]) and passed in as [identity].
+ * Identity resolution (package/component name) is done in the identity
+ * layer ([com.jerrey.monoicon.identity.IdentityResolver]) and passed in
+ * as [identity].
  *
- * Fingerprint is computed from the bitmap content via **FNV-1a 32-bit**
- * to distinguish different visuals from the same component.
+ * Fingerprint is computed from the **key bitmap** via **FNV-1a 32-bit** —
+ * the source render that drives generation (input of toLuminanceMask for
+ * NATIVE/RAW paths, the generated mask itself for FG/LUMA paths). This
+ * distinguishes different visuals from the same component and makes the
+ * cache lookup meaningful before re-running the mask pipeline.
  *
- * @param maxSize Maximum number of cached entries.
+ * Phase 3.18-D: byte-based budgeting — [LruCache.sizeOf] returns
+ * [Bitmap.byteCount], so [maxBytes] bounds total bitmap memory instead of
+ * entry count (a 284x284 folder mask is ~323 KB vs ~47 KB desktop mask).
+ *
+ * @param maxBytes Maximum total bitmap bytes to retain (default: maxMemory/16).
  */
-class MonochromeCache(private val maxSize: Int) {
+class MonochromeCache(
+    private val maxBytes: Int = (Runtime.getRuntime().maxMemory() / 16).toInt()
+) {
 
     /** Stores [Bitmap] masks, keyed by identity + size + fingerprint. */
-    private val cache = object : LruCache<String, Bitmap>(maxSize) {
-        override fun sizeOf(key: String, value: Bitmap): Int = 1
+    private val cache = object : LruCache<String, Bitmap>(maxBytes) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
-    /** Current number of cached entries. */
+    /** Current total bytes retained (LruCache byte budget). */
     val size: Int get() = cache.size()
 
     // ── Key construction ──────────────────────────────────────────────
@@ -59,7 +69,8 @@ class MonochromeCache(private val maxSize: Int) {
      * (e.g. NATIVE monochrome vs LUMINANCE fallback for the same component).
      *
      * @param identity Resolved component identity.
-     * @param bitmap The monochrome mask bitmap (for fingerprint).
+     * @param bitmap The key bitmap for the fingerprint — the source render
+     *               for NATIVE/RAW paths, the generated mask for FG/LUMA paths.
      * @param source Source type: [SOURCE_NATIVE], [SOURCE_FOREGROUND], or [SOURCE_LUMINANCE].
      * @return Cache key, or `null` if identity/bitmap invalid.
      */

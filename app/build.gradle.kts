@@ -42,6 +42,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Phase 3.18-A: BuildConfig.DEBUG gates verbose hook logging
+        // (debug builds → logd enabled for verification; release → off)
+        buildConfig = true
     }
 
     // LSPosed META-INF/xposed files are placed in src/main/resources/

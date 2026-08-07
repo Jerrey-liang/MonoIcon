@@ -49,4 +49,28 @@ object MonochromeGenerator {
 
         return BitmapDrawable(null, bitmap)
     }
+
+    /**
+     * Phase 3.18-D: wraps a **private copy** of [bitmap] for handoff to the
+     * launcher.
+     *
+     * The mask pipeline caches the original [Bitmap] in MonochromeCache;
+     * handing the launcher a [BitmapDrawable] that shares that instance
+     * risks the launcher recycling or mutating it and poisoning the cache
+     * entry. This helper hands over an independent ARGB_8888 copy instead.
+     *
+     * Cost: ~0.1–0.3 ms per handoff (108x108), paid only at proceed() time.
+     * If the copy fails, falls back to wrapping the original bitmap
+     * (the pre-3.18 behavior, cache-poisoning risk remains in that rare case).
+     */
+    fun createForLauncher(bitmap: Bitmap?): BitmapDrawable? {
+        if (bitmap == null) return null
+        if (bitmap.isRecycled) return null
+        val copy = try {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        } catch (_: Throwable) {
+            null
+        }
+        return create(copy ?: bitmap)
+    }
 }

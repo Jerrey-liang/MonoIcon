@@ -9,11 +9,6 @@
 # Hook utilities
 -keep class com.jerrey.monoicon.hook.HookStats { *; }
 
-# Core types
--keep class com.jerrey.monoicon.core.Result { *; }
--keep class com.jerrey.monoicon.core.Result$Success { *; }
--keep class com.jerrey.monoicon.core.Result$Error { *; }
-
 # Logging
 -keep class com.jerrey.monoicon.logging.** { *; }
 

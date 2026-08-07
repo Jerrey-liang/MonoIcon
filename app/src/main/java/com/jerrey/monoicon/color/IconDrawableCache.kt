@@ -1,10 +1,10 @@
 package com.jerrey.monoicon.color
 
 import android.graphics.drawable.Drawable
-import java.util.concurrent.ConcurrentHashMap
+import java.util.LinkedHashMap
 
 /**
- * Thread-safe in-memory cache storing raw APK [Drawable] references
+ * Thread-safe LRU cache storing raw APK [Drawable] references
  * for monochrome mask generation.
  *
  * Populated at [com.miui.home.icon.IconProvider.getActivityIcon] hook time
@@ -13,36 +13,59 @@ import java.util.concurrent.ConcurrentHashMap
  * [com.miui.home.common.drawable.LayerAdaptiveIconDrawable]
  * containing a monochrome mask.
  *
- * Consumed in [com.jerrey.monoicon.hook.IconThemeHook.processIconReplacement]
- * to bypass the pre-generated HyperOS mask and feed the original drawable
- * into [com.jerrey.monoicon.image.DrawableConverter.toBitmap].
+ * Consumed in [com.jerrey.monoicon.mask.MaskGenerator] to bypass the
+ * pre-generated HyperOS mask and feed the original drawable into the
+ * luminance pipeline.
  *
  * ## Key format
- * `"pkg/full.ClassName"` — matches [IconColorCache] and [resolveIdentity].
+ * `"pkg/full.ClassName"` — matches [IconColorCache] and IdentityResolver.
  *
  * ## Drawable lifecycle
  * Stored drawables are NOT cloned. They are references to the original
- * AdaptiveIconDrawable obtained from [android.content.pm.LauncherActivityInfo.getIcon].
+ * AdaptiveIconDrawable obtained from [android.content.pm.LauncherActivityInfo.getIcon],
+ * isolated via constantState.newDrawable().mutate() at capture time.
  * The launcher retains ownership; we only reference them for rendering.
+ *
+ * ## Capacity (Phase 3.18-D)
+ * LRU eviction at [MAX_ENTRIES] (access-order [LinkedHashMap], all access
+ * synchronized). Evicted entries are re-captured on the next app icon
+ * load (Hook 7) — no correctness impact.
  */
 object IconDrawableCache {
 
-    private val store = ConcurrentHashMap<String, Drawable>()
+    /** Maximum retained raw drawables (LRU eviction beyond this). */
+    private const val MAX_ENTRIES = 256
 
-    /** Number of cached entries. */
-    val size: Int get() = store.size
+    private val lock = Any()
 
-    fun put(identity: String, drawable: Drawable) {
-        store[identity] = drawable
+    private val store = object : LinkedHashMap<String, Drawable>(MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Drawable>?): Boolean {
+            return size > MAX_ENTRIES
+        }
     }
 
-    fun get(identity: String): Drawable? = store[identity]
+    /** Number of cached entries. */
+    val size: Int get() = synchronized(lock) { store.size }
+
+    fun put(identity: String, drawable: Drawable) {
+        synchronized(lock) {
+            store[identity] = drawable
+        }
+    }
+
+    fun get(identity: String): Drawable? = synchronized(lock) {
+        store[identity]
+    }
 
     fun remove(identity: String) {
-        store.remove(identity)
+        synchronized(lock) {
+            store.remove(identity)
+        }
     }
 
     fun clear() {
-        store.clear()
+        synchronized(lock) {
+            store.clear()
+        }
     }
 }
