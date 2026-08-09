@@ -37,6 +37,7 @@ object ConfigManager {
     private const val TAG = "MonoIcon.Config"
     private const val PREFS_NAME = "monoicon_config"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_THEME_ID = "theme_id"
 
     /** Launcher-side refresh cadence (ms). */
     private const val REFRESH_INTERVAL_MS = 1_000L
@@ -154,5 +155,51 @@ object ConfigManager {
         remotePrefsProvider?.invoke()?.getBoolean(KEY_ENABLED, true) ?: true
     } catch (t: Throwable) {
         true
+    }
+
+    // ── Theme ID (Phase 5) ─────────────────────────────────────────────
+
+    /** Launcher side: reads the persisted theme ID (defaults to pixel_default). */
+    fun getThemeId(): String = try {
+        remotePrefsProvider?.invoke()?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
+    } catch (t: Throwable) {
+        "pixel_default"
+    }
+
+    /** UI side: reads the theme ID from remote preferences (falls back to shared prefs). */
+    fun getThemeIdFromUi(): String {
+        val service = remoteService
+        return if (service != null) {
+            try {
+                service.getRemotePreferences(PREFS_NAME).getString(KEY_THEME_ID, "pixel_default")
+                    ?: "pixel_default"
+            } catch (t: Throwable) {
+                fallbackPrefs?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
+            }
+        } else {
+            fallbackPrefs?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
+        }
+    }
+
+    /** Writes the theme ID via the framework remote preferences. */
+    fun setThemeId(themeId: String) {
+        try {
+            val service = remoteService
+            if (service != null) {
+                service.getRemotePreferences(PREFS_NAME)
+                    .edit()
+                    .putString(KEY_THEME_ID, themeId)
+                    .apply()
+                android.util.Log.i(TAG, "setThemeId=$themeId (remote)")
+            } else {
+                fallbackPrefs?.edit()?.putString(KEY_THEME_ID, themeId)?.apply()
+                android.util.Log.i(TAG, "setThemeId=$themeId (fallback prefs)")
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setThemeId failed: ${t.message}")
+            try {
+                fallbackPrefs?.edit()?.putString(KEY_THEME_ID, themeId)?.apply()
+            } catch (_: Throwable) { }
+        }
     }
 }

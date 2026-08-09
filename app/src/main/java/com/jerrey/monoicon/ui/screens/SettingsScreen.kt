@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -23,19 +24,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.theme.ThemeManager
 
 /**
- * MonoIcon settings screen (Phase 4.1).
+ * MonoIcon settings screen (Phase 5).
  *
- * The single master switch writes the `enabled` flag to SharedPreferences,
- * which the launcher hook process reads via getRemotePreferences. Changing
- * the switch takes effect in the launcher within one refresh interval
- * (~1s); already-replaced drawables refresh on the next launcher bind, so
- * a launcher restart is recommended for an immediate full apply.
+ * Master ON/OFF switch + theme selector. Both write the module's remote
+ * preferences via [ConfigManager]; the launcher hook process picks up
+ * changes within one refresh interval or on next launcher start.
  */
 @Composable
 fun SettingsScreen() {
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
+    var selectedTheme by remember { mutableStateOf(ThemeManager.currentThemeId()) }
     var showRestartHint by remember { mutableStateOf(false) }
 
     Scaffold { paddingValues ->
@@ -52,7 +53,8 @@ fun SettingsScreen() {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Status card
+            // ── Master switch ──────────────────────────────────────────
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -82,22 +84,65 @@ fun SettingsScreen() {
                             }
                         )
                     }
-
-                    if (showRestartHint) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Configuration changed. Restart HyperOS Launcher " +
-                                    "to apply completely.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Info card
+            // ── Theme selector (Phase 5) ─────────────────────────────────
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Theme",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    ThemeManager.availableThemes.forEach { theme ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedTheme == theme.id,
+                                onClick = {
+                                    selectedTheme = theme.id
+                                    showRestartHint = true
+                                    ThemeManager.setTheme(theme.id)
+                                }
+                            )
+                            Text(
+                                text = theme.name,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Restart hint ───────────────────────────────────────────
+
+            if (showRestartHint) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Configuration changed. Restart HyperOS Launcher " +
+                            "to apply completely.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Info card ──────────────────────────────────────────────
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(

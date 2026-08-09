@@ -21,7 +21,8 @@ import com.jerrey.monoicon.logging.LogcatLogger
 import com.jerrey.monoicon.logging.logd
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logw
-import com.jerrey.monoicon.mask.MaskGenerator
+import com.jerrey.monoicon.theme.IconContext
+import com.jerrey.monoicon.theme.ThemeManager
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedModule
@@ -95,6 +96,8 @@ class IconThemeHook : XposedModule() {
         // Phase 4.1: load configuration before installing hooks — a disabled
         // module installs nothing and leaves the launcher untouched.
         ConfigManager.initForHooks(this)
+        // Phase 5: initialize ThemeManager (reads theme_id from remote prefs)
+        ThemeManager.initForHooks(this)
         val enabled = ConfigManager.isEnabled()
         android.util.Log.i(TAG, "MonoIcon enabled=$enabled — ${if (enabled) "installing hooks" else "skip hooks"}")
 
@@ -320,8 +323,8 @@ class IconThemeHook : XposedModule() {
                 return chain.proceed()
             }
 
-            // Phase 3.18-C: unified mask pipeline (RAW_APK > FG > LUMA, cached)
-            val result = MaskGenerator.generate(d, identity, MaskGenerator.Priority.FOLDER)
+            // Phase 5: dispatch via ThemeManager (RAW_FIRST preserved for folder previews)
+            val result = ThemeManager.currentTheme.generateMask(d, identity, IconContext.FOLDER_PREVIEW)
             val mask = result.mask
             if (mask == null) {
                 logw(TAG_FOLDER,
@@ -741,8 +744,8 @@ class IconThemeHook : XposedModule() {
         // Phase 3.12-A: 在 mask 生成之前提取原始图标颜色
         extractOriginalIconColor(d, identity)
 
-        // Phase 3.18-C: unified mask pipeline (NATIVE > RAW_APK > FG > LUMA, cached)
-        val result = MaskGenerator.generate(d, identity, MaskGenerator.Priority.DESKTOP)
+        // Phase 5: dispatch via ThemeManager (Phase 4 behavior preserved by PixelDefaultTheme)
+        val result = ThemeManager.currentTheme.generateMask(d, identity, IconContext.DESKTOP)
         val maskBitmap = result.mask ?: return null
 
         // Phase 3.16: log mask bitmap quality

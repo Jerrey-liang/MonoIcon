@@ -159,7 +159,11 @@ object MaskGenerator {
         if (mask == null) return GenerateResult(null, source, rawUsed, cacheHit = false)
 
         // Cache lookup — fingerprint over the source render (or the mask itself)
-        val cacheKey = monochromeCache.buildKey(identity, keyBitmap ?: mask, source)
+        // Phase 5: buildKey requires themeId|context| prefix; legacy path
+        // passes sentinel values (replaced by theme strategies in Step 3).
+        val cacheKey = monochromeCache.buildKey(
+            "default", if (priority == Priority.DESKTOP) "desktop" else "folder",
+            identity, keyBitmap ?: mask, source)
         if (cacheKey != null) {
             val cached = monochromeCache.get(cacheKey)
             if (cached != null) {

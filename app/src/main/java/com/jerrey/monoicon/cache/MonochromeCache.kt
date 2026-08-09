@@ -60,21 +60,25 @@ class MonochromeCache(
      * @return Cache key, or `null` if [identity] is blank or [bitmap] is recycled.
      */
     /**
-     * Builds a stable cache key from component identity, bitmap content,
-     * and icon source type.
+     * Builds a stable cache key from theme ID, context, component identity,
+     * bitmap content, and icon source type (Phase 5).
      *
-     * Format: `"$identity|${w}x${h}@$fp|$src"`
+     * Format: `"$themeId|$context|$identity|${w}x${h}@$fp|$src"`
      *
-     * Source suffix prevents cache collisions between different icon sources
-     * (e.g. NATIVE monochrome vs LUMINANCE fallback for the same component).
+     * Theme ID and context prefix prevent cache collisions between different
+     * themes applied to the same component (e.g. Pixel Default vs Pure Mono
+     * produce different masks for the same icon).
      *
+     * @param themeId  Theme identifier (e.g. "pixel_default").
+     * @param context  Rendering context ("desktop" / "folder").
      * @param identity Resolved component identity.
-     * @param bitmap The key bitmap for the fingerprint — the source render
-     *               for NATIVE/RAW paths, the generated mask for FG/LUMA paths.
-     * @param source Source type: [SOURCE_NATIVE], [SOURCE_FOREGROUND], or [SOURCE_LUMINANCE].
+     * @param bitmap   The key bitmap for the fingerprint — the source render
+     *                 for NATIVE/RAW paths, the generated mask for FG/LUMA paths.
+     * @param source   Source type: SOURCE_NATIVE, SOURCE_FOREGROUND or SOURCE_LUMINANCE.
      * @return Cache key, or `null` if identity/bitmap invalid.
      */
-    fun buildKey(identity: String?, bitmap: Bitmap?, source: Int): String? {
+    fun buildKey(themeId: String, context: String,
+                 identity: String?, bitmap: Bitmap?, source: Int): String? {
         if (identity.isNullOrBlank()) return null
         if (bitmap == null || bitmap.isRecycled) return null
         val w = bitmap.width
@@ -85,7 +89,7 @@ class MonochromeCache(
             SOURCE_FOREGROUND -> "FG"
             else -> "LUMA"
         }
-        return "$identity|${w}x${h}@$fp|$src"
+        return "$themeId|$context|$identity|${w}x${h}@$fp|$src"
     }
 
     // ── Source constants (synced with IconThemeHook / MaskGenerator) ───
