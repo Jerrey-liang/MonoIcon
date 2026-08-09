@@ -1,10 +1,12 @@
 package com.jerrey.monoicon.theme
 
 import android.graphics.drawable.Drawable
+import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.mask.MaskGenerator
+import com.jerrey.monoicon.theme.render.IconRenderResult
 
 /**
- * Pluggable icon theme (Phase 5).
+ * Pluggable icon theme (Phase 5 / Phase 6.0).
  *
  * Each theme defines how monochrome masks are generated and how
  * dominant colors are extracted. Themes are data-driven and do not
@@ -54,4 +56,33 @@ interface IconTheme {
      * @return ARGB color int.
      */
     fun extractColor(drawable: Drawable, identity: String): Int
+
+    /**
+     * Phase 6.0: combined mask + color generation.
+     *
+     * Default implementation calls [generateMask] followed by color
+     * lookup. The color is read from [IconColorCache] (populated by
+     * the early extraction pipeline — Hook 7 / extractOriginalIconColor)
+     * to avoid re-extracting from a HyperOS-processed drawable whose
+     * colors may already be destroyed. Falls back to [extractColor] on
+     * cache miss.
+     *
+     * Pure Mono theme (static black) naturally works through this path:
+     * its [extractColor] always returns 0xFF000000, producing a
+     * black-tinted result identical to Phase 5.
+     */
+    fun generateIcon(
+        drawable: Drawable,
+        identity: String?,
+        context: IconContext,
+    ): IconRenderResult {
+        val maskResult = generateMask(drawable, identity, context)
+        val cachedColor = if (identity != null) IconColorCache.get(identity) else null
+        val color = when {
+            cachedColor != null -> cachedColor
+            identity != null -> extractColor(drawable, identity)
+            else -> 0
+        }
+        return IconRenderResult(maskResult, color)
+    }
 }

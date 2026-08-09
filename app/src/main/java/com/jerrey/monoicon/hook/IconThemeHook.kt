@@ -23,6 +23,7 @@ import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logw
 import com.jerrey.monoicon.theme.IconContext
 import com.jerrey.monoicon.theme.ThemeManager
+import com.jerrey.monoicon.theme.render.ColoredMonochromeDrawable
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedModule
@@ -163,7 +164,7 @@ class IconThemeHook : XposedModule() {
                 ensurePackageChangeReceiver(chain.thisObject)
 
                 // Phase 2.7: 生成逻辑整体 try/catch，任何异常回落原始 drawable
-                val replacement = try {
+                val replacementPair = try {
                     processIconReplacement(chain)
                 } catch (t: Throwable) {
                     // 绝不 crash launcher：记录后回落原始行为
@@ -171,15 +172,15 @@ class IconThemeHook : XposedModule() {
                     null
                 }
 
-                val result = if (replacement != null) {
+                val result = if (replacementPair != null) {
                     val b = chain.getArg(1) as? Bitmap
-                    chain.proceed(arrayOf<Any>(replacement, b ?: replacement.bitmap))
+                    chain.proceed(arrayOf<Any>(replacementPair.first, b ?: replacementPair.second))
                 } else {
                     chain.proceed()
                 }
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
                 // Phase 2.7: 降噪 — 仅记录替换与否，完整描述交给 HookStats 统计
-                logd(TAG, "[setIconDrawable] replaced=${replacement != null} cost=${elapsed}ms")
+                logd(TAG, "[setIconDrawable] replaced=${replacementPair != null} cost=${elapsed}ms")
                 stats.record("setIconDrawable", elapsed)
                 result
             }
@@ -323,9 +324,9 @@ class IconThemeHook : XposedModule() {
                 return chain.proceed()
             }
 
-            // Phase 5: dispatch via ThemeManager (RAW_FIRST preserved for folder previews)
-            val result = ThemeManager.currentTheme.generateMask(d, identity, IconContext.FOLDER_PREVIEW)
-            val mask = result.mask
+            // Phase 6.0: combined mask + color (IconColorCache hit → app-specific hue)
+            val iconResult = ThemeManager.currentTheme.generateIcon(d, identity, IconContext.FOLDER_PREVIEW)
+            val mask = iconResult.mask
             if (mask == null) {
                 logw(TAG_FOLDER,
                     "[${logPrefix}Fail] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
@@ -333,20 +334,17 @@ class IconThemeHook : XposedModule() {
                 return chain.proceed()
             }
 
+            // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
             // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
-            val replacement = MonochromeGenerator.createForLauncher(mask)
-            if (replacement == null) {
-                logw(TAG_FOLDER,
-                    "[${logPrefix}Fail] t=$tMs vh=@${Integer.toHexString(viewHash)} reason=replacement_null")
-                return chain.proceed()
-            }
+            val safeMask = mask.copy(Bitmap.Config.ARGB_8888, false) ?: mask
+            val replacement = ColoredMonochromeDrawable(safeMask, iconResult.color)
 
             logd(TAG_FOLDER,
                 "[${logPrefix}Replace] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
                 "identity=${identity ?: "NULL"} " +
                 "original=$dClass " +
                 "replacement=${replacement.javaClass.simpleName} " +
-                "rawCached=${result.rawUsed} " +
+                "rawCached=${iconResult.rawUsed} " +
                 "maskW=${mask.width} maskH=${mask.height}")
             return chain.proceed(arrayOf<Any>(replacement))
         } catch (t: Throwable) {
@@ -734,25 +732,27 @@ class IconThemeHook : XposedModule() {
         } catch (_: Throwable) { }
     }
 
-    private fun processIconReplacement(chain: Chain): BitmapDrawable? {
+    private fun processIconReplacement(chain: Chain): Pair<Drawable, Bitmap>? {
         val d = chain.getArg(0) as? Drawable ?: return null
         val identity = IdentityResolver.resolve(chain.thisObject)
 
         // Phase 3.16: Mask quality diagnostics — log drawable structure before conversion
         diagMaskInput(d, identity)
 
-        // Phase 3.12-A: 在 mask 生成之前提取原始图标颜色
+        // Phase 3.12-A: 在 mask 生成之前提取原始图标颜色 → IconColorCache
         extractOriginalIconColor(d, identity)
 
-        // Phase 5: dispatch via ThemeManager (Phase 4 behavior preserved by PixelDefaultTheme)
-        val result = ThemeManager.currentTheme.generateMask(d, identity, IconContext.DESKTOP)
-        val maskBitmap = result.mask ?: return null
+        // Phase 6.0: combined mask + color (IconColorCache hit → app-specific hue)
+        val iconResult = ThemeManager.currentTheme.generateIcon(d, identity, IconContext.DESKTOP)
+        val maskBitmap = iconResult.mask ?: return null
 
         // Phase 3.16: log mask bitmap quality
-        diagMaskRender(maskBitmap, identity, result.source)
+        diagMaskRender(maskBitmap, identity, iconResult.source)
 
+        // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
         // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
-        return MonochromeGenerator.createForLauncher(maskBitmap)
+        val safeMask = maskBitmap.copy(Bitmap.Config.ARGB_8888, false) ?: maskBitmap
+        return Pair(ColoredMonochromeDrawable(safeMask, iconResult.color), safeMask)
     }
 
     // ═══════════════════════════════════════════════════════════════
