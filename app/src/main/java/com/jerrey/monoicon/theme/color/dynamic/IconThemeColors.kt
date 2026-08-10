@@ -1,13 +1,14 @@
 package com.jerrey.monoicon.theme.color.dynamic
 
 /**
- * Paired icon theme colors matching Pixel Launcher's
- * `themed_icon_background_color` + `themed_icon_color` (Phase 6.2).
+ * Paired icon theme colors (Phase 6.3).
  *
- * @param background  AdaptiveIconDrawable background fill (ColorDrawable color).
- * @param foreground  Monochrome icon tint.
+ * @param foreground  Monochrome icon tint (themed_icon_color).
+ * @param background  AdaptiveIconDrawable background fill (themed_icon_background_color).
+ * @param palette     Full Monet tonal palette for advanced rendering (Phase 6.4+).
  */
 data class IconThemeColors(
-    val background: Int,
     val foreground: Int,
+    val background: Int,
+    val palette: MonetPalette,
 )

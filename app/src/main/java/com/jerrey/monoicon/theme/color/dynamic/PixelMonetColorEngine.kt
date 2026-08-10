@@ -5,7 +5,6 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
-import android.graphics.Color
 import android.os.SystemClock
 import com.jerrey.monoicon.logging.logd
 
@@ -40,10 +39,17 @@ object PixelMonetColorEngine {
     private const val TAG = "MonoIcon.Monet"
     private const val CACHE_TTL_MS = 60_000L
 
-    /** Safe neutral when wallpaper / seed is unavailable. */
+    /** Safe neutral when wallpaper / seed is unavailable (no HCT dependency). */
     private val FALLBACK = IconThemeColors(
+        foreground = 0xFF3C4043.toInt(),
         background = 0xFFF5F5F5.toInt(),
-        foreground = 0xFF3C4043.toInt()
+        palette = MonetPalette(
+            TonePalette.generate(0xFF4A6D8C.toInt()),
+            TonePalette.generate(0xFF4A6D8C.toInt()),
+            TonePalette.generate(0xFF4A6D8C.toInt()),
+            TonePalette.generate(0xFF4A6D8C.toInt()),
+            TonePalette.generate(0xFF4A6D8C.toInt()),
+        )
     )
 
     @Volatile private var cachedColors: IconThemeColors = FALLBACK
@@ -96,65 +102,23 @@ object PixelMonetColorEngine {
                 null
             } ?: return FALLBACK
 
-            // Primary seed color (Monet accent1 seed)
-            val seed = wallpaperColors.primaryColor?.toArgb() ?: return FALLBACK
-
+            // Phase 6.3: seed selection with chroma floor
+            val seed = WallpaperSeedSelector.select(wallpaperColors)
+            val palette = MonetPalette.generate(seed)
             val isDark = isSystemDark()
 
-            val fgTone = if (isDark) 80f else 40f
-            val bgTone = if (isDark) 10f else 95f
+            val fgToneIdx = if (isDark) 8 else 4    // tone 80 / tone 40
+            val bgToneIdx = if (isDark) 1 else 11   // tone 10 / tone 95
 
-            logd(TAG, "seed=0x${Integer.toHexString(seed)} fgTone=$fgTone bgTone=$bgTone dark=$isDark")
+            logd(TAG, "seed=0x${Integer.toHexString(seed)} fgTone=$fgToneIdx bgTone=$bgToneIdx dark=$isDark")
             IconThemeColors(
-                background = generateTone(seed, bgTone),
-                foreground = generateTone(seed, fgTone)
+                foreground = palette.accent1[fgToneIdx],
+                background = palette.accent1[bgToneIdx],
+                palette = palette
             )
         } catch (t: Throwable) {
             FALLBACK
         }
-    }
-
-    /**
-     * Approximates a Monet tonal shade via linear RGB interpolation.
-     *
-     * @param seedColor  ARGB seed (primary color from wallpaper).
-     * @param tone       0 = black, 100 = white (perceptual lightness).
-     */
-    private fun generateTone(seedColor: Int, tone: Float): Int {
-        if (tone <= 0f) return Color.BLACK
-        if (tone >= 100f) return Color.WHITE
-
-        val r = Color.red(seedColor)
-        val g = Color.green(seedColor)
-        val b = Color.blue(seedColor)
-
-        // Convert tone (perceptual) to approximate sRGB luminance
-        val targetLum = tone * 2.55f  // tone 0→0, tone 100→255
-        val seedLum = (0.299f * r + 0.587f * g + 0.114f * b)
-
-        val tr: Int
-        val tg: Int
-        val tb: Int
-
-        if (targetLum > seedLum) {
-            // Lighten: blend toward white
-            val ratio = ((targetLum - seedLum) / (255f - seedLum)).coerceIn(0f, 1f)
-            tr = (r + (255 - r) * ratio).toInt()
-            tg = (g + (255 - g) * ratio).toInt()
-            tb = (b + (255 - b) * ratio).toInt()
-        } else {
-            // Darken: blend toward black
-            val ratio = ((seedLum - targetLum) / seedLum).coerceIn(0f, 1f)
-            tr = (r * (1f - ratio)).toInt()
-            tg = (g * (1f - ratio)).toInt()
-            tb = (b * (1f - ratio)).toInt()
-        }
-
-        return Color.rgb(
-            tr.coerceIn(0, 255),
-            tg.coerceIn(0, 255),
-            tb.coerceIn(0, 255)
-        )
     }
 
     private fun isSystemDark(): Boolean = try {

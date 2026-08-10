@@ -5,6 +5,7 @@ import android.graphics.drawable.Drawable
 import com.jerrey.monoicon.theme.color.PixelColorStrategy
 import com.jerrey.monoicon.theme.color.StaticColorStrategy
 import com.jerrey.monoicon.theme.mask.NativeFirstMaskStrategy
+import com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy
 import com.jerrey.monoicon.theme.mask.RawFirstMaskStrategy
 import com.jerrey.monoicon.mask.MaskGenerator
 
@@ -23,13 +24,17 @@ object BuiltinThemes {
     private val pixelFolderMask = RawFirstMaskStrategy()
     private val pixelColor = PixelColorStrategy()
 
-    // ── Theme 1: Pixel Default (100% equivalent to Phase 4) ────────────
+    // ── Theme 1: Pixel Default (Phase 6.3: unified Pixel strategy) ─────
+
+    /** Shared Pixel Launcher monochrome mask strategy (unified desktop + folder). */
+    private val pixelMonoMask = PixelMonochromeMaskStrategy()
 
     /**
-     * Pixel Default — identical behavior to Phase 4.
+     * Pixel Default — matches Pixel Launcher's monochrome icon pipeline.
      *
-     * Mask: desktop NATIVE > RAW > FG > LUMA, folder RAW > FG > LUMA.
-     * Color: Pixel Launcher HSV dominant hue algorithm.
+     * Mask: unified PixelMonochromeMaskStrategy (NATIVE > LAB luminance,
+     * no desktop/folder distinction — same as Pixel Launcher).
+     * Color: Pixel Launcher dynamic color (Phase 6.2).
      */
     val PIXEL_DEFAULT = ThemeDefinition(
         id = "pixel_default",

@@ -24,8 +24,8 @@ class NativeFirstMaskStrategy : MaskStrategy {
     private val TAG = "MonoIcon.Hook"
     private val TAG_MASK = "MonoIcon.Mask"
 
-    private lateinit var themeId: String
-    private lateinit var contextStr: String
+    private var themeId: String = ""
+    private var contextStr: String = ""
 
     override fun configureCache(themeId: String, context: String) {
         this.themeId = themeId

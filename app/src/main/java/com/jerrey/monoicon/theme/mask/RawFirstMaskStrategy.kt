@@ -19,8 +19,8 @@ import com.jerrey.monoicon.mask.MaskGenerator
  */
 class RawFirstMaskStrategy : MaskStrategy {
 
-    private lateinit var themeId: String
-    private lateinit var contextStr: String
+    private var themeId: String = ""
+    private var contextStr: String = ""
 
     override fun configureCache(themeId: String, context: String) {
         this.themeId = themeId

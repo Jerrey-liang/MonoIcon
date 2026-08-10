@@ -77,8 +77,17 @@ interface IconTheme {
         identity: String?,
         context: IconContext,
     ): IconRenderResult {
-        val maskResult = generateMask(drawable, identity, context)
-        val color = if (identity != null) extractColor(drawable, identity) else 0
-        return IconRenderResult(maskResult, color)
+        return try {
+            val maskResult = generateMask(drawable, identity, context)
+            val color = if (identity != null) {
+                try { extractColor(drawable, identity) } catch (_: Throwable) { 0 }
+            } else 0
+            IconRenderResult(maskResult, color)
+        } catch (_: Throwable) {
+            // Any exception in mask generation or color extraction must not
+            // propagate to the hook layer — return null mask → hook passes
+            // through the original drawable gracefully.
+            IconRenderResult(MaskGenerator.GenerateResult(null, 3, false, false), 0)
+        }
     }
 }

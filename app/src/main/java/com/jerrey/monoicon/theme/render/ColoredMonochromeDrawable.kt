@@ -11,27 +11,29 @@ import android.content.res.ColorStateList
 
 /**
  * A [Drawable] that renders an alpha-mask [Bitmap] filled with a
- * fixed ARGB color (Phase 6.0).
+ * fixed ARGB color (Phase 6.0 / 6.3).
  *
  * ## Rendering (pixel-bake)
  * Each pixel's RGB is replaced with [color] while alpha is kept
- * from the mask. This is done once at construction by copying the
- * pixel array — the resulting tinted bitmap is drawn directly with
- * no per-frame PorterDuff overhead.
+ * from the mask. The tinted bitmap is drawn directly.
+ *
+ * ## [ConstantState] support
+ * HyperOS [FolderPreviewIconView.refreshIconDrawable] copies the
+ * drawable via [getConstantState] → [newDrawable]. This drawable
+ * provides a full [ConstantState] so folder icon copies are
+ * correctly cloned rather than producing null → invisible icons.
  *
  * ## Launcher tint resistance
- * The HyperOS launcher may call [setTint] / [setTintList] after
- * [setIconDrawable]. This drawable ignores those calls — the color
- * baked into the bitmap at construction time is always rendered.
- *
- * ## Bitmap ownership
- * The tinted bitmap is a **new** [Bitmap] created in the constructor.
- * The caller's mask bitmap is NOT retained.
+ * [setTintList] is intentionally a no-op.
  */
 class ColoredMonochromeDrawable(
     mask: Bitmap,
     color: Int,
 ) : Drawable() {
+
+    /** The source mask (retained for ConstantState copy). */
+    private val sourceMask: Bitmap = mask
+    private val sourceColor: Int = color
 
     /** Pre-tinted bitmap — mask alpha + color RGB. */
     private val bitmap: Bitmap
@@ -83,5 +85,24 @@ class ColoredMonochromeDrawable(
         // no-op — the baked color controls all rendering
     }
 
+    override fun getIntrinsicWidth(): Int = bitmap.width
+
+    override fun getIntrinsicHeight(): Int = bitmap.height
+
+    override fun getConstantState(): ConstantState = ColoredMonoState(sourceMask, sourceColor)
+
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+    /**
+     * [ConstantState] for [ColoredMonochromeDrawable].
+     * [newDrawable] creates a fresh pre-tinted bitmap copy so each
+     * cloned drawable is independent (same behavior as BitmapDrawable).
+     */
+    private class ColoredMonoState(
+        private val mask: Bitmap,
+        private val color: Int,
+    ) : ConstantState() {
+        override fun newDrawable(): Drawable = ColoredMonochromeDrawable(mask, color)
+        override fun getChangingConfigurations(): Int = 0
+    }
 }
