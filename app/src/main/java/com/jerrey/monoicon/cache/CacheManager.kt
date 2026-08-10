@@ -3,6 +3,7 @@ package com.jerrey.monoicon.cache
 import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.identity.IdentityResolver
+import com.jerrey.monoicon.theme.color.dynamic.SystemMaterialColorProvider
 
 /**
  * Cache lifecycle management (Phase 4.0-A).
@@ -57,6 +58,17 @@ object CacheManager {
         IconColorCache.clear()
         MonochromeCache.shared.clear()
         IdentityResolver.clearViews()
+        invalidateDynamicColor()
+    }
+
+    /**
+     * Phase 6.1: forces the dynamic color provider to re-read the system
+     * palette on the next call. Called on theme switch or configuration
+     * change (light/dark toggle) so the icon color updates immediately
+     * without waiting for the internal 60s TTL.
+     */
+    fun invalidateDynamicColor() {
+        SystemMaterialColorProvider.invalidate()
     }
 
     /** Current cache occupancy. */
