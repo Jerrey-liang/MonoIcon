@@ -3,7 +3,7 @@ package com.jerrey.monoicon.cache
 import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.identity.IdentityResolver
-import com.jerrey.monoicon.theme.color.dynamic.SystemMaterialColorProvider
+import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 
 /**
  * Cache lifecycle management (Phase 4.0-A).
@@ -68,7 +68,7 @@ object CacheManager {
      * without waiting for the internal 60s TTL.
      */
     fun invalidateDynamicColor() {
-        SystemMaterialColorProvider.invalidate()
+        PixelMonetColorEngine.invalidate()
     }
 
     /** Current cache occupancy. */

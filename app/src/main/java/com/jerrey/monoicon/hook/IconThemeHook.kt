@@ -23,6 +23,7 @@ import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logw
 import com.jerrey.monoicon.theme.IconContext
 import com.jerrey.monoicon.theme.ThemeManager
+import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.theme.render.ColoredMonochromeDrawable
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
@@ -247,6 +248,8 @@ class IconThemeHook : XposedModule() {
             if (packageReceiverRegistered) return
             try {
                 PackageChangeReceiver.register(context)
+                // Phase 6.2: lazy Monet engine init (same first-View pattern)
+                PixelMonetColorEngine.init(context)
                 packageReceiverRegistered = true
             } catch (_: Throwable) {
                 // isolation — registration must never crash the launcher
