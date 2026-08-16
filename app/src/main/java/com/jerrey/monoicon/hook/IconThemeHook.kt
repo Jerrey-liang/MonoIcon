@@ -348,6 +348,20 @@ class IconThemeHook : XposedModule() {
             val d = chain.getArg(0) as? Drawable
             val dClass = d?.javaClass?.simpleName ?: "null"
 
+            // Fix (Phase 3.17-class regression, Phase 6.5): recycled
+            // folder-preview views re-bind with the ColoredMonochromeDrawable
+            // we installed on the previous pass. Re-processing an
+            // already-monochrome icon collapses it (the luminance mask of a
+            // mono glyph is ~0 alpha → invisible folder icons, e.g.
+            // googlequicksearchbox / kernelsu). Keep the existing
+            // replacement unchanged — the view already shows the correct icon.
+            if (d is ColoredMonochromeDrawable) {
+                logd(TAG_FOLDER,
+                    "[${logPrefix}Keep] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
+                    "dClass=$dClass already_mono")
+                return chain.proceed()
+            }
+
             // Phase 3.17: try mBuddyInfo → drawable constantState → viewIdentityMap (from Hook 9/10)
             val identity = IdentityResolver.resolveView(chain.thisObject)
                 ?: d?.let { IdentityResolver.resolveDrawable(it) }
@@ -1011,6 +1025,16 @@ class IconThemeHook : XposedModule() {
 
     private fun processIconReplacement(chain: Chain): Pair<Drawable, Bitmap>? {
         val d = chain.getArg(0) as? Drawable ?: return null
+
+        // Fix (Phase 6.5): some launcher re-set flows pass back the
+        // ColoredMonochromeDrawable we installed earlier. Re-generating a
+        // mask from an already-monochrome drawable degrades it; keep the
+        // existing replacement unchanged (same as the folder path).
+        if (d is ColoredMonochromeDrawable) {
+            logd(TAG, "[setIconDrawable] already mono → keep existing replacement")
+            return null
+        }
+
         val identity = IdentityResolver.resolve(chain.thisObject)
 
         // Phase 3.16: Mask quality diagnostics — log drawable structure before conversion
