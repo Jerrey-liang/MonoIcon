@@ -20,14 +20,19 @@ object BuiltinThemes {
 
     // ── Strategy instances ─────────────────────────────────────────────
 
-    private val pixelDesktopMask = NativeFirstMaskStrategy()
-    private val pixelFolderMask = RawFirstMaskStrategy()
     private val pixelColor = PixelColorStrategy()
 
     // ── Theme 1: Pixel Default (Phase 6.3: unified Pixel strategy) ─────
 
-    /** Shared Pixel Launcher monochrome mask strategy (unified desktop + folder). */
-    private val pixelMonoMask = PixelMonochromeMaskStrategy()
+    /**
+     * Unified Pixel Launcher monochrome mask strategy. Desktop and folder
+     * use SEPARATE instances because [MaskStrategy.configureCache] bakes
+     * the context label into each strategy's cache-key prefix — sharing one
+     * instance across contexts would make desktop/folder cache entries
+     * collide.
+     */
+    private val pixelMonoDesktopMask = PixelMonochromeMaskStrategy()
+    private val pixelMonoFolderMask = PixelMonochromeMaskStrategy()
 
     /**
      * Pixel Default — matches Pixel Launcher's monochrome icon pipeline.
@@ -39,8 +44,8 @@ object BuiltinThemes {
     val PIXEL_DEFAULT = ThemeDefinition(
         id = "pixel_default",
         name = "Pixel Default",
-        desktopMask = pixelDesktopMask,
-        folderMask = pixelFolderMask,
+        desktopMask = pixelMonoDesktopMask,
+        folderMask = pixelMonoFolderMask,
         color = pixelColor,
     )
 
@@ -63,11 +68,11 @@ object BuiltinThemes {
     // ── Theme 3: High Contrast — placeholder for enhancement ────────────
 
     /**
-     * High Contrast — same mask pipeline as Pixel Default, placeholder
-     * for future contrast enhancement.
+     * High Contrast — placeholder for enhancement.
      *
-     * Mask: identical to Pixel Default (desktop NATIVE_FIRST, folder RAW_FIRST).
-     * Color: Pixel Launcher HSV (same as Pixel Default).
+     * Mask: the Phase 5 split (desktop NATIVE_FIRST, folder RAW_FIRST),
+     * kept as an alternative to the unified Pixel pipeline.
+     * Color: same dynamic color strategy as Pixel Default.
      */
     val HIGH_CONTRAST = ThemeDefinition(
         id = "high_contrast",
