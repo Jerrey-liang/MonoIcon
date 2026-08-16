@@ -151,6 +151,9 @@ class IconThemeHook : XposedModule() {
         HookRegistry.install("FolderIdentity", required = true) { installSetViewDrawable(cl) }
         // Kotlin synthetic lambda name — fragile across launcher builds → optional
         HookRegistry.install("FolderIdentity1x1", required = false) { installSetViewDrawable1x1(cl) }
+        // Fix: prevent resetBackAnim from reverting the desktop icon to the
+        // original colored icon (lambda$new$5 re-sets it from ShortcutInfo).
+        HookRegistry.install("ResetBackAnim", required = true) { installResetBackAnim(cl) }
         // Fix: mark bitmaps produced from our monochrome drawable so the
         // launch-animation render paths can recognize them.
         HookRegistry.install("DrawableToBitmap", required = false) { installDrawableToBitmapHook(cl) }
@@ -553,6 +556,38 @@ class IconThemeHook : XposedModule() {
                         "[ViewDrawable1x1Crash] t=$tMs error=${t.message}", t)
                     chain.proceed()
                 }
+            }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Hook: ShortcutIcon.resetBackAnim — prevent the "revert to colored"
+    //
+    // resetBackAnim's non-adaptive branch posts a runnable that re-sets the
+    // icon drawable from ShortcutInfo.getIconDrawable() — the ORIGINAL colored
+    // icon (see ShortcutIcon.lambda$new$5). It bypasses setIconDrawable (our
+    // Hook 5) via setOriginalDrawableAndRoundedDrawable when the icon is
+    // invisible. Skip resetBackAnim while our ColoredMonochromeDrawable is
+    // installed so the icon stays monochrome after the back-home animation.
+    // (Fixes: launching the same app repeatedly then exiting made the desktop
+    // icon revert to the app's original colored icon.)
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installResetBackAnim(cl: ClassLoader) {
+        val method = cl.loadClass("com.miui.home.launcher.ShortcutIcon")
+            .getDeclaredMethod("resetBackAnim")
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                try {
+                    val icon = chain.thisObject
+                    val drawable = icon.javaClass.getMethod("getIconDrawable").invoke(icon) as? Drawable
+                    if (drawable is ColoredMonochromeDrawable) {
+                        return@intercept null
+                    }
+                } catch (_: Throwable) { }
+                chain.proceed()
             }
     }
 
