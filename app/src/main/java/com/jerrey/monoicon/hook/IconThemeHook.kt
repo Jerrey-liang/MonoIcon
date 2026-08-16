@@ -323,12 +323,13 @@ class IconThemeHook : XposedModule() {
      * and Hook 8 (FolderIconPreviewContainer1X1$PreviewIconView).
      *
      * Phase 3.18-A: extracted from the two identical intercept bodies.
-     * Behavior identical to Phase 3.17:
      * - identity resolution order: mBuddyInfo → drawable constantState → viewIdentityMap.remove
-     * - mask priority: rawCached → toLuminanceMask(toRawBitmap(rawCached));
-     *   else toBitmap(d); else renderGenericToMask(d)
-     * - replacement via MonochromeGenerator.create; null-safe passthrough
-     * - debug log lines keep the "[Folder6X]/[Folder8X]" prefix via [logPrefix]
+     * - Phase 6.5: the drawable arrives unchanged from Hooks 9/10
+     *   (LayerAdaptiveIconDrawable, same as the desktop path), so folder
+     *   masks now come from the SAME PixelMonochromeMaskStrategy pipeline
+     *   as the MonoIcon-processed desktop icon.
+     * - already-mono inputs (recycled view re-binds) pass through untouched.
+     * - null-safe passthrough on failure.
      *
      * @param logPrefix Log tag prefix for debug output ("Folder6" / "Folder8").
      * @param statsName HookStats entry name; null disables stats recording (Hook 8).
@@ -418,17 +419,21 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
     // Hook 9: BaseFolderIconPreviewContainer2X2.setViewDrawable
     //
-    // Phase 3.17: Primary fix for folder preview lifecycle.
+    // Phase 3.17: identity pre-resolution for the folder preview lifecycle.
     // setViewDrawable receives IShortcutInfo BEFORE calling setImageDrawable,
     // but the internal sequence is:
     //   1. drawable.setColorFilter(iShortcutInfo.getColorFilter())
     //   2. folderPreviewIconView.setImageDrawable(drawable)  ← our hook 6/8 fires
     //   3. folderPreviewIconView.setMBuddyInfo(iShortcutInfo)
     //
-    // This hook intercepts BEFORE step 1 so we can resolve identity from
-    // iShortcutInfo directly. We replace the drawable argument with the
-    // raw APK AdaptiveIconDrawable from IconDrawableCache, which Hook 6/8
-    // then renders into a proper luminance mask.
+    // Phase 6.5: this hook now ONLY binds view→identity (the timing bridge
+    // for Hook 6/8) and passes the drawable through unchanged. Previously it
+    // swapped in the raw APK AdaptiveIconDrawable, which made the folder mask
+    // pipeline diverge from the desktop one (native monochrome layers, no
+    // launcher icon mask → square / washed-out / inconsistent folder icons).
+    // With the pass-through, folder and desktop consume the SAME
+    // LayerAdaptiveIconDrawable through the SAME PixelMonochromeMaskStrategy,
+    // so folder previews match the MonoIcon-processed desktop icon.
     // ═══════════════════════════════════════════════════════════════
 
     private fun installSetViewDrawable(cl: ClassLoader) {
@@ -457,29 +462,18 @@ class IconThemeHook : XposedModule() {
                     val d = chain.getArg(2) as? Drawable
                     val dClass = d?.javaClass?.simpleName ?: "null"
                     val identity = IdentityResolver.resolveShortcutInfo(si)
-                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
 
+                    // Phase 3.17: store identity for Hook 6/8 to find before
+                    // setMBuddyInfo runs. Drawable is passed through untouched
+                    // (Phase 6.5: unified desktop/folder mask pipeline).
+                    val view = chain.getArg(1)
+                    if (view != null && identity != null) {
+                        IdentityResolver.bindView(System.identityHashCode(view), identity)
+                    }
                     logd(TAG_FOLDER,
                         "[ViewDrawable] t=$tMs identity=${identity ?: "NULL"} " +
-                        "originalDrawable=$dClass rawCached=${rawCached != null} " +
-                        "cacheSize=${IconDrawableCache.size}")
+                        "originalDrawable=$dClass passThrough=true")
 
-                    if (rawCached != null && identity != null) {
-                        logd(TAG_FOLDER,
-                            "[ViewDrawableReplace] t=$tMs identity=$identity " +
-                            "replacing $dClass with ${rawCached.javaClass.simpleName}")
-                        // Phase 3.17: store identity for Hook 6/8 to find
-                        // (replacing drawable loses LayerAdaptiveIconDrawable constantState ComponentName)
-                        val view = chain.getArg(1)
-                        if (view != null) {
-                            IdentityResolver.bindView(System.identityHashCode(view), identity)
-                        }
-                        // Pass all three args, replacing only the drawable
-                        return@intercept chain.proceed(
-                            arrayOf<Any>(chain.getArg(0), chain.getArg(1), rawCached))
-                    }
-
-                    // Cache miss — let original through, Hook 6/8 will fallback
                     chain.proceed()
                 } catch (t: Throwable) {
                     loge(TAG_FOLDER,
@@ -498,11 +492,14 @@ class IconThemeHook : XposedModule() {
     // loadItemIcons$lambda$0 is the Kotlin synthetic that receives
     // IShortcutInfo (identity) + Drawable before refreshIconDrawable.
     //
+    // Phase 6.5: identity binding only, drawable passes through unchanged —
+    // same unified desktop/folder pipeline as Hook 9.
+    //
     // Signature: (IShortcutInfo, FolderIconPreviewContainer1X1, int, Drawable)
     //   arg 0 = IShortcutInfo → identity source
     //   arg 1 = container → to access mItemIcons[i]
     //   arg 2 = index i
-    //   arg 3 = Drawable → to replace
+    //   arg 3 = Drawable (passed through)
     // ═══════════════════════════════════════════════════════════════
 
     private fun installSetViewDrawable1x1(cl: ClassLoader) {
@@ -532,37 +529,29 @@ class IconThemeHook : XposedModule() {
                     val d = chain.getArg(3) as? Drawable
                     val dClass = d?.javaClass?.simpleName ?: "null"
                     val identity = IdentityResolver.resolveShortcutInfo(si)
-                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+
+                    // Phase 3.17: bind the target PreviewIconView's identity
+                    // for Hook 8; the drawable passes through unchanged
+                    // (Phase 6.5: unified desktop/folder mask pipeline).
+                    try {
+                        val itemIconsField = cachedItemIconsField ?: run {
+                            containerClass.getDeclaredField("mItemIcons").also {
+                                it.isAccessible = true
+                                cachedItemIconsField = it
+                            }
+                        }
+                        val itemIcons = itemIconsField.get(container) as? Array<*>
+                        if (itemIcons != null && idx < itemIcons.size) {
+                            val view = itemIcons[idx]
+                            if (view != null && identity != null) {
+                                IdentityResolver.bindView(System.identityHashCode(view), identity)
+                            }
+                        }
+                    } catch (_: Throwable) { }
 
                     logd(TAG_FOLDER,
                         "[ViewDrawable1x1] t=$tMs idx=$idx identity=${identity ?: "NULL"} " +
-                        "originalDrawable=$dClass rawCached=${rawCached != null} " +
-                        "cacheSize=${IconDrawableCache.size}")
-
-                    if (rawCached != null && identity != null) {
-                        // Get the target PreviewIconView to store identity
-                        try {
-                            val itemIconsField = cachedItemIconsField ?: run {
-                                containerClass.getDeclaredField("mItemIcons").also {
-                                    it.isAccessible = true
-                                    cachedItemIconsField = it
-                                }
-                            }
-                            val itemIcons = itemIconsField.get(container) as? Array<*>
-                            if (itemIcons != null && idx < itemIcons.size) {
-                                val view = itemIcons[idx]
-                                if (view != null) {
-                                    IdentityResolver.bindView(System.identityHashCode(view), identity)
-                                }
-                            }
-                        } catch (_: Throwable) { }
-
-                        logd(TAG_FOLDER,
-                            "[ViewDrawable1x1Replace] t=$tMs identity=$identity " +
-                            "replacing $dClass with ${rawCached.javaClass.simpleName}")
-                        return@intercept chain.proceed(
-                            arrayOf<Any>(chain.getArg(0), chain.getArg(1), chain.getArg(2), rawCached))
-                    }
+                        "originalDrawable=$dClass passThrough=true")
 
                     chain.proceed()
                 } catch (t: Throwable) {
