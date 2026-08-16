@@ -44,10 +44,12 @@ private fun relMs(): Long = (System.nanoTime() - bootTimeNs) / 1_000_000L
 /**
  * MonoIcon — Modern LSPosed API 101 module entry point.
  *
- * Hooks 6 production methods in HyperOS Launcher (com.miui.home) to
- * intercept the icon loading pipeline (Phase 3.18-E: diagnostic
- * MonochromeUtils hooks 1–4 live in [DebugHooks], default off). All hooks
- * use the official libxposed interceptor-chain API.
+ * Hooks 6 icon-pipeline methods in HyperOS Launcher (com.miui.home) to
+ * intercept the icon loading pipeline, plus 3 launch/back-home animation
+ * hooks that keep the mono icons uniformly scaled during the window
+ * animation (Phase 3.18-E: diagnostic MonochromeUtils hooks 1–4 live in
+ * [DebugHooks], default off). All hooks use the official libxposed
+ * interceptor-chain API.
  *
  * Pipeline (Phase 3.18): identity via [IdentityResolver], masks via
  * [MaskGenerator], caches via IconDrawableCache / IconColorCache /
@@ -70,6 +72,25 @@ class IconThemeHook : XposedModule() {
     /** Cached `getMBuddyInfo()` handle per view class (diagnostic log). */
     private val buddyMethodCache =
         ConcurrentHashMap<String, java.lang.reflect.Method>()
+
+    /**
+     * Bitmaps produced from a [ColoredMonochromeDrawable] by
+     * `FloatingIconAnimHelper.drawableToBitmap` (used by both
+     * `FloatingIconUtils.fillDrawable` and the classic `FloatingIconView2`
+     * path). Lets the launch/back-home animation hooks recognize MonoIcon
+     * content after the launcher converted our drawable into a bitmap.
+     * Weak keys — a bitmap stays marked only while the launcher holds it.
+     */
+    private val monoBitmapIds = java.util.Collections.synchronizedSet(
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap<Bitmap, Boolean>())
+    )
+
+    // SfAnim surface path (FloatingIconLayer2): cached reflection handles
+    // for the stretch-branch decision (see installFloatingIconLayerClampHook).
+    @Volatile
+    private var floatingLayerDrawableField: java.lang.reflect.Field? = null
+    @Volatile
+    private var floatingLayerBackgroundField: java.lang.reflect.Field? = null
 
     // ═══════════════════════════════════════════════════════════════
     // Bootstrap
@@ -130,6 +151,20 @@ class IconThemeHook : XposedModule() {
         HookRegistry.install("FolderIdentity", required = true) { installSetViewDrawable(cl) }
         // Kotlin synthetic lambda name — fragile across launcher builds → optional
         HookRegistry.install("FolderIdentity1x1", required = false) { installSetViewDrawable1x1(cl) }
+        // Fix: mark bitmaps produced from our monochrome drawable so the
+        // launch-animation render paths can recognize them.
+        HookRegistry.install("DrawableToBitmap", required = false) { installDrawableToBitmapHook(cl) }
+        // Fix: classic (non-SfAnim) launch path — force uniform scaling instead
+        // of the CLAMP shader branch when the animated icon is MonoIcon's.
+        HookRegistry.install("DrawBackgroundUniform", required = false) { installDrawBackgroundHook(cl) }
+        // Fix: SfAnim layer launch path — disable HMatchVTopExtend (non-uniform
+        // vertical stretch) for MonoIcon layers. Core fix for folder-preview /
+        // desktop launches under the default icon theme.
+        HookRegistry.install("LayerIconClamp", required = true) { installFloatingIconLayerClampHook(cl) }
+        // Fix: skip FloatingIconUtils.fillDrawable's bitmap + JNI preprocessing
+        // for MonoIcon drawables (root cause of the remaining stretch — see
+        // installFillDrawableSkipJniHook).
+        HookRegistry.install("FillDrawableSkipJni", required = true) { installFillDrawableSkipJniHook(cl) }
 
         android.util.Log.i(TAG, "Hooks installed: ${HookRegistry.installedCount}/${HookRegistry.size}")
         android.util.Log.i(TAG, HookRegistry.statusReport())
@@ -519,6 +554,210 @@ class IconThemeHook : XposedModule() {
                     chain.proceed()
                 }
             }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Launch / back-home animation fixes (default-theme stretch)
+    //
+    // Root cause (verified against the decompiled launcher 7.00.00.2259,
+    // outer_res/res_apk_decoded/original):
+    //
+    // With the DEFAULT icon theme `DeviceConfigs.isDefaultMiuiIcon()` is
+    // true, so for non-adaptive drawables (our ColoredMonochromeDrawable)
+    // the launcher enables its "clamp/extend" branches:
+    //
+    // 1. SfAnim surface path — `FloatingIconLayer2.createLayerSurface()`
+    //    calls `getMIsClamp()`, which returns true under the default theme
+    //    (target.isCrop() defaults to true). `setupStretchType()` then
+    //    selects `StretchType.HMatchVTopExtend` for the BACKGROUND layer,
+    //    and `setMatrixAndClip()` scales the square icon surface
+    //    NON-uniformly into the tall app-window rect via
+    //    `Matrix.setRectToRect(..., Matrix.ScaleToFit.START)` — the mono
+    //    glyph is vertically stretched to the full window height during
+    //    the launch animation. Custom icon themes return false from
+    //    `getMIsClamp()` and take the uniform `VMatchHCenter` branch,
+    //    which is exactly why custom themes render correctly.
+    //
+    // 2. Classic view path — `FloatingIconView2` / `FloatingIconAnimHelper`
+    //    take the CLAMP `BitmapShader` branch (`extendImage`) under the
+    //    default theme instead of `cuttingImage` (uniform scale by width,
+    //    the branch custom-theme icons take via isCrop()==false). Note that
+    //    `centerImage` (uniform by height) would fill the whole tall window
+    //    rect and visually reads as a vertical stretch, so the hook below
+    //    forces mIsCutting=true instead.
+    //
+    // 3. Verified on device (bitmap dumps): the real corruption is earlier —
+    //    `FloatingIconUtils.fillDrawable` converts our drawable to a bitmap
+    //    and `JNIHelper.processBitmap` stretches the glyph vertically INSIDE
+    //    that bitmap under the default theme. `FillDrawableSkipJni` returns
+    //    our drawable directly so the conversion/JNI never runs (same path
+    //    custom themes take via isNotFill).
+    //
+    // The hooks below force the same branches that custom themes use,
+    // whenever the animated icon is a MonoIcon drawable/bitmap.
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installDrawableToBitmapHook(cl: ClassLoader) {
+        val method = cl.loadClass("com.miui.home.launcher.anim.util.FloatingIconAnimHelper")
+            .getDeclaredMethod("drawableToBitmap", Drawable::class.java, Integer.TYPE, Integer.TYPE)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                val drawable = chain.getArg(0) as? Drawable
+                val result = chain.proceed() as? Bitmap
+                if (drawable is ColoredMonochromeDrawable && result != null) {
+                    monoBitmapIds.add(result)
+                    logd(TAG, "[DrawableToBitmap] marked mono bitmap ${result.width}x${result.height}")
+                }
+                result
+            }
+    }
+
+    private fun installDrawBackgroundHook(cl: ClassLoader) {
+        val method = cl.loadClass("com.miui.home.launcher.anim.util.FloatingIconAnimHelper")
+            .getDeclaredMethod("drawBackground",
+                Canvas::class.java,
+                android.graphics.Path::class.java,
+                android.widget.FrameLayout.LayoutParams::class.java,
+                Integer.TYPE)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                try {
+                    val helper = chain.thisObject
+                    val bgField = helper.javaClass.getDeclaredField("mBackgroundBitmapDrawable")
+                    bgField.isAccessible = true
+                    val bg = bgField.get(helper) as? Drawable
+                    if (isMonoAnimationDrawable(bg)) {
+                        // Force the cuttingImage branch (uniform scale by WIDTH,
+                        // icon size follows the animating rect width — the same
+                        // branch custom-theme icons take via isCrop()==false).
+                        // centerImage scales by HEIGHT, which fills the whole
+                        // tall window rect and looks like a vertical stretch.
+                        val cuttingField = helper.javaClass.getDeclaredField("mIsCutting")
+                        cuttingField.isAccessible = true
+                        cuttingField.setBoolean(helper, true)
+                        // Belt-and-braces: also keep the CLAMP shader branch off.
+                        val clampField = helper.javaClass.getDeclaredField("mIsClamp")
+                        clampField.isAccessible = true
+                        clampField.setBoolean(helper, false)
+                        logd(TAG, "[DrawBackground] mono bg=${bg?.javaClass?.simpleName ?: "?"} → forced mIsCutting=true, mIsClamp=false")
+                    }
+                } catch (_: Throwable) {
+                    // isolation — a failed inspection must never break the animation
+                }
+                chain.proceed()
+            }
+    }
+
+    /**
+     * SfAnim layer path — the core fix for the folder-preview launch
+     * stretch under the default theme.
+     *
+     * `FloatingIconLayer2.getMIsClamp()` feeds two decisions:
+     * - `isNotFill()`: false → `FloatingIconUtils.fillDrawable` converts the
+     *   drawable into a bitmap (true → the original drawable is used);
+     * - `getStretchTypeByLayerType(BACKGROUND)`: true →
+     *   `StretchType.HMatchVTopExtend` → `Matrix.setRectToRect(...,
+     *   ScaleToFit.START)` stretches the square icon surface non-uniformly
+     *   into the tall window rect (vertical stretch of the mono glyph);
+     *   false → `VMatchHCenter` → uniform scaling (custom-theme behavior).
+     *
+     * For MonoIcon layers we force `false`, so the SF launch animation
+     * renders our icon exactly like a custom-theme icon: uniform scaling,
+     * horizontally centered, no bitmap conversion.
+     */
+    private fun installFloatingIconLayerClampHook(cl: ClassLoader) {
+        val method = cl.loadClass("com.miui.home.recents.views.FloatingIconLayer2")
+            .getDeclaredMethod("getMIsClamp")
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                try {
+                    if (isMonoFloatingLayer(chain.thisObject)) {
+                        logd(TAG, "[LayerIconClamp] mono layer → forced getMIsClamp=false")
+                        return@intercept java.lang.Boolean.FALSE
+                    }
+                } catch (_: Throwable) { }
+                chain.proceed()
+            }
+    }
+
+    /**
+     * Core fix for the remaining launch-animation stretch (verified on
+     * device by dumping the actual bitmaps).
+     *
+     * `FloatingIconUtils.fillDrawable` runs for non-adaptive drawables
+     * under the DEFAULT icon theme and converts the drawable into a bitmap,
+     * then calls `JNIHelper.processBitmap(bitmap, w, h, alpha)` which
+     * stretches the icon glyph VERTICALLY to fill the whole bitmap height
+     * (the launcher's "clamp/extend" preprocessing). The stretched pixels
+     * are therefore baked in BEFORE any draw branch runs — switching
+     * mIsClamp/mIsCutting afterwards cannot undo it.
+     *
+     * Custom icon themes take the `isNotFill` early-return path and never
+     * reach the conversion, which is why they render correctly. Returning
+     * our drawable directly makes MonoIcon take the same no-conversion
+     * path: mBackground stays our ColoredMonochromeDrawable (which draws
+     * the glyph FIT-centered and never distorts), and the
+     * DrawBackgroundUniform hook routes rendering through `cuttingImage`
+     * (uniform scaling), exactly like custom-theme icons.
+     */
+    private fun installFillDrawableSkipJniHook(cl: ClassLoader) {
+        // fillDrawable is a Kotlin Companion method: it lives on the
+        // FloatingIconUtils$Companion nested class, not on FloatingIconUtils.
+        val method = cl.loadClass("com.miui.home.recents.views.FloatingIconUtils\$Companion")
+            .getDeclaredMethod("fillDrawable",
+                Drawable::class.java,
+                java.lang.Boolean.TYPE, java.lang.Integer.TYPE, java.lang.Integer.TYPE,
+                java.lang.Boolean.TYPE, java.lang.Boolean.TYPE, java.lang.Integer.TYPE)
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                val drawable = chain.getArg(0) as? Drawable
+                if (drawable is ColoredMonochromeDrawable) {
+                    logd(TAG, "[FillDrawable] mono drawable → skip bitmap/JNI conversion")
+                    return@intercept drawable
+                }
+                chain.proceed()
+            }
+    }
+
+    /** True when [drawable] is a MonoIcon drawable or a bitmap produced from one. */
+    private fun isMonoAnimationDrawable(drawable: Drawable?): Boolean {
+        if (drawable is ColoredMonochromeDrawable) return true
+        if (drawable is BitmapDrawable) {
+            val bm = drawable.bitmap
+            if (bm != null && monoBitmapIds.contains(bm)) return true
+        }
+        return false
+    }
+
+    /** True when an SfAnim [com.miui.home.recents.views.FloatingIconLayer2] carries a MonoIcon icon. */
+    private fun isMonoFloatingLayer(layer: Any?): Boolean {
+        if (layer == null) return false
+        try {
+            val cls = layer.javaClass
+            val dField = floatingLayerDrawableField ?: cls.getDeclaredField("mDrawable").also {
+                it.isAccessible = true
+                floatingLayerDrawableField = it
+            }
+            if (isMonoAnimationDrawable(dField.get(layer) as? Drawable)) return true
+            val bField = floatingLayerBackgroundField ?: cls.getDeclaredField("mBackground").also {
+                it.isAccessible = true
+                floatingLayerBackgroundField = it
+            }
+            if (isMonoAnimationDrawable(bField.get(layer) as? Drawable)) return true
+        } catch (_: Throwable) { }
+        return false
     }
 
     // ═══════════════════════════════════════════════════════════════
