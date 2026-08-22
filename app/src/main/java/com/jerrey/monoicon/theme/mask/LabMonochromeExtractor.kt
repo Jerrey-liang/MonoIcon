@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.drawable.AdaptiveIconDrawable
 import kotlin.math.cbrt
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 /**
  * Pixel Launcher compatible monochrome mask extractor (Phase 6.3).
@@ -23,9 +24,8 @@ import kotlin.math.pow
  * 1. Render full AdaptiveIconDrawable → ARGB_8888
  * 2. Equi-weight grayscale per pixel → [0, 100]
  * 3. Contrast stretch + mid-tone boost (Pixel Launcher formula)
- * Pixel stores [luminanceDelta] as metadata but does not alter the cached
- * alpha mask with it. The mask itself is always the contrast-stretched
- * grayscale render.
+ * 4. Invert when [luminanceDelta] is negative so dark foreground artwork on
+ *    a light plate remains the opaque glyph rather than the plate.
  */
 object LabMonochromeExtractor {
 
@@ -45,6 +45,12 @@ object LabMonochromeExtractor {
     private const val BG_MID = 11
     private const val BG_LIGHT = 12
 
+    // Conservative thresholds for legacy bitmap icons that contain a plate
+    // but do not expose an Android monochrome layer.
+    private const val EDGE_COLOR_DISTANCE = 32f
+    private const val MIN_BACKGROUND_RATIO = 0.35
+    private const val MIN_FOREGROUND_RATIO = 0.02
+
     /**
      * Generates an alpha mask from the full AdaptiveIconDrawable.
      * Uses default polarity (darker pixels → opaque). Call
@@ -56,8 +62,7 @@ object LabMonochromeExtractor {
 
     /**
      * Generates an alpha mask from separately rendered adaptive-icon layers.
-     * [luminanceDelta] is accepted for call-site compatibility and metadata,
-     * but Pixel does not invert the generated alpha bitmap from this value.
+     * A negative [luminanceDelta] preserves Pixel's dark-foreground polarity.
      */
     fun extract(drawable: AdaptiveIconDrawable, luminanceDelta: Double?): Bitmap? {
         val w = drawable.intrinsicWidth.coerceAtLeast(1)
@@ -102,6 +107,12 @@ object LabMonochromeExtractor {
         val pixels = IntArray(w * h)
         bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
 
+        // Legacy PNG icons often contain a white/light plate but no native
+        // monochrome layer. If that plate participates in min-max stretching,
+        // it becomes an opaque glyph and covers the whole themed icon. Detect
+        // a conservative edge-connected plate before extracting luminance.
+        val edgeBackground = detectEdgeBackground(pixels, w, h)
+
         // Step 2: equi-weight grayscale → [0, 100] range
         // Matches Pixel Launcher ColorMatrix: [R×0.3333 + G×0.3333 + B×0.3333]
         // (MonochromeIconFactory lines 150-158, 186)
@@ -112,7 +123,10 @@ object LabMonochromeExtractor {
 
         for (i in pixels.indices) {
             val a = (pixels[i] shr 24) and 0xFF
-            if (a < 32) { lValues[i] = -1f; continue }
+            if (a < 32 || edgeBackground?.get(i) == true) {
+                lValues[i] = -1f
+                continue
+            }
             val r = ((pixels[i] shr 16) and 0xFF) / 255f
             val g = ((pixels[i] shr 8) and 0xFF) / 255f
             val b = (pixels[i] and 0xFF) / 255f
@@ -123,7 +137,20 @@ object LabMonochromeExtractor {
             validCount++
         }
 
-        if (validCount < 4 || lMax - lMin < 1f) return null
+        if (validCount < 4) return null
+        if (lMax - lMin < 1f) {
+            // A flat foreground still has a useful silhouette after a plate
+            // was removed. Preserve the old null result for truly flat images.
+            if (edgeBackground == null) return null
+            val silhouettePixels = IntArray(pixels.size)
+            for (i in pixels.indices) {
+                val a = (pixels[i] shr 24) and 0xFF
+                if (a >= 32 && edgeBackground[i] != true) silhouettePixels[i] = a shl 24
+            }
+            val silhouette = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            silhouette.setPixels(silhouettePixels, 0, w, 0, 0, w, h)
+            return silhouette
+        }
 
         // Step 3: contrast stretch + Pixel's mid-tone boost.
         val range = lMax - lMin
@@ -132,6 +159,7 @@ object LabMonochromeExtractor {
             if (lValues[i] < 0f) { maskPixels[i] = 0; continue }
             var alpha = ((lValues[i] - lMin) * 255f / range).toInt()
             alpha = midToneBoost(alpha)
+            if (luminanceDelta != null && luminanceDelta < 0.0) alpha = 255 - alpha
             alpha = alpha.coerceIn(0, 255)
             maskPixels[i] = (alpha shl 24)
         }
@@ -139,6 +167,93 @@ object LabMonochromeExtractor {
         val mask = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         mask.setPixels(maskPixels, 0, w, 0, 0, w, h)
         return mask
+    }
+
+    /** Finds a dominant plate connected to the bitmap edge. */
+    private fun detectEdgeBackground(pixels: IntArray, w: Int, h: Int): BooleanArray? {
+        if (w < 3 || h < 3) return null
+        val edgeSamples = ArrayList<Int>(2 * (w + h))
+        for (y in 0 until h) {
+            edgeSamples += pixels[y * w]
+            edgeSamples += pixels[y * w + w - 1]
+        }
+        for (x in 0 until w) {
+            edgeSamples += pixels[x]
+            edgeSamples += pixels[(h - 1) * w + x]
+        }
+        val opaqueEdge = edgeSamples.filter { ((it ushr 24) and 0xFF) >= 32 }
+        if (opaqueEdge.size < edgeSamples.size / 4) return null
+
+        val meanR = opaqueEdge.sumOf { (it ushr 16) and 0xFF }.toDouble() / opaqueEdge.size
+        val meanG = opaqueEdge.sumOf { (it ushr 8) and 0xFF }.toDouble() / opaqueEdge.size
+        val meanB = opaqueEdge.sumOf { it and 0xFF }.toDouble() / opaqueEdge.size
+        val edgeVariance = opaqueEdge.map {
+            val dr = ((it ushr 16) and 0xFF) - meanR
+            val dg = ((it ushr 8) and 0xFF) - meanG
+            val db = (it and 0xFF) - meanB
+            dr * dr + dg * dg + db * db
+        }.average()
+        val tolerance = maxOf(EDGE_COLOR_DISTANCE, sqrt(edgeVariance).toFloat() * 2.0f)
+
+        val background = BooleanArray(pixels.size)
+        val queue = IntArray(pixels.size)
+        var head = 0
+        var tail = 0
+        fun enqueue(index: Int) {
+            if (!background[index]) {
+                background[index] = true
+                queue[tail++] = index
+            }
+        }
+        fun nearEdgeColor(color: Int): Boolean {
+            val dr = ((color ushr 16) and 0xFF) - meanR
+            val dg = ((color ushr 8) and 0xFF) - meanG
+            val db = (color and 0xFF) - meanB
+            return sqrt((dr * dr + dg * dg + db * db).toFloat()) <= tolerance
+        }
+        for (y in 0 until h) {
+            if (nearEdgeColor(pixels[y * w])) enqueue(y * w)
+            if (nearEdgeColor(pixels[y * w + w - 1])) enqueue(y * w + w - 1)
+        }
+        for (x in 0 until w) {
+            if (nearEdgeColor(pixels[x])) enqueue(x)
+            val bottom = (h - 1) * w + x
+            if (nearEdgeColor(pixels[bottom])) enqueue(bottom)
+        }
+        while (head < tail) {
+            val index = queue[head++]
+            val x = index % w
+            val y = index / w
+            if (x > 0) {
+                val next = index - 1
+                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
+            }
+            if (x + 1 < w) {
+                val next = index + 1
+                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
+            }
+            if (y > 0) {
+                val next = index - w
+                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
+            }
+            if (y + 1 < h) {
+                val next = index + w
+                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
+            }
+        }
+
+        var opaque = 0
+        var edgeOpaque = 0
+        var foregroundOpaque = 0
+        for (i in pixels.indices) {
+            if (((pixels[i] ushr 24) and 0xFF) < 32) continue
+            opaque++
+            if (background[i]) edgeOpaque++ else foregroundOpaque++
+        }
+        if (opaque == 0) return null
+        val backgroundRatio = edgeOpaque.toDouble() / opaque.toDouble()
+        val foregroundRatio = foregroundOpaque.toDouble() / opaque.toDouble()
+        return if (backgroundRatio >= MIN_BACKGROUND_RATIO && foregroundRatio >= MIN_FOREGROUND_RATIO) background else null
     }
 
     /**
