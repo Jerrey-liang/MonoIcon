@@ -22,10 +22,9 @@ private const val TAG = "MonoIcon.MonoCache"
  * as [identity].
  *
  * Fingerprint is computed from the **key bitmap** via **FNV-1a 32-bit** —
- * the source render that drives generation (input of toLuminanceMask for
- * NATIVE/RAW paths, the generated mask itself for FG/LUMA paths). This
- * distinguishes different visuals from the same component and makes the
- * cache lookup meaningful before re-running the mask pipeline.
+ * the source render (or the generated mask itself) that drives generation.
+ * This distinguishes different visuals from the same component and makes
+ * the cache lookup meaningful before re-running the mask pipeline.
  *
  * Phase 3.18-D: byte-based budgeting — [LruCache.sizeOf] returns
  * [Bitmap.byteCount], so [maxBytes] bounds total bitmap memory instead of
@@ -92,7 +91,7 @@ class MonochromeCache(
         return "$themeId|$context|$identity|${w}x${h}@$fp|$src"
     }
 
-    // ── Source constants (synced with IconThemeHook / MaskGenerator) ───
+    // ── Source constants (synced with IconThemeHook / MaskStrategy) ────
     companion object {
         const val SOURCE_NATIVE = 1
         const val SOURCE_FOREGROUND = 2
@@ -100,9 +99,9 @@ class MonochromeCache(
 
         /**
          * Process-wide shared instance (Phase 4.0-A).
-         * Both the mask pipeline (MaskGenerator) and lifecycle management
-         * (CacheManager) operate on this single instance so invalidation
-         * and statistics see the same data.
+         * Both the mask pipeline (PixelMonochromeMaskStrategy) and lifecycle
+         * management (CacheManager) operate on this single instance so
+         * invalidation and statistics see the same data.
          */
         val shared: MonochromeCache by lazy { MonochromeCache() }
     }

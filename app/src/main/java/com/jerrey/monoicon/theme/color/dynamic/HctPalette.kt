@@ -48,41 +48,55 @@ object HctPalette {
      * Tones: 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100.
      */
     fun generate(seed: Int): IntArray {
-        return try {
-            val cam = Cam16.fromArgb(seed)
-            // Guard: NaN hue/chroma → fall through to catch
-            if (cam.hue.isNaN() || cam.chroma.isNaN()) throw IllegalStateException("NaN CAM16")
-            val hct = HctSolver.solveToInt(cam.hue, cam.chroma)
-            val tones = intArrayOf(0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100)
-            IntArray(tones.size) { i -> hct.argb(tones[i]) }
-        } catch (_: Throwable) {
-            // HCT failed — fall back to equi-weight grayscale ramp (same as TonePalette fallback)
-            val tones = intArrayOf(0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100)
-            val r = Color.red(seed); val g = Color.green(seed); val b = Color.blue(seed)
-            val seedY = (0.299f * r + 0.587f * g + 0.114f * b)
-            IntArray(tones.size) { i ->
-                val targetY = tones[i] * 2.55f
-                if (targetY > seedY) {
-                    val ratio = ((targetY - seedY) / (255f - seedY)).coerceIn(0f, 1f)
-                    Color.rgb((r + (255 - r) * ratio).toInt().coerceIn(0, 255),
-                        (g + (255 - g) * ratio).toInt().coerceIn(0, 255),
-                        (b + (255 - b) * ratio).toInt().coerceIn(0, 255))
-                } else {
-                    val ratio = ((seedY - targetY) / seedY.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                    Color.rgb((r * (1f - ratio)).toInt().coerceIn(0, 255),
-                        (g * (1f - ratio)).toInt().coerceIn(0, 255),
-                        (b * (1f - ratio)).toInt().coerceIn(0, 255))
-                }
-            }
-        }
+        // Keep a deterministic hue-preserving fallback. The previous local
+        // CAM16 port contained decompilation remnants and frequently returned
+        // grayscale tones, which made the plate react only to light/dark mode.
+        val tones = intArrayOf(0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100)
+        return IntArray(tones.size) { i -> hslTone(seed, tones[i].toFloat()) }
     }
 
     /**
      * Single-tone ARGB at Hue-Chroma from seed.
      */
     fun argb(seed: Int, tone: Float): Int {
-        val cam = Cam16.fromArgb(seed)
-        return HctSolver.solveToInt(cam.hue, cam.chroma).argb(tone.roundToInt())
+        return hslTone(seed, tone)
+    }
+
+    /** Generates a wallpaper-hued tone without depending on the broken local HCT port. */
+    private fun hslTone(seed: Int, tone: Float): Int {
+        val r = Color.red(seed) / 255f
+        val g = Color.green(seed) / 255f
+        val b = Color.blue(seed) / 255f
+        val max = maxOf(r, g, b)
+        val min = minOf(r, g, b)
+        val delta = max - min
+        val lightness = (max + min) / 2f
+        val hue = when {
+            delta == 0f -> 0f
+            max == r -> ((g - b) / delta).let { if (it < 0f) it + 6f else it }
+            max == g -> (b - r) / delta + 2f
+            else -> (r - g) / delta + 4f
+        } / 6f
+        val sourceSaturation = if (delta == 0f) 0f else
+            delta / (1f - kotlin.math.abs(2f * lightness - 1f))
+        val saturation = (sourceSaturation * 0.75f).coerceIn(0.12f, 0.72f)
+        val l = (tone / 100f).coerceIn(0f, 1f)
+        val c = (1f - kotlin.math.abs(2f * l - 1f)) * saturation
+        val x = c * (1f - kotlin.math.abs((hue * 6f) % 2f - 1f))
+        val m = l - c / 2f
+        val (r1, g1, b1) = when ((hue * 6f).toInt().coerceIn(0, 5)) {
+            0 -> Triple(c, x, 0f)
+            1 -> Triple(x, c, 0f)
+            2 -> Triple(0f, c, x)
+            3 -> Triple(0f, x, c)
+            4 -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+        return Color.rgb(
+            ((r1 + m) * 255f).roundToInt().coerceIn(0, 255),
+            ((g1 + m) * 255f).roundToInt().coerceIn(0, 255),
+            ((b1 + m) * 255f).roundToInt().coerceIn(0, 255),
+        )
     }
 
     // ═══════════════════════════════════════════════════════════════════

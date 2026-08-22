@@ -1,22 +1,23 @@
 package com.jerrey.monoicon.theme.color
 
 import android.graphics.drawable.Drawable
-import com.jerrey.monoicon.theme.IconContext
-import com.jerrey.monoicon.theme.color.dynamic.SystemMaterialColorProvider
+import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 
 /**
- * Pixel Launcher dynamic color strategy (Phase 6.2 material — stable baseline).
+ * Pixel Launcher dynamic color strategy (Phase 6.6).
  *
- * Delegates to [SystemMaterialColorProvider] for the globally uniform
- * Material You icon tint from framework resources. This is the Phase 6.1/6.2
- * baseline proven stable on-device.
+ * Derives BOTH colors from the Monet wallpaper palette with the exact
+ * Pixel Launcher algorithm (HCT/CAM16 tonal palette from the wallpaper
+ * primary seed):
+ * - glyph  (`themed_icon_color`)                = accent tone 40 (light) / 80 (dark)
+ * - plate  (`themed_icon_background_color`)     = accent tone 95 (light) / 10 (dark)
  *
- * HCT palette generation ([PixelMonetColorEngine]) is available for themes
- * that need the full 13-tone palette but is not yet integrated into the
- * default strategy pending stability verification.
+ * Cached by [PixelMonetColorEngine] with a 60-second TTL.
  */
 class PixelColorStrategy : ColorStrategy {
 
-    override fun extract(drawable: Drawable, identity: String): Int =
-        SystemMaterialColorProvider.getIconTint(identity, IconContext.DESKTOP)
+    override fun extract(drawable: Drawable, identity: String): ThemeColors {
+        val colors = PixelMonetColorEngine.getIconColors()
+        return ThemeColors(foreground = colors.foreground, background = colors.background)
+    }
 }

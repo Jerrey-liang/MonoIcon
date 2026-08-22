@@ -7,18 +7,26 @@ import com.jerrey.monoicon.cache.MonochromeCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.image.DrawableConverter
 import com.jerrey.monoicon.logging.logd
-import com.jerrey.monoicon.mask.MaskGenerator
+import com.jerrey.monoicon.mask.GenerateResult
 
 /**
- * Pixel Launcher compatible monochrome mask strategy (Phase 6.3).
+ * Pixel Launcher compatible monochrome mask strategy (Phase 6.3, 6.6).
  *
  * ## Priority
  * 1. **Native monochrome layer** — `AdaptiveIconDrawable.getMonochrome()`
  * 2. **LAB luminance extraction** — CIELAB L* from full icon render
- * 3. **Raw APK drawable** — IconDrawableCache hit → full render → toLuminanceMask
- * 4. **Foreground extraction** — foreground → toBitmap
- * 5. **Whole drawable** — toBitmap (Rec.601 Y' fallback)
- * 6. **null** → caller passes through (FancyDrawable/unrenderable types)
+ * 3. **Raw APK drawable** — IconDrawableCache hit → LAB, or full render
+ *    → [LabMonochromeExtractor.extractFromBitmap]
+ * 4. **Foreground extraction** — foreground render → extractFromBitmap
+ * 5. **Whole drawable** — generic render → extractFromBitmap
+ * 6. **null** → caller passes through
+ *
+ * ## Phase 6.6: single Pixel algorithm everywhere
+ * Every tier that renders a bitmap now feeds it into
+ * [LabMonochromeExtractor.extractFromBitmap] (equi-weight grayscale,
+ * min-max stretch, mid-tone boost, polarity inversion) — the exact
+ * Pixel Launcher mask formula. The old Rec.601 polarity pipeline
+ * (DrawableConverter.toBitmap/toLuminanceMask) has been removed.
  *
  * ## Desktop / folder unification
  * Pixel Launcher uses a single mask pipeline — this strategy replaces
@@ -34,61 +42,61 @@ class PixelMonochromeMaskStrategy : MaskStrategy {
         this.contextStr = context
     }
 
-    override fun generate(d: Drawable, identity: String?): MaskGenerator.GenerateResult? {
+    override fun generate(d: Drawable, identity: String?): GenerateResult? {
         var source = MaskStrategy.SOURCE_LUMINANCE
         var rawUsed = false
         var keyBitmap: Bitmap? = null
         var mask: Bitmap? = null
 
-        // Tiers 1-4: may throw from LabMonochromeExtractor or reflection —
-        // catch inside this block so Tier 5 (LUMA) always runs as a fallback.
+        // Pixel receives the raw APK AdaptiveIconDrawable before launcher
+        // theming. HyperOS hands the display hook a LayerAdaptiveIconDrawable,
+        // so Hook 7's isolated raw copy is the authoritative Pixel input when
+        // available. The generic HyperOS drawable remains the compatibility
+        // fallback when identity/raw capture is unavailable.
         try {
-            var luminanceDelta: Double? = null
-            if (d is AdaptiveIconDrawable) {
+            val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+            val adaptiveSource = (rawCached as? AdaptiveIconDrawable)
+                ?: (d as? AdaptiveIconDrawable)
+            rawUsed = adaptiveSource != null && adaptiveSource !== d
+
+            if (adaptiveSource != null) {
                 // ① Native monochrome layer
-                val mono = DrawableConverter.getMonochromeLayer(d)
+                val mono = DrawableConverter.getMonochromeLayer(adaptiveSource)
                 if (mono != null) {
                     source = MaskStrategy.SOURCE_NATIVE
-                    keyBitmap = DrawableConverter.toRawBitmap(mono)
-                    mask = keyBitmap?.let { DrawableConverter.normalizeNativeMonochrome(it) }
-                    logd(TAG, "[PixelMask] source=NATIVE")
+                    val size = maxOf(
+                        adaptiveSource.intrinsicWidth,
+                        adaptiveSource.intrinsicHeight,
+                    ).coerceAtLeast(1)
+                    mask = DrawableConverter.renderPixelNativeMonochrome(mono, size)
+                    keyBitmap = mask
+                    logd(TAG, "[PixelMask] source=NATIVE raw=$rawUsed")
                 }
                 // ② LAB luminance extraction
                 if (mask == null) {
-                    luminanceDelta = LabMonochromeExtractor.computeLuminanceDelta(d)
-                    val labMask = LabMonochromeExtractor.extract(d, luminanceDelta)
+                    val luminanceDelta = LabMonochromeExtractor.computeLuminanceDelta(adaptiveSource)
+                    val labMask = LabMonochromeExtractor.extract(adaptiveSource, luminanceDelta)
                     if (labMask != null) {
                         source = MaskStrategy.SOURCE_LUMINANCE; mask = labMask; keyBitmap = labMask
-                        logd(TAG, "[PixelMask] source=LAB_LUMINANCE delta=$luminanceDelta")
+                        logd(TAG, "[PixelMask] source=LAB_LUMINANCE delta=$luminanceDelta raw=$rawUsed")
                     }
                 }
-                // ③ Raw APK drawable → LAB
+                // HyperOS compatibility fallback for malformed adaptive icons.
                 if (mask == null) {
-                    val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
-                    if (rawCached is AdaptiveIconDrawable) {
-                        val delta = luminanceDelta ?: LabMonochromeExtractor.computeLuminanceDelta(rawCached)
-                        val labMask = LabMonochromeExtractor.extract(rawCached, delta)
-                        if (labMask != null) {
-                            source = MaskStrategy.SOURCE_LUMINANCE; rawUsed = true; mask = labMask; keyBitmap = labMask
-                            logd(TAG, "[PixelMask] source=LAB_VIA_CACHE identity=$identity")
-                        }
-                    }
-                    if (mask == null && rawCached != null) {
-                        keyBitmap = DrawableConverter.toRawBitmap(rawCached)
-                        mask = keyBitmap?.let { DrawableConverter.toLuminanceMask(it) }
-                        if (mask != null) { source = MaskStrategy.SOURCE_FOREGROUND; rawUsed = true }
-                    }
-                }
-                // ④ Foreground extraction
-                if (mask == null) {
-                    val fg = d.foreground
+                    val fg = adaptiveSource.foreground
                     if (fg != null) {
-                        val srcBounds = d.bounds
-                        val w = if (srcBounds.width() > 0) srcBounds.width() else d.intrinsicWidth.coerceAtLeast(1)
-                        val h = if (srcBounds.height() > 0) srcBounds.height() else d.intrinsicHeight.coerceAtLeast(1)
+                        val srcBounds = adaptiveSource.bounds
+                        val w = if (srcBounds.width() > 0) srcBounds.width() else adaptiveSource.intrinsicWidth.coerceAtLeast(1)
+                        val h = if (srcBounds.height() > 0) srcBounds.height() else adaptiveSource.intrinsicHeight.coerceAtLeast(1)
                         fg.setBounds(0, 0, w, h)
                         source = MaskStrategy.SOURCE_FOREGROUND
-                        mask = DrawableConverter.toBitmap(fg); keyBitmap = mask
+                        val render = DrawableConverter.renderToBitmap(fg)
+                        mask = render?.let {
+                            LabMonochromeExtractor.extractFromBitmap(
+                                it, LabMonochromeExtractor.estimateLuminanceDelta(it))
+                        }
+                        keyBitmap = render ?: mask
+                        logd(TAG, "[PixelMask] source=FOREGROUND")
                     }
                 }
             }
@@ -96,10 +104,14 @@ class PixelMonochromeMaskStrategy : MaskStrategy {
             // Any exception in tiers 1-4 → fall through to tier 5
             mask = null
         }
-        // ⑤ Whole drawable (non-adaptive or adaptive with no foreground)
+        // Whole drawable: compatibility path for non-adaptive HyperOS themes.
         if (mask == null) {
-            mask = DrawableConverter.toBitmap(d) ?: MaskStrategy.renderGenericToMask(d)
-            keyBitmap = mask
+            val render = DrawableConverter.renderToBitmap(d)
+            mask = render?.let {
+                LabMonochromeExtractor.extractFromBitmap(
+                    it, LabMonochromeExtractor.estimateLuminanceDelta(it))
+            }
+            keyBitmap = mask ?: render
             logd(TAG, "[PixelMask] source=LUMA")
         }
 
@@ -110,11 +122,11 @@ class PixelMonochromeMaskStrategy : MaskStrategy {
         if (cacheKey != null) {
             val cached = MonochromeCache.shared.get(cacheKey)
             if (cached != null) {
-                return MaskGenerator.GenerateResult(cached, source, rawUsed, cacheHit = true)
+                return GenerateResult(cached, source, rawUsed, cacheHit = true)
             }
             MonochromeCache.shared.put(cacheKey, mask)
         }
-        return MaskGenerator.GenerateResult(mask, source, rawUsed, cacheHit = false)
+        return GenerateResult(mask, source, rawUsed, cacheHit = false)
     }
 
     companion object {

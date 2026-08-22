@@ -3,22 +3,38 @@ package com.jerrey.monoicon.theme.color
 import android.graphics.drawable.Drawable
 
 /**
- * Pluggable color extraction strategy (Phase 5).
+ * Pixel Launcher icon color pair (Phase 6.6).
  *
- * Implementations define how a dominant ARGB color is extracted from
- * a full-color icon drawable. The result may be cached per identity
- * by the caller ([com.jerrey.monoicon.color.IconColorCache]) — this
- * interface does NOT own caching.
+ * @param foreground Glyph tint — Pixel's `themed_icon_color`.
+ * @param background Background plate — Pixel's `themed_icon_background_color`
+ *                   (alpha 0 = no plate, e.g. engine unavailable).
+ */
+data class ThemeColors(
+    val foreground: Int,
+    val background: Int,
+) {
+    companion object {
+        /** Transparent pair — used when identity is unknown or extraction fails. */
+        val TRANSPARENT = ThemeColors(0, 0)
+    }
+}
+
+/**
+ * Pluggable color strategy (Phase 5, 6.6).
+ *
+ * Implementations return the Pixel Launcher color pair (glyph tint +
+ * background plate). [PixelColorStrategy] derives both from the Monet
+ * wallpaper palette via [com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine].
  */
 interface ColorStrategy {
 
     /**
-     * Extracts the dominant color from [drawable].
+     * Returns the icon colors for [identity].
      *
-     * @param drawable Full-color drawable (raw APK AdaptiveIconDrawable
-     *                 or a rendered Bitmap).
+     * @param drawable Full-color drawable (unused by the dynamic strategy;
+     *                 available for future per-app colors).
      * @param identity Resolved "pkg/cls" component identity (for logging).
-     * @return ARGB color int.
+     * @return The glyph/plate color pair.
      */
-    fun extract(drawable: Drawable, identity: String): Int
+    fun extract(drawable: Drawable, identity: String): ThemeColors
 }

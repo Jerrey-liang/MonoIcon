@@ -16,7 +16,6 @@ import com.jerrey.monoicon.color.IconColorExtractor
 import com.jerrey.monoicon.color.PixelStyleColorExtractor
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.identity.IdentityResolver
-import com.jerrey.monoicon.image.MonochromeGenerator
 import com.jerrey.monoicon.logging.LogcatLogger
 import com.jerrey.monoicon.logging.logd
 import com.jerrey.monoicon.logging.loge
@@ -51,9 +50,10 @@ private fun relMs(): Long = (System.nanoTime() - bootTimeNs) / 1_000_000L
  * [DebugHooks], default off). All hooks use the official libxposed
  * interceptor-chain API.
  *
- * Pipeline (Phase 3.18): identity via [IdentityResolver], masks via
- * [MaskGenerator], caches via IconDrawableCache / IconColorCache /
- * MonochromeCache, launcher handoff copies via [MonochromeGenerator].
+ * Pipeline (Phase 6.6): identity via [IdentityResolver], masks via the
+ * unified [com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy]
+ * (Pixel Launcher LAB pipeline), caches via IconDrawableCache /
+ * IconColorCache / MonochromeCache.
  *
  * Single entry class. No legacy adapters. No IXposedHookLoadPackage.
  * Listed in [META-INF/xposed/java_init.list].
@@ -393,7 +393,7 @@ class IconThemeHook : XposedModule() {
             // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
             // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
             val safeMask = mask.copy(Bitmap.Config.ARGB_8888, false) ?: mask
-            val replacement = ColoredMonochromeDrawable(safeMask, iconResult.color)
+            val replacement = ColoredMonochromeDrawable(safeMask, iconResult.color, iconResult.plate)
 
             logd(TAG_FOLDER,
                 "[${logPrefix}Replace] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
@@ -1042,7 +1042,7 @@ class IconThemeHook : XposedModule() {
         // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
         // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
         val safeMask = maskBitmap.copy(Bitmap.Config.ARGB_8888, false) ?: maskBitmap
-        return Pair(ColoredMonochromeDrawable(safeMask, iconResult.color), safeMask)
+        return Pair(ColoredMonochromeDrawable(safeMask, iconResult.color, iconResult.plate), safeMask)
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1208,8 +1208,8 @@ class IconThemeHook : XposedModule() {
     )
 
     /**
-     * 从原始 [Drawable]（未经 [DrawableConverter.toBitmap] 或 luminance mask 处理）
-     * 中提取代表色。优先尝试 LayerAdaptive 背景层，回退到通用渲染。
+     * 从原始 [Drawable]（未经掩码管线处理）中提取代表色。
+     * 优先尝试 LayerAdaptive 背景层，回退到通用渲染。
      *
      * @param drawable 原始图标 Drawable（色彩未被销毁）。
      * @param identity 组件标识（用于日志）。

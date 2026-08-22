@@ -2,8 +2,6 @@ package com.jerrey.monoicon.hook
 
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Build
-import com.jerrey.monoicon.image.DrawableConverter
-import com.jerrey.monoicon.image.MonochromeGenerator
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 
@@ -86,33 +84,19 @@ object DebugHooks {
                 } else "null"
                 android.util.Log.d(TAG, "[getMonochrome] drawable=$desc")
 
-                // Step 1: 复用系统原生 monochrome layer（若应用自带）
+                // Phase 6.6: log-only passthrough — mask generation now lives
+                // in LabMonochromeExtractor (Pixel pipeline), so the diagnostic
+                // hook no longer generates its own monochrome replacement.
                 val original = try {
                     chain.proceed()
                 } catch (t: Throwable) {
                     android.util.Log.e(TAG, "[getMonochrome] proceed threw: ${t.message}", t)
                     null
                 }
-                if (original != null) {
-                    val elapsed = (System.nanoTime() - start) / 1_000_000L
-                    android.util.Log.i(TAG, "[getMonochrome] native monochrome reused null=false cost=${elapsed}ms")
-                    stats.record("getMonochrome", elapsed)
-                    return@intercept original
-                }
-
-                // Step 2: 原生为空 → 自行生成 alpha-mask monochrome
-                val generated = if (adaptiveIcon != null) {
-                    val bitmap = DrawableConverter.toBitmap(adaptiveIcon)
-                    MonochromeGenerator.create(bitmap)
-                } else {
-                    null
-                }
-
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
-                val isNull = generated == null
-                android.util.Log.i(TAG, "[getMonochrome] generated null=$isNull type=${generated?.javaClass?.simpleName} cost=${elapsed}ms")
+                android.util.Log.i(TAG, "[getMonochrome] result null=${original == null} cost=${elapsed}ms")
                 stats.record("getMonochrome", elapsed)
-                generated
+                original
             }
     }
 

@@ -18,6 +18,7 @@ local.properties
 /res_agent_output/
 /res_lsposed_log/
 /res_original_apk_pkg/
+/outer_res/
 *.log
 *.zip
 *.apk

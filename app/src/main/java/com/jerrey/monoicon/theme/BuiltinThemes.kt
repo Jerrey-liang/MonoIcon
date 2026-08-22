@@ -1,28 +1,26 @@
 package com.jerrey.monoicon.theme
 
-import android.graphics.Color
 import android.graphics.drawable.Drawable
+import com.jerrey.monoicon.mask.GenerateResult
 import com.jerrey.monoicon.theme.color.PixelColorStrategy
-import com.jerrey.monoicon.theme.color.StaticColorStrategy
-import com.jerrey.monoicon.theme.mask.NativeFirstMaskStrategy
+import com.jerrey.monoicon.theme.color.ThemeColors
+import com.jerrey.monoicon.theme.mask.MaskStrategy
 import com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy
-import com.jerrey.monoicon.theme.mask.RawFirstMaskStrategy
-import com.jerrey.monoicon.mask.MaskGenerator
 
 /**
- * Built-in theme definitions (Phase 5).
+ * Built-in theme definitions (Phase 5, 6.6).
  *
- * Each entry is a [ThemeDefinition] that configures desktop mask,
- * folder mask, and color extraction strategies. New themes are added
- * by creating a definition here and registering it in [ALL].
+ * Phase 6.6: only the Pixel Default theme remains — mask generation is
+ * the single Pixel Launcher pipeline ([PixelMonochromeMaskStrategy]),
+ * color is the Pixel Launcher dynamic tint ([PixelColorStrategy]).
+ * High Contrast / Pure Mono and the legacy Rec.601 mask strategies have
+ * been removed.
  */
 object BuiltinThemes {
 
     // ── Strategy instances ─────────────────────────────────────────────
 
     private val pixelColor = PixelColorStrategy()
-
-    // ── Theme 1: Pixel Default (Phase 6.3: unified Pixel strategy) ─────
 
     /**
      * Unified Pixel Launcher monochrome mask strategy. Desktop and folder
@@ -37,9 +35,9 @@ object BuiltinThemes {
     /**
      * Pixel Default — matches Pixel Launcher's monochrome icon pipeline.
      *
-     * Mask: unified PixelMonochromeMaskStrategy (NATIVE > LAB luminance,
-     * no desktop/folder distinction — same as Pixel Launcher).
-     * Color: Pixel Launcher dynamic color (Phase 6.2).
+     * Mask: unified PixelMonochromeMaskStrategy (NATIVE > CIELAB luminance,
+     * same for desktop and folder previews — same as Pixel Launcher).
+     * Color: Pixel Launcher dynamic tint (system accent).
      */
     val PIXEL_DEFAULT = ThemeDefinition(
         id = "pixel_default",
@@ -49,46 +47,13 @@ object BuiltinThemes {
         color = pixelColor,
     )
 
-    // ── Theme 2: Pure Mono — all icons black/white ─────────────────────
-
-    /**
-     * Pure Mono — all icons as pure silhouettes, color forced to black.
-     *
-     * Mask: RAW_FIRST everywhere (same source priority as folder previews).
-     * Color: static black (no per-icon color extraction).
-     */
-    val PURE_MONO = ThemeDefinition(
-        id = "pure_mono",
-        name = "Pure Mono",
-        desktopMask = RawFirstMaskStrategy(),
-        folderMask = RawFirstMaskStrategy(),
-        color = StaticColorStrategy(Color.BLACK),
-    )
-
-    // ── Theme 3: High Contrast — placeholder for enhancement ────────────
-
-    /**
-     * High Contrast — placeholder for enhancement.
-     *
-     * Mask: the Phase 5 split (desktop NATIVE_FIRST, folder RAW_FIRST),
-     * kept as an alternative to the unified Pixel pipeline.
-     * Color: same dynamic color strategy as Pixel Default.
-     */
-    val HIGH_CONTRAST = ThemeDefinition(
-        id = "high_contrast",
-        name = "High Contrast",
-        desktopMask = NativeFirstMaskStrategy(),
-        folderMask = RawFirstMaskStrategy(),
-        color = PixelColorStrategy(),
-    )
-
     // ── Registry ───────────────────────────────────────────────────────
 
     /** All built-in themes in display order. */
-    val ALL: List<ThemeDefinition> = listOf(PIXEL_DEFAULT, PURE_MONO, HIGH_CONTRAST)
+    val ALL: List<ThemeDefinition> = listOf(PIXEL_DEFAULT)
 
-    /** Lookup by ID (falls back to PIXEL_DEFAULT). */
-    fun byId(id: String): ThemeDefinition = ALL.find { it.id == id } ?: PIXEL_DEFAULT
+    /** Lookup by ID (always resolves to the single Pixel Default theme). */
+    fun byId(id: String): ThemeDefinition = PIXEL_DEFAULT
 
     /**
      * Thin [IconTheme] wrapper that delegates to a [ThemeDefinition].
@@ -103,17 +68,17 @@ object BuiltinThemes {
             drawable: Drawable,
             identity: String?,
             context: IconContext,
-        ): MaskGenerator.GenerateResult {
+        ): GenerateResult {
             val strategy = when (context) {
                 IconContext.DESKTOP -> def.desktopMask
                 IconContext.FOLDER_PREVIEW -> def.folderMask
             }
             return strategy.generate(drawable, identity)
-                ?: MaskGenerator.GenerateResult(null, 3, false, false)
+                ?: GenerateResult(null, 3, false, false)
             // SOURCE_LUMINANCE = 3
         }
 
-        override fun extractColor(drawable: Drawable, identity: String): Int =
+        override fun extractColors(drawable: Drawable, identity: String): ThemeColors =
             def.color.extract(drawable, identity)
     }
 

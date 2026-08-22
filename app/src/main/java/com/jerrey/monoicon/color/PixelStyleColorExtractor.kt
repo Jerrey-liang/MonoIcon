@@ -187,8 +187,8 @@ class PixelStyleColorExtractor : IconColorExtractor {
      * ## Why this exists
      *
      * The monochrome pipeline intentionally destroys RGB color information
-     * (via [com.jerrey.monoicon.image.DrawableConverter.toBitmap]
-     * and luminance masks). Color extraction needs the ORIGINAL colors.
+     * (the LAB mask pipeline keeps only alpha). Color extraction needs the
+     * ORIGINAL colors.
      *
      * Using a temporary [AdaptiveIconDrawable] with a transparent background
      * ensures the system manages foreground layout (inset, viewport,
@@ -199,8 +199,7 @@ class PixelStyleColorExtractor : IconColorExtractor {
      *
      * - Returns a raw ARGB_8888 bitmap with NO alpha/luminance mask applied.
      * - The bitmap is ONLY for color extraction — do NOT feed it back into
-     *   [com.jerrey.monoicon.image.DrawableConverter.toBitmap] or any mask
-     *   generation path.
+     *   the mask pipeline.
      * - Caller is responsible for recycling the bitmap when done.
      *
      * @param drawable The AdaptiveIconDrawable whose foreground to render.

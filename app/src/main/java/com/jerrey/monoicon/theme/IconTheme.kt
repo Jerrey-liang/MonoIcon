@@ -1,22 +1,24 @@
 package com.jerrey.monoicon.theme
 
 import android.graphics.drawable.Drawable
-import com.jerrey.monoicon.mask.MaskGenerator
+import com.jerrey.monoicon.mask.GenerateResult
+import com.jerrey.monoicon.theme.color.ThemeColors
 import com.jerrey.monoicon.theme.render.IconRenderResult
 
 /**
- * Pluggable icon theme (Phase 5 / Phase 6.1).
+ * Pluggable icon theme (Phase 5 / Phase 6.1 / 6.6).
  *
- * Each theme defines how monochrome masks are generated and how
- * dominant colors are extracted. Themes are data-driven and do not
- * carry mutable state — [ThemeManager] owns the current selection.
+ * Each theme defines how monochrome masks are generated and how the
+ * Pixel Launcher color pair (glyph tint + background plate) is derived.
+ * Themes are data-driven and do not carry mutable state — [ThemeManager]
+ * owns the current selection.
  *
  * ## Contract
  * - [generateMask] returns null when the drawable cannot be processed
  *   (unsupported type, rendering failure) — the caller passes through
  *   the original drawable unchanged.
- * - [extractColor] returns an ARGB color int; failures return
- *   [IconColorExtractor.FALLBACK_COLOR].
+ * - [extractColors] returns the Pixel color pair; failures return
+ *   [ThemeColors.TRANSPARENT].
  */
 interface IconTheme {
 
@@ -35,8 +37,8 @@ interface IconTheme {
      *                  unresolved (folder fallback — mask still generated but
      *                  not cached, preserving Phase 3.17 behavior).
      * @param context   Rendering context — desktop vs folder preview.
-     * @return A [MaskGenerator.GenerateResult] with the mask bitmap and
-     *         metadata; [MaskGenerator.GenerateResult.mask] is null if
+     * @return A [GenerateResult] with the mask bitmap and
+     *         metadata; [GenerateResult.mask] is null if
      *         processing failed — callers check mask separately (same
      *         pattern as the Phase 4 call sites).
      */
@@ -44,33 +46,27 @@ interface IconTheme {
         drawable: Drawable,
         identity: String?,
         context: IconContext,
-    ): MaskGenerator.GenerateResult
+    ): GenerateResult
 
     /**
-     * Extracts the dominant icon color.
+     * Returns the Pixel Launcher color pair for [identity].
      *
      * @param drawable  Full-color drawable (raw APK AdaptiveIconDrawable or
      *                  LayerAdaptiveIconDrawable with intact background).
      * @param identity  Resolved "pkg/cls" component identity.
-     * @return ARGB color int.
+     * @return Glyph tint + background plate colors.
      */
-    fun extractColor(drawable: Drawable, identity: String): Int
+    fun extractColors(drawable: Drawable, identity: String): ThemeColors
 
     /**
-     * Phase 6.1: combined mask + color generation.
+     * Phase 6.1/6.6: combined mask + color generation.
      *
      * Default implementation calls [generateMask] followed by
-     * [extractColor]. In Phase 6.1 the color is no longer sourced
-     * from [com.jerrey.monoicon.color.IconColorCache] — the default
-     * Pixel Default theme uses [SystemMaterialColorProvider] to read
-     * the system Material You palette, which is globally uniform
-     * across all icons (matching Pixel Launcher behavior).
-     *
-     * Themes that need per-app colors (future / custom themes) can
-     * override this method and re-add IconColorCache lookup.
-     *
-     * Pure Mono / High Contrast work identically: [extractColor]
-     * delegates to their configured [ColorStrategy].
+     * [extractColors]. The color pair comes from the Monet wallpaper
+     * palette via [PixelMonetColorEngine] — globally uniform across all
+     * icons (matching Pixel Launcher behavior). Themes that need per-app
+     * colors (future / custom themes) can override this method and
+     * re-add IconColorCache lookup.
      */
     fun generateIcon(
         drawable: Drawable,
@@ -79,15 +75,21 @@ interface IconTheme {
     ): IconRenderResult {
         return try {
             val maskResult = generateMask(drawable, identity, context)
-            val color = if (identity != null) {
-                try { extractColor(drawable, identity) } catch (_: Throwable) { 0 }
-            } else 0
-            IconRenderResult(maskResult, color)
+            // Pixel's themed icon colors are global wallpaper-derived values,
+            // not component-specific. Keep them even when folder identity
+            // resolution is temporarily unavailable; only mask caching needs
+            // a stable identity.
+            val colors = try {
+                extractColors(drawable, identity ?: "unknown")
+            } catch (_: Throwable) {
+                ThemeColors.TRANSPARENT
+            }
+            IconRenderResult(maskResult, colors.foreground, colors.background)
         } catch (_: Throwable) {
             // Any exception in mask generation or color extraction must not
             // propagate to the hook layer — return null mask → hook passes
             // through the original drawable gracefully.
-            IconRenderResult(MaskGenerator.GenerateResult(null, 3, false, false), 0)
+            IconRenderResult(GenerateResult(null, 3, false, false), 0, 0)
         }
     }
 }

@@ -13,9 +13,8 @@ import java.util.LinkedHashMap
  * [com.miui.home.common.drawable.LayerAdaptiveIconDrawable]
  * containing a monochrome mask.
  *
- * Consumed in [com.jerrey.monoicon.mask.MaskGenerator] to bypass the
- * pre-generated HyperOS mask and feed the original drawable into the
- * luminance pipeline.
+ * Consumed in [com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy]
+ * (raw-APK tier) to feed the original drawable into the LAB mask pipeline.
  *
  * ## Key format
  * `"pkg/full.ClassName"` — matches [IconColorCache] and IdentityResolver.
