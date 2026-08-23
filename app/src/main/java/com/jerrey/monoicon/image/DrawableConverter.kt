@@ -2,18 +2,19 @@ package com.jerrey.monoicon.image
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.VectorDrawable
 import android.util.Log
 
 /**
- * Renders [Drawable]s into raw ARGB_8888 [Bitmap]s and normalizes
- * native monochrome layers (Phase 6.6: mask generation itself lives in
- * [com.jerrey.monoicon.theme.mask.LabMonochromeExtractor] — the same
- * Pixel Launcher pipeline for every mask source).
+ * Renders [Drawable]s into raw ARGB_8888 [Bitmap]s and provides the Pixel
+ * legacy-icon AdaptiveIcon wrapper. Mask generation itself lives in
+ * [com.jerrey.monoicon.theme.mask.LabMonochromeExtractor].
  *
  * ## Supported render types
  * - [BitmapDrawable] — copies the inner bitmap directly.
@@ -27,6 +28,96 @@ object DrawableConverter {
 
     // Phase 2.5 性能优化：复用绘制对象，避免每次分配 Canvas/Bitmap 位图分配
     private val reusableCanvas = Canvas()
+
+    /**
+     * Pixel Launcher's scale for a non-adaptive (legacy) icon foreground.
+     * The value is intentionally derived from the platform inset rather than
+     * hard-coded so it follows the same AdaptiveIconDrawable contract.
+     */
+    private val pixelLegacyIconScale: Float
+        get() = (
+            1f / ((AdaptiveIconDrawable.getExtraInsetFraction() * 2f) + 1f)
+                * kotlin.math.sqrt(0.6510416666666666).toFloat()
+                * 0.7f
+            )
+
+    /**
+     * Wraps a legacy Drawable exactly like Pixel Launcher's
+     * BaseIconFactory.wrapToAdaptiveIcon().
+     *
+     * The returned AdaptiveIconDrawable owns an isolated foreground wrapper;
+     * the source Drawable is never used directly by the generated mask path.
+     */
+    fun wrapPixelLegacyIcon(drawable: Drawable): AdaptiveIconDrawable? {
+        return try {
+            val source = cloneForPixelLegacy(drawable) ?: return null
+            val foreground = wrapIntoSquareDrawable(source, pixelLegacyIconScale)
+            AdaptiveIconDrawable(ColorDrawable(android.graphics.Color.WHITE), foreground).apply {
+                setBounds(0, 0, 1, 1)
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "wrapPixelLegacyIcon failed: ${t.message}", t)
+            null
+        }
+    }
+
+    /** Pixel's aspect-ratio-preserving square wrapper. */
+    private fun wrapIntoSquareDrawable(drawable: Drawable, scale: Float): Drawable {
+        val width = drawable.intrinsicWidth.toFloat()
+        val height = drawable.intrinsicHeight.toFloat()
+        val scaledWidth: Float
+        val scaledHeight: Float
+        if (height <= width || width <= 0f) {
+            scaledWidth = scale
+            scaledHeight = if (width <= height || height <= 0f) {
+                scale
+            } else {
+                (height / width) * scale
+            }
+        } else {
+            scaledWidth = (width / height) * scale
+            scaledHeight = scale
+        }
+        val horizontal = ((1f - scaledWidth) / 2f).coerceAtLeast(0f)
+        val vertical = ((1f - scaledHeight) / 2f).coerceAtLeast(0f)
+        return InsetDrawable(drawable, horizontal, vertical, horizontal, vertical)
+    }
+
+    /**
+     * Makes a private Drawable for the wrapper. ConstantState is preferred;
+     * BitmapDrawable gets a copied bitmap when no state is available.
+     */
+    private fun cloneForPixelLegacy(drawable: Drawable): Drawable? {
+        drawable.constantState?.let { return it.newDrawable().mutate() }
+        if (drawable is BitmapDrawable) {
+            val source = drawable.bitmap ?: return null
+            val copy = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+            synchronized(reusableCanvas) {
+                reusableCanvas.setBitmap(copy)
+                reusableCanvas.drawBitmap(source, 0f, 0f, null)
+                reusableCanvas.setBitmap(null)
+            }
+            return BitmapDrawable(null, copy)
+        }
+        val width = drawable.intrinsicWidth.coerceAtLeast(1)
+        val height = drawable.intrinsicHeight.coerceAtLeast(1)
+        val copy = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val oldBounds = Rect(drawable.bounds)
+        return try {
+            synchronized(reusableCanvas) {
+                reusableCanvas.setBitmap(copy)
+                drawable.setBounds(0, 0, width, height)
+                drawable.draw(reusableCanvas)
+                reusableCanvas.setBitmap(null)
+            }
+            BitmapDrawable(null, copy)
+        } catch (t: Throwable) {
+            copy.recycle()
+            null
+        } finally {
+            drawable.bounds = oldBounds
+        }
+    }
 
     /**
      * Renders [drawable] to a raw ARGB_8888 [Bitmap] **without** any mask

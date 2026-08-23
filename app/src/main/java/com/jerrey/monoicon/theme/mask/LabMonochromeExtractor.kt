@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.InsetDrawable
 import kotlin.math.cbrt
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -87,6 +89,132 @@ object LabMonochromeExtractor {
         } finally {
             render.recycle()
         }
+    }
+
+    /**
+     * Pixel Launcher native-monochrome path.
+     *
+     * Native monochrome layers are already alpha masks. Pixel only applies
+     * the inverse AdaptiveIcon inset while rasterizing them; no luminance,
+     * polarity or edge-plate processing is involved.
+     */
+    fun extractPixelNativeMonochrome(drawable: Drawable, targetSize: Int): Bitmap? {
+        return try {
+            val size = targetSize.coerceAtLeast(1)
+            val inset = InsetDrawable(
+                drawable,
+                -AdaptiveIconDrawable.getExtraInsetFraction(),
+            )
+            val result = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
+            inset.setBounds(0, 0, size, size)
+            inset.draw(Canvas(result))
+            result
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Pixel Launcher's forced Adaptive Icon mask path.
+     *
+     * This intentionally bypasses MonoIcon's edge-plate and polarity
+     * heuristics. It follows MonoIconThemeController: render the Adaptive Icon
+     * layers into a square intermediate bitmap, apply equal-weight grayscale,
+     * min/max stretch and the Pixel mid-tone curve, then compensate the
+     * AdaptiveIcon inset into the requested output size.
+     */
+    fun extractPixelAdaptiveIcon(drawable: AdaptiveIconDrawable, targetSize: Int): Bitmap? {
+        var flat: Bitmap? = null
+        var intermediate: Bitmap? = null
+        return try {
+            val outputSize = targetSize.coerceAtLeast(1)
+            val extraInset = AdaptiveIconDrawable.getExtraInsetFraction()
+            val bitmapSize = kotlin.math.round(
+                outputSize * 2f / ((extraInset * 2f) + 1f)
+            ).toInt().coerceAtLeast(1)
+
+            flat = Bitmap.createBitmap(bitmapSize, bitmapSize, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(flat)
+            canvas.drawColor(Color.BLACK)
+            drawable.background?.let {
+                it.setBounds(0, 0, bitmapSize, bitmapSize)
+                it.draw(canvas)
+            }
+            drawable.foreground?.let {
+                it.setBounds(0, 0, bitmapSize, bitmapSize)
+                it.draw(canvas)
+            }
+
+            val pixels = IntArray(bitmapSize * bitmapSize)
+            flat.getPixels(pixels, 0, bitmapSize, 0, 0, bitmapSize, bitmapSize)
+            flat.recycle()
+            flat = null
+
+            var min = 255
+            var max = 0
+            val grayscale = IntArray(pixels.size)
+            for (i in pixels.indices) {
+                val p = pixels[i]
+                val gray = kotlin.math.round((
+                    ((p ushr 16) and 0xFF) +
+                    ((p ushr 8) and 0xFF) +
+                    (p and 0xFF)
+                    ) / 3f).toInt().coerceIn(0, 255)
+                grayscale[i] = gray
+                min = minOf(min, gray)
+                max = maxOf(max, gray)
+            }
+
+            val alpha = ByteArray(grayscale.size)
+            if (min < max) {
+                val range = max - min
+                for (i in grayscale.indices) {
+                    val stretched = kotlin.math.round(
+                        ((grayscale[i] - min) * 255f) / range.toFloat()
+                    ).toInt().coerceIn(0, 255)
+                    alpha[i] = midToneBoost(stretched).toByte()
+                }
+            } else {
+                for (i in grayscale.indices) {
+                    alpha[i] = grayscale[i].toByte()
+                }
+            }
+
+            intermediate = Bitmap.createBitmap(bitmapSize, bitmapSize, Bitmap.Config.ALPHA_8)
+            intermediate.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(alpha))
+            val inset = InsetDrawable(BitmapDrawableCompat(intermediate), -extraInset)
+            val result = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.ALPHA_8)
+            inset.setBounds(0, 0, outputSize, outputSize)
+            inset.draw(Canvas(result))
+            intermediate.recycle()
+            intermediate = null
+            result
+        } catch (_: Throwable) {
+            null
+        } finally {
+            flat?.takeUnless { it.isRecycled }?.recycle()
+            intermediate?.takeUnless { it.isRecycled }?.recycle()
+        }
+    }
+
+    /** Minimal Bitmap-backed Drawable used for Pixel's inset raster step. */
+    private class BitmapDrawableCompat(private val bitmap: Bitmap) : Drawable() {
+        private val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+
+        override fun draw(canvas: Canvas) {
+            canvas.drawBitmap(bitmap, null, bounds, paint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+            paint.colorFilter = colorFilter
+        }
+
+        @Suppress("OVERRIDE_DEPRECATION")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
     /**
@@ -415,7 +543,7 @@ object LabMonochromeExtractor {
 
     // ── Pixel Launcher mid-tone boost (MonochromeIconFactory) ──────────
 
-    private fun midToneBoost(p: Int): Int {
+    internal fun midToneBoost(p: Int): Int {
         if (p > 128) return (255 - ((1.0 - (p - 128) / 128.0) * (255 - p))).toInt()
         return ((1.0 - (128.0 - p) / 128.0) * p).toInt()
     }
