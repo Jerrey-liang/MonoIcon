@@ -4,15 +4,15 @@ import android.graphics.drawable.Drawable
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 
 /**
- * Pixel Launcher dynamic color strategy (Phase 6.6).
+ * HyperOS Launcher overlay color strategy.
  *
- * Derives BOTH colors from the Monet wallpaper palette with the exact
- * Pixel Launcher algorithm (HCT/CAM16 tonal palette from the wallpaper
- * primary seed):
- * - glyph  (`themed_icon_color`)                = accent tone 40 (light) / 80 (dark)
- * - plate  (`themed_icon_background_color`)     = accent tone 95 (light) / 10 (dark)
+ * Reads both colors from the final `com.miui.home:material_dynamic_primary*`
+ * resources already resolved by SystemUI's Monet/RRO pipeline:
+ * - glyph = primary40 (light) / primary80 (dark)
+ * - plate = primary95 (light) / primary10 (dark)
  *
- * Cached by [PixelMonetColorEngine] with a 60-second TTL.
+ * Resource IDs are cached, but RGB values are read for every invocation so
+ * overlay changes are visible on the next Drawable draw.
  */
 class PixelColorStrategy : ColorStrategy {
 

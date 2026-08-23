@@ -18,6 +18,7 @@ import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.image.DrawableConverter
 import com.jerrey.monoicon.theme.mask.LabMonochromeExtractor
 import com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy
+import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertEquals
@@ -32,6 +33,7 @@ class PixelMaskPipelineInstrumentedTest {
     fun clearCaches() {
         IconDrawableCache.clear()
         MonochromeCache.shared.clear()
+        PixelMonetColorEngine.invalidate()
     }
 
     @Test
@@ -119,6 +121,22 @@ class PixelMaskPipelineInstrumentedTest {
         assertNotNull(result)
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
+    }
+
+    @Test
+    fun launcherOverlayResourceNamesMatchPrimaryToneContract() {
+        assertTrue(
+            PixelMonetColorEngine.PRIMARY_LIGHT_FOREGROUND.endsWith("primary40")
+        )
+        assertTrue(
+            PixelMonetColorEngine.PRIMARY_LIGHT_BACKGROUND.endsWith("primary95")
+        )
+        assertTrue(
+            PixelMonetColorEngine.PRIMARY_DARK_FOREGROUND.endsWith("primary80")
+        )
+        assertTrue(
+            PixelMonetColorEngine.PRIMARY_DARK_BACKGROUND.endsWith("primary10")
+        )
     }
 
     private fun findBounds(bitmap: Bitmap, predicate: (Int) -> Boolean): Rect? {
