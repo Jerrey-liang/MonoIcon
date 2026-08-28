@@ -38,6 +38,7 @@ object ConfigManager {
     private const val PREFS_NAME = "monoicon_config"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_THEME_ID = "theme_id"
+    private const val KEY_VARIANT_ID = "variant_id"
 
     /** Launcher-side refresh cadence (ms). */
     private const val REFRESH_INTERVAL_MS = 1_000L
@@ -199,6 +200,53 @@ object ConfigManager {
             android.util.Log.w(TAG, "setThemeId failed: ${t.message}")
             try {
                 fallbackPrefs?.edit()?.putString(KEY_THEME_ID, themeId)?.apply()
+            } catch (_: Throwable) { }
+        }
+    }
+
+    // ── Material Dynamic Color Variant ────────────────────────────────
+
+    /** Launcher side: reads the selected Google 2025 Variant. */
+    fun getVariantId(): String = try {
+        remotePrefsProvider?.invoke()?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
+    } catch (_: Throwable) {
+        "tonal_spot"
+    }
+
+    /** UI side: reads the selected Variant from remote preferences. */
+    fun getVariantIdFromUi(): String {
+        val service = remoteService
+        return if (service != null) {
+            try {
+                service.getRemotePreferences(PREFS_NAME)
+                    .getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
+            } catch (_: Throwable) {
+                fallbackPrefs?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
+            }
+        } else {
+            fallbackPrefs?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
+        }
+    }
+
+    /** Persists the selected Google 2025 Variant. */
+    fun setVariantId(variantId: String) {
+        val normalized = variantId.trim().lowercase().ifBlank { "tonal_spot" }
+        try {
+            val service = remoteService
+            if (service != null) {
+                service.getRemotePreferences(PREFS_NAME)
+                    .edit()
+                    .putString(KEY_VARIANT_ID, normalized)
+                    .apply()
+                android.util.Log.i(TAG, "setVariantId=$normalized (remote)")
+            } else {
+                fallbackPrefs?.edit()?.putString(KEY_VARIANT_ID, normalized)?.apply()
+                android.util.Log.i(TAG, "setVariantId=$normalized (fallback prefs)")
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setVariantId failed: ${t.message}")
+            try {
+                fallbackPrefs?.edit()?.putString(KEY_VARIANT_ID, normalized)?.apply()
             } catch (_: Throwable) { }
         }
     }

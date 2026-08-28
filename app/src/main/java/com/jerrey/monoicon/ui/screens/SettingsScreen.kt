@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.theme.ThemeManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,16 +52,24 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen() {
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
     var selectedTheme by remember { mutableStateOf(ThemeManager.currentThemeId()) }
+    var selectedVariant by remember {
+        mutableStateOf(
+            Material2025ColorEngine.VariantId
+                .fromId(ConfigManager.getVariantIdFromUi())
+                .id
+        )
+    }
     var showRestartHint by remember { mutableStateOf(false) }
     var restarting by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     Scaffold { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(paddingValues)
                 .padding(16.dp)
         ) {
             Text(
@@ -98,6 +109,56 @@ fun SettingsScreen() {
                                 ConfigManager.setEnabled(value)
                             }
                         )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Material Dynamic Color Variant ─────────────────────────
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Material Dynamic Color 2025",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Select the palette variant used for icon colors.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Material2025ColorEngine.availableVariants.forEach { variant ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedVariant == variant.id,
+                                onClick = {
+                                    selectedVariant = variant.id
+                                    showRestartHint = true
+                                    ConfigManager.setVariantId(variant.id)
+                                }
+                            )
+                            Column(modifier = Modifier.padding(start = 8.dp)) {
+                                Text(text = variant.label)
+                                if (variant.id == "tonal_spot") {
+                                    Text(
+                                        text = "Default Material You style",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
