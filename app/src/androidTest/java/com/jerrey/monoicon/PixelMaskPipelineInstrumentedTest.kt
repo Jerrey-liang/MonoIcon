@@ -103,6 +103,119 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(Color.alpha(mask!!.getPixel(32, 32)) in 84..86)
     }
 
+    @Test
+    fun adaptiveNearFlatGlyphUsesSilhouette() {
+        // Near-flat single-color glyph on a transparent foreground: the
+        // silhouette branch keeps the glyph solid instead of flipping it.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val identity = "test.pixel/adaptive-flat-glyph"
+        val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.TRANSPARENT)
+        }
+        Canvas(fg).drawCircle(32f, 32f, 20f, Paint().apply { color = Color.WHITE })
+        val adaptive = AdaptiveIconDrawable(
+            ColorDrawable(Color.WHITE),
+            BitmapDrawable(context.resources, fg),
+        )
+        IconDrawableCache.put(identity, adaptive)
+
+        val display = AdaptiveIconDrawable(
+            ColorDrawable(Color.WHITE),
+            ColorDrawable(Color.WHITE),
+        )
+        val strategy = AospMonochromeMaskStrategy().apply {
+            configureCache("aosp_test", "instrumented")
+        }
+        val result = strategy.generate(display, identity)
+
+        assertNotNull(result)
+        assertTrue(result!!.rawUsed)
+        assertNotNull(result.mask)
+        val mask = result.mask!!
+        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // glyph body
+        assertTrue(Color.alpha(mask.getPixel(12, 12)) < 32)   // plate
+        assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // corner
+        IconDrawableCache.remove(identity)
+    }
+
+    @Test
+    fun adaptiveInsetLayersFollowVisibleRingFlip() {
+        // JMComic3 regression: both layers inset 8.35% (prefill ring), light
+        // badge with dark internal details. The visible-ring flip must make
+        // the dark details the glyph while the plate and the badge body stay
+        // transparent.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val identity = "test.pixel/adaptive-inset-layers"
+        val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.TRANSPARENT)
+        }
+        val fgCanvas = Canvas(fg)
+        fgCanvas.drawCircle(32f, 32f, 30f, Paint().apply { color = Color.rgb(210, 210, 210) })
+        fgCanvas.drawRect(24f, 24f, 40f, 40f, Paint().apply { color = Color.rgb(20, 20, 20) })
+        val adaptive = AdaptiveIconDrawable(
+            android.graphics.drawable.InsetDrawable(ColorDrawable(Color.WHITE), 0.0835f),
+            android.graphics.drawable.InsetDrawable(
+                BitmapDrawable(context.resources, fg), 0.0835f,
+            ),
+        )
+        IconDrawableCache.put(identity, adaptive)
+
+        val display = AdaptiveIconDrawable(
+            ColorDrawable(Color.WHITE),
+            ColorDrawable(Color.WHITE),
+        )
+        val strategy = AospMonochromeMaskStrategy().apply {
+            configureCache("aosp_test", "instrumented")
+        }
+        val result = strategy.generate(display, identity)
+
+        assertNotNull(result)
+        assertTrue(result!!.rawUsed)
+        assertNotNull(result.mask)
+        val mask = result.mask!!
+        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 200)  // dark details
+        assertTrue(Color.alpha(mask.getPixel(12, 32)) < 64)   // badge body (haze-cleared)
+        assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // plate corner
+        IconDrawableCache.remove(identity)
+    }
+
+    @Test
+    fun adaptiveOpaqueForegroundFallsBackToVisibleRingFlip() {
+        // Opaque full-cell foreground (bright art + dark motif): no
+        // transparent structure, so the B core applies and the dark motif
+        // becomes the glyph.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val identity = "test.pixel/adaptive-opaque-fg"
+        val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.rgb(230, 230, 230))
+        }
+        Canvas(fg).drawRect(24f, 24f, 40f, 40f, Paint().apply {
+            color = Color.rgb(40, 40, 40)
+        })
+        val adaptive = AdaptiveIconDrawable(
+            ColorDrawable(Color.WHITE),
+            BitmapDrawable(context.resources, fg),
+        )
+        IconDrawableCache.put(identity, adaptive)
+
+        val display = AdaptiveIconDrawable(
+            ColorDrawable(Color.WHITE),
+            ColorDrawable(Color.WHITE),
+        )
+        val strategy = AospMonochromeMaskStrategy().apply {
+            configureCache("aosp_test", "instrumented")
+        }
+        val result = strategy.generate(display, identity)
+
+        assertNotNull(result)
+        assertTrue(result!!.rawUsed)
+        assertNotNull(result.mask)
+        val mask = result.mask!!
+        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // dark motif
+        assertTrue(Color.alpha(mask.getPixel(12, 12)) < 64)   // bright art (haze-cleared)
+        IconDrawableCache.remove(identity)
+    }
+
     // ── AOSP edge-flip predicate ───────────────────────────────────────
 
     @Test

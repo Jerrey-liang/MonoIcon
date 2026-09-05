@@ -71,10 +71,25 @@ class AospMonochromeMaskStrategy : MaskStrategy {
                     keyBitmap = mask
                     logd(TAG, "[AospMask] source=AOSP_NATIVE raw=$rawUsed")
                 } else {
-                    source = MaskStrategy.SOURCE_AOSP_ADAPTIVE
-                    mask = AospMonochromeFactory.wrap(adaptiveSource, size)
-                    keyBitmap = mask
-                    logd(TAG, "[AospMask] source=AOSP_ADAPTIVE raw=$rawUsed")
+                    // Plan replay decision: near-flat single-color glyph layers
+                    // use the foreground alpha silhouette; everything else
+                    // (opaque art, artwork badges) takes the B core.
+                    val structure = adaptiveSource.foreground?.let {
+                        AospMonochromeFactory.foregroundStructure(it, size)
+                    }
+                    if (structure?.useSilhouette == true) {
+                        source = MaskStrategy.SOURCE_AOSP_ADAPTIVE_SILHOUETTE
+                        mask = AospMonochromeFactory.renderForegroundSilhouette(
+                            adaptiveSource.foreground!!, size,
+                        )
+                        keyBitmap = mask
+                        logd(TAG, "[AospMask] source=AOSP_ADAPTIVE_SILHOUETTE raw=$rawUsed")
+                    } else {
+                        source = MaskStrategy.SOURCE_AOSP_ADAPTIVE
+                        mask = AospMonochromeFactory.wrap(adaptiveSource, size)
+                        keyBitmap = mask
+                        logd(TAG, "[AospMask] source=AOSP_ADAPTIVE raw=$rawUsed")
+                    }
                 }
             } else if (
                 rawCached != null ||

@@ -36,6 +36,12 @@ import kotlin.math.round
  */
 object AospMonochromeFactory {
 
+    // Thresholds validated by the plan replay (plan_silhouette_b_replay).
+    private const val SILHOUETTE_MIN_TRANSPARENT_FRACTION = 0.05f
+    private const val SILHOUETTE_MAX_FG_GRAY_STD = 20f
+    private const val HAZE_THRESHOLD = 64
+    private const val MIN_VISIBLE_ALPHA = 32
+
     /** Intermediate square size for a requested output size (AOSP mBitmapSize). */
     fun flatSize(targetSize: Int): Int {
         val size = targetSize.coerceAtLeast(1)
@@ -58,12 +64,15 @@ object AospMonochromeFactory {
         }
     }
 
-    /** Flattens background + foreground onto a black square canvas (AOSP wrap). */
+    /** Flattens background + foreground (transparent prefill; alpha = coverage). */
     fun renderFlat(drawable: AdaptiveIconDrawable, size: Int): Bitmap? {
         return try {
+            // A fresh ARGB_8888 bitmap is transparent black, so pixels not
+            // covered by any layer keep RGB=0 (the same grayscale value as
+            // AOSP's opaque black prefill) while the alpha channel records
+            // coverage — used to exclude prefill from the stretch statistics.
             val flat = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(flat)
-            canvas.drawColor(Color.BLACK)
             drawable.background?.let {
                 it.setBounds(0, 0, size, size)
                 it.draw(canvas)
@@ -79,8 +88,15 @@ object AospMonochromeFactory {
     }
 
     /**
-     * AOSP `MonochromeIconFactory.generateMono()`:
-     * grayscale → min/max stretch → edge-strip polarity flip.
+     * AOSP `MonochromeIconFactory.generateMono()` with two robustness fixes
+     * validated by the plan replay:
+     * - prefill pixels (no layer coverage) are excluded from min/max and
+     *   forced to alpha 0;
+     * - the edge strip samples the OUTER RING OF THE VISIBLE VIEWPORT
+     *   instead of the clipped overscan band (an inset background layer
+     *   would otherwise pollute the band with prefill);
+     * - after a flip, mask values below [HAZE_THRESHOLD] are zeroed so the
+     *   bright plate-adjacent content does not haze over the whole icon.
      */
     fun generateMono(flat: Bitmap, targetSize: Int): Bitmap? {
         val size = flat.width
@@ -88,32 +104,45 @@ object AospMonochromeFactory {
         flat.getPixels(pixels, 0, size, 0, 0, size, size)
 
         val gray = ByteArray(pixels.size)
+        val prefill = BooleanArray(pixels.size)
         var min = 255
         var max = 0
         for (i in pixels.indices) {
             val p = pixels[i]
             val g = (((p ushr 16) and 0xFF) + ((p ushr 8) and 0xFF) + (p and 0xFF)) / 3
             gray[i] = g.toByte()
-            min = minOf(min, g)
-            max = maxOf(max, g)
+            if (((p ushr 24) and 0xFF) == 0) {
+                prefill[i] = true
+            } else {
+                min = minOf(min, g)
+                max = maxOf(max, g)
+            }
         }
 
         if (min < max) {
             val range = (max - min).toFloat()
 
-            // Edge strip: the top+bottom band outside the visible viewport.
-            // mEdgePixelLength = mBitmapSize * (mBitmapSize - iconBitmapSize) / 2
-            // → band rows on both sides, every column included.
-            val bandRows = ((size - targetSize.coerceIn(1, size)) / 2)
+            // Visible-viewport outer ring: the viewport is the center 2/3 of
+            // the flat; sample its outermost `bandRows` rows on both sides
+            // (the AOSP band size, relocated to where the plate really is).
+            val bandRows = (size - targetSize.coerceIn(1, size)) / 2
+            val viewportTop = size / 6
             var edgeSum = 0L
             var edgeCount = 0
-            for (y in 0 until bandRows) {
-                val topRow = y * size
-                val bottomRow = (size - 1 - y) * size
+            val firstBand = viewportTop until minOf(viewportTop + bandRows, size - viewportTop)
+            val secondBand = (size - viewportTop - bandRows).coerceAtLeast(viewportTop) until (size - viewportTop)
+            for (y in firstBand) {
+                val row = y * size
                 for (x in 0 until size) {
-                    edgeSum += (gray[topRow + x].toInt() and 0xFF)
-                    edgeSum += (gray[bottomRow + x].toInt() and 0xFF)
-                    edgeCount += 2
+                    edgeSum += (gray[row + x].toInt() and 0xFF)
+                    edgeCount++
+                }
+            }
+            for (y in secondBand) {
+                val row = y * size
+                for (x in 0 until size) {
+                    edgeSum += (gray[row + x].toInt() and 0xFF)
+                    edgeCount++
                 }
             }
             val flip = if (edgeCount > 0) {
@@ -124,9 +153,17 @@ object AospMonochromeFactory {
             }
 
             for (i in gray.indices) {
+                if (prefill[i]) {
+                    gray[i] = 0
+                    continue
+                }
                 val p = gray[i].toInt() and 0xFF
-                val stretched = round(((p - min) * 255f) / range).toInt().coerceIn(0, 255)
-                gray[i] = (if (flip) 255 - stretched else stretched).toByte()
+                var value = round(((p - min) * 255f) / range).toInt().coerceIn(0, 255)
+                if (flip) {
+                    value = 255 - value
+                    if (value < HAZE_THRESHOLD) value = 0
+                }
+                gray[i] = value.toByte()
             }
         }
         // min == max: AOSP leaves the bytes unchanged (flat grayscale pass-through).
@@ -168,6 +205,134 @@ object AospMonochromeFactory {
         } catch (_: Throwable) {
             null
         }
+    }
+
+    /**
+     * Foreground alpha-coverage silhouette (plan "silhouette" branch):
+     * render the foreground layer alone, keep alpha >= 32 as the glyph and
+     * rasterize with the ClippedMonoDrawable geometry.
+     */
+    fun renderForegroundSilhouette(drawable: Drawable, targetSize: Int): Bitmap? {
+        val flatSize = flatSize(targetSize)
+        val raw: Bitmap = try {
+            val bmp = Bitmap.createBitmap(flatSize, flatSize, Bitmap.Config.ALPHA_8)
+            val canvas = Canvas(bmp)
+            drawable.setBounds(0, 0, flatSize, flatSize)
+            drawable.draw(canvas)
+            bmp
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        var mono: Bitmap? = null
+        return try {
+            val pixels = IntArray(flatSize * flatSize)
+            raw.getPixels(pixels, 0, flatSize, 0, 0, flatSize, flatSize)
+            val mapped = ByteArray(pixels.size)
+            for (i in pixels.indices) {
+                mapped[i] = if (((pixels[i] ushr 24) and 0xFF) >= MIN_VISIBLE_ALPHA) 255.toByte() else 0
+            }
+            mono = Bitmap.createBitmap(flatSize, flatSize, Bitmap.Config.ALPHA_8)
+            mono.copyPixelsFromBuffer(ByteBuffer.wrap(mapped))
+            rasterizeClipped(mono, targetSize)
+        } catch (_: Throwable) {
+            null
+        } finally {
+            mono?.takeUnless { it.isRecycled }?.recycle()
+            raw.takeUnless { it.isRecycled }?.recycle()
+        }
+    }
+
+    /**
+     * Foreground-layer structure used by the silhouette/B decision:
+     * transparency fractions measured in flat space and inside the fg's own
+     * bounding box, plus the grayscale standard deviation of its opaque
+     * content. Full-bleed artwork badges (high std) must not collapse into a
+     * flat silhouette block.
+     */
+    fun foregroundStructure(drawable: Drawable, targetSize: Int): ForegroundStructure? {
+        val flatSize = flatSize(targetSize)
+        val bmp: Bitmap = try {
+            val bitmap = Bitmap.createBitmap(flatSize, flatSize, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, flatSize, flatSize)
+            drawable.draw(canvas)
+            bitmap
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        return try {
+            val pixels = IntArray(flatSize * flatSize)
+            bmp.getPixels(pixels, 0, flatSize, 0, 0, flatSize, flatSize)
+
+            val opaque = BooleanArray(pixels.size)
+            var left = flatSize
+            var right = -1
+            var top = flatSize
+            var bottom = -1
+            var opaqueCount = 0
+            for (i in pixels.indices) {
+                if (((pixels[i] ushr 24) and 0xFF) >= MIN_VISIBLE_ALPHA) {
+                    opaque[i] = true
+                    opaqueCount++
+                    val x = i % flatSize
+                    val y = i / flatSize
+                    left = minOf(left, x)
+                    right = maxOf(right, x)
+                    top = minOf(top, y)
+                    bottom = maxOf(bottom, y)
+                }
+            }
+            val flatTransparentFraction = 1f - opaqueCount.toFloat() / pixels.size
+            if (opaqueCount == 0) {
+                return ForegroundStructure(
+                    flatTransparentFraction = flatTransparentFraction,
+                    bboxTransparentFraction = 0f,
+                    grayStd = 0f,
+                )
+            }
+
+            var bboxOpaque = 0
+            var sum = 0.0
+            var sumSq = 0.0
+            for (y in top..bottom) {
+                for (x in left..right) {
+                    val i = y * flatSize + x
+                    if (opaque[i]) {
+                        bboxOpaque++
+                        val p = pixels[i]
+                        val g = (((p ushr 16) and 0xFF) + ((p ushr 8) and 0xFF) + (p and 0xFF)) / 3.0
+                        sum += g
+                        sumSq += g * g
+                    }
+                }
+            }
+            val bboxArea = (bottom - top + 1) * (right - left + 1)
+            val bboxTransparentFraction = 1f - bboxOpaque.toFloat() / bboxArea
+            val mean = sum / bboxOpaque
+            val variance = (sumSq / bboxOpaque) - mean * mean
+            val grayStd = kotlin.math.sqrt(variance.coerceAtLeast(0.0)).toFloat()
+            ForegroundStructure(
+                flatTransparentFraction = flatTransparentFraction,
+                bboxTransparentFraction = bboxTransparentFraction,
+                grayStd = grayStd,
+            )
+        } catch (_: Throwable) {
+            null
+        } finally {
+            bmp.takeUnless { it.isRecycled }?.recycle()
+        }
+    }
+
+    /** Foreground structure metrics + the silhouette branch decision. */
+    data class ForegroundStructure(
+        val flatTransparentFraction: Float,
+        val bboxTransparentFraction: Float,
+        val grayStd: Float,
+    ) {
+        val useSilhouette: Boolean
+            get() = flatTransparentFraction >= SILHOUETTE_MIN_TRANSPARENT_FRACTION &&
+                bboxTransparentFraction >= SILHOUETTE_MIN_TRANSPARENT_FRACTION &&
+                grayStd < SILHOUETTE_MAX_FG_GRAY_STD
     }
 
     /**

@@ -50,5 +50,6 @@ interface MaskStrategy {
         const val SOURCE_LUMINANCE = 3
         const val SOURCE_AOSP_ADAPTIVE = 4
         const val SOURCE_AOSP_LEGACY = 5
+        const val SOURCE_AOSP_ADAPTIVE_SILHOUETTE = 6
     }
 }
