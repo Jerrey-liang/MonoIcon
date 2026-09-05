@@ -50,9 +50,9 @@ private fun relMs(): Long = (System.nanoTime() - bootTimeNs) / 1_000_000L
  * [DebugHooks], default off). All hooks use the official libxposed
  * interceptor-chain API.
  *
- * Pipeline (Phase 6.6): identity via [IdentityResolver], masks via the
- * unified [com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy]
- * (Pixel Launcher LAB pipeline), caches via IconDrawableCache /
+ * Pipeline (Phase 7): identity via [IdentityResolver], masks via the
+ * unified [com.jerrey.monoicon.theme.mask.AospMonochromeMaskStrategy]
+ * (AOSP android15 monochrome pipeline), caches via IconDrawableCache /
  * IconColorCache / MonochromeCache.
  *
  * Single entry class. No legacy adapters. No IXposedHookLoadPackage.
@@ -326,7 +326,7 @@ class IconThemeHook : XposedModule() {
      * - identity resolution order: mBuddyInfo → drawable constantState → viewIdentityMap.remove
      * - Phase 6.5: the drawable arrives unchanged from Hooks 9/10
      *   (LayerAdaptiveIconDrawable, same as the desktop path), so folder
-     *   masks now come from the SAME PixelMonochromeMaskStrategy pipeline
+     *   masks now come from the SAME AospMonochromeMaskStrategy pipeline
      *   as the MonoIcon-processed desktop icon.
      * - already-mono inputs (recycled view re-binds) pass through untouched.
      * - null-safe passthrough on failure.
@@ -432,7 +432,7 @@ class IconThemeHook : XposedModule() {
     // pipeline diverge from the desktop one (native monochrome layers, no
     // launcher icon mask → square / washed-out / inconsistent folder icons).
     // With the pass-through, folder and desktop consume the SAME
-    // LayerAdaptiveIconDrawable through the SAME PixelMonochromeMaskStrategy,
+    // LayerAdaptiveIconDrawable through the SAME AospMonochromeMaskStrategy,
     // so folder previews match the MonoIcon-processed desktop icon.
     // ═══════════════════════════════════════════════════════════════
 

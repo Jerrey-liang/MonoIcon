@@ -15,12 +15,6 @@ object PixelMonetColorEngine {
     private const val MIUI_MANAGER = "com.miui.miwallpaper.MiuiWallpaperManager"
     private const val FALLBACK_SOURCE = 0xFF4285F4.toInt()
 
-    // Kept for source/binary compatibility with the previous overlay implementation.
-    internal const val PRIMARY_LIGHT_FOREGROUND = "material_dynamic_primary40"
-    internal const val PRIMARY_LIGHT_BACKGROUND = "material_dynamic_primary95"
-    internal const val PRIMARY_DARK_FOREGROUND = "material_dynamic_primary80"
-    internal const val PRIMARY_DARK_BACKGROUND = "material_dynamic_primary10"
-
     private val LIGHT_FALLBACK = IconThemeColors(0xFF3C4043.toInt(), 0xFFF5F5F5.toInt(), fallbackPalette(FALLBACK_SOURCE))
     private val DARK_FALLBACK = IconThemeColors(0xFFDADCE0.toInt(), 0xFF202124.toInt(), fallbackPalette(FALLBACK_SOURCE))
 

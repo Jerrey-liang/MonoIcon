@@ -86,6 +86,8 @@ class MonochromeCache(
         val src = when (source) {
             SOURCE_NATIVE -> "NATIVE"
             SOURCE_FOREGROUND -> "FG"
+            SOURCE_AOSP_ADAPTIVE -> "AOSP_ADAPTIVE"
+            SOURCE_AOSP_LEGACY -> "AOSP_LEGACY"
             else -> "LUMA"
         }
         return "$themeId|$context|$identity|${w}x${h}@$fp|$src"
@@ -96,10 +98,12 @@ class MonochromeCache(
         const val SOURCE_NATIVE = 1
         const val SOURCE_FOREGROUND = 2
         const val SOURCE_LUMINANCE = 3
+        const val SOURCE_AOSP_ADAPTIVE = 4
+        const val SOURCE_AOSP_LEGACY = 5
 
         /**
          * Process-wide shared instance (Phase 4.0-A).
-         * Both the mask pipeline (PixelMonochromeMaskStrategy) and lifecycle
+         * Both the mask pipeline (AospMonochromeMaskStrategy) and lifecycle
          * management (CacheManager) operate on this single instance so
          * invalidation and statistics see the same data.
          */

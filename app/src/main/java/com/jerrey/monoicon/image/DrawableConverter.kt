@@ -30,38 +30,43 @@ object DrawableConverter {
     private val reusableCanvas = Canvas()
 
     /**
-     * Pixel Launcher's scale for a non-adaptive (legacy) icon foreground.
-     * The value is intentionally derived from the platform inset rather than
-     * hard-coded so it follows the same AdaptiveIconDrawable contract.
+     * AOSP android15 `BaseIconFactory.LEGACY_ICON_SCALE`:
+     * `0.7f * (1f / (1 + 2 * extraInsetFraction))` = 0.4667.
+     * The effective legacy scale is the product of this constant and the
+     * per-icon [com.jerrey.monoicon.theme.mask.IconNormalizerCompat] result.
      */
-    private val pixelLegacyIconScale: Float
-        get() = (
-            1f / ((AdaptiveIconDrawable.getExtraInsetFraction() * 2f) + 1f)
-                * kotlin.math.sqrt(0.6510416666666666).toFloat()
-                * 0.7f
-            )
+    private val aospLegacyIconScale: Float
+        get() = 0.7f / ((AdaptiveIconDrawable.getExtraInsetFraction() * 2f) + 1f)
 
     /**
-     * Wraps a legacy Drawable exactly like Pixel Launcher's
-     * BaseIconFactory.wrapToAdaptiveIcon().
+     * Wraps a legacy Drawable exactly like AOSP
+     * `BaseIconFactory.wrapToAdaptiveIcon()` (android15-release):
+     * white `ColorDrawable` background + the icon inset by
+     * `IconNormalizer.getScale() * LEGACY_ICON_SCALE`. Shape detection is
+     * disabled (the default factory configuration), so the legacy scale
+     * branch always applies.
      *
      * The returned AdaptiveIconDrawable owns an isolated foreground wrapper;
      * the source Drawable is never used directly by the generated mask path.
      */
-    fun wrapPixelLegacyIcon(drawable: Drawable): AdaptiveIconDrawable? {
+    fun wrapAospLegacyIcon(drawable: Drawable, iconBitmapSize: Int): AdaptiveIconDrawable? {
         return try {
             val source = cloneForPixelLegacy(drawable) ?: return null
-            val foreground = wrapIntoSquareDrawable(source, pixelLegacyIconScale)
+            val normalized = com.jerrey.monoicon.theme.mask.IconNormalizerCompat.getScale(
+                source, iconBitmapSize,
+            )
+            val scale = normalized * aospLegacyIconScale
+            val foreground = wrapIntoSquareDrawable(source, scale)
             AdaptiveIconDrawable(ColorDrawable(android.graphics.Color.WHITE), foreground).apply {
                 setBounds(0, 0, 1, 1)
             }
         } catch (t: Throwable) {
-            Log.e(TAG, "wrapPixelLegacyIcon failed: ${t.message}", t)
+            Log.e(TAG, "wrapAospLegacyIcon failed: ${t.message}", t)
             null
         }
     }
 
-    /** Pixel's aspect-ratio-preserving square wrapper. */
+    /** AOSP's aspect-ratio-preserving square wrapper. */
     private fun wrapIntoSquareDrawable(drawable: Drawable, scale: Float): Drawable {
         val width = drawable.intrinsicWidth.toFloat()
         val height = drawable.intrinsicHeight.toFloat()
@@ -240,7 +245,7 @@ object DrawableConverter {
      *    this straight into an ALPHA_8 bitmap: the alpha channel IS the
      *    mask. Converting via luminance would collapse a black glyph to
      *    alpha 0 → invisible icons (e.g. Google Search / KernelSU folder
-     *    previews under PixelMonochromeMaskStrategy).
+     *    previews under AospMonochromeMaskStrategy).
      *
      * 2. **RGB-encoded shape** — the layer is a flat opaque image whose
      *    silhouette lives in the RGB channels (alpha is uniform). Here

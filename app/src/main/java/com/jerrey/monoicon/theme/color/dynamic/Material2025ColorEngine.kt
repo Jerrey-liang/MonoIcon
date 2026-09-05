@@ -90,16 +90,39 @@ object Material2025ColorEngine {
         )
     }
 
+    /**
+     * AOSP themed-icon color contract (iconloaderlib
+     * `res/values-v31/colors.xml` + `values-night-v31` + SystemUI
+     * `TonalPalette.getAtTone` where `tone = (1000 - shade) / 10`):
+     *
+     * - light: fg = `themed_icon_color` = system_accent1_700 → primary.tone(30)
+     *          bg = `themed_icon_background_color` = system_accent1_100 → primary.tone(90)
+     * - dark:  fg = system_accent1_200 → primary.tone(80)
+     *          bg = system_accent2_800 → secondary.tone(20)
+     *
+     * `mAccent1`/`mAccent2` in SystemUI `ColorScheme` are the primary and
+     * secondary palettes of the wallpaper seed scheme; the built-in theme
+     * uses TONAL_SPOT (AOSP default style), and the 9-variant setting only
+     * changes the scheme source for the same AOSP tone mapping.
+     */
     fun iconColorsForSource(
         sourceColor: Int,
         dark: Boolean,
         variant: Variant = Variant.TONAL_SPOT,
     ): IconThemeColors {
-        val colors = fromSource(sourceColor, variant = variant)
+        val scheme = schemeFor(variant, Hct.fromInt(sourceColor), dark)
         return if (dark) {
-            IconThemeColors(colors.primaryDark, colors.primaryContainerDark, fallbackPalette(sourceColor))
+            IconThemeColors(
+                foreground = scheme.primaryPalette.tone(80),
+                background = scheme.secondaryPalette.tone(20),
+                palette = fallbackPalette(sourceColor),
+            )
         } else {
-            IconThemeColors(colors.primaryLight, colors.primaryContainerLight, fallbackPalette(sourceColor))
+            IconThemeColors(
+                foreground = scheme.primaryPalette.tone(30),
+                background = scheme.primaryPalette.tone(90),
+                palette = fallbackPalette(sourceColor),
+            )
         }
     }
 

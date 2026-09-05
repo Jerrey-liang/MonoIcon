@@ -12,9 +12,10 @@ import com.jerrey.monoicon.mask.GenerateResult
  * (source category, raw usage flag, cache hit) consumed by the hook layer
  * for logging and diagnostics.
  *
- * Phase 6.6: only the Pixel Launcher pipeline remains —
- * [PixelMonochromeMaskStrategy] implements this interface and every mask
- * source goes through [LabMonochromeExtractor].
+ * Phase 7: the mask pipeline follows AOSP android15-release —
+ * [AospMonochromeMaskStrategy] implements this interface; native monochrome
+ * layers and AOSP mask branches go through [AospMonochromeFactory], and the
+ * HyperOS compatibility fallback uses [LabMonochromeExtractor].
  *
  * ## Cache contract
  * Strategies own their cache lookup/put — the [GenerateResult]
@@ -47,5 +48,7 @@ interface MaskStrategy {
         const val SOURCE_NATIVE = 1
         const val SOURCE_FOREGROUND = 2
         const val SOURCE_LUMINANCE = 3
+        const val SOURCE_AOSP_ADAPTIVE = 4
+        const val SOURCE_AOSP_LEGACY = 5
     }
 }

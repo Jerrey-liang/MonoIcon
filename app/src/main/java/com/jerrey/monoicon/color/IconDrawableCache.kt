@@ -13,8 +13,8 @@ import java.util.LinkedHashMap
  * [com.miui.home.common.drawable.LayerAdaptiveIconDrawable]
  * containing a monochrome mask.
  *
- * Consumed in [com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy]
- * (raw-APK tier) to feed the original drawable into the LAB mask pipeline.
+ * Consumed in [com.jerrey.monoicon.theme.mask.AospMonochromeMaskStrategy]
+ * (raw-APK tier) to feed the original drawable into the AOSP mask pipeline.
  *
  * ## Key format
  * `"pkg/full.ClassName"` — matches [IconColorCache] and IdentityResolver.

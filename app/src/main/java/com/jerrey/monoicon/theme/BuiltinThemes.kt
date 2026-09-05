@@ -4,17 +4,15 @@ import android.graphics.drawable.Drawable
 import com.jerrey.monoicon.mask.GenerateResult
 import com.jerrey.monoicon.theme.color.PixelColorStrategy
 import com.jerrey.monoicon.theme.color.ThemeColors
+import com.jerrey.monoicon.theme.mask.AospMonochromeMaskStrategy
 import com.jerrey.monoicon.theme.mask.MaskStrategy
-import com.jerrey.monoicon.theme.mask.PixelMonochromeMaskStrategy
 
 /**
- * Built-in theme definitions (Phase 5, 6.6).
+ * Built-in theme definitions (Phase 5, 7).
  *
- * Phase 6.6: only the Pixel Default theme remains — mask generation is
- * the single Pixel Launcher pipeline ([PixelMonochromeMaskStrategy]),
- * color is the Pixel Launcher dynamic tint ([PixelColorStrategy]).
- * High Contrast / Pure Mono and the legacy Rec.601 mask strategies have
- * been removed.
+ * Phase 7: the built-in theme follows AOSP android15-release — mask
+ * generation is the AOSP monochrome pipeline ([AospMonochromeMaskStrategy]),
+ * color is the AOSP themed-icon tone mapping ([PixelColorStrategy]).
  */
 object BuiltinThemes {
 
@@ -23,25 +21,25 @@ object BuiltinThemes {
     private val pixelColor = PixelColorStrategy()
 
     /**
-     * Unified Pixel Launcher monochrome mask strategy. Desktop and folder
-     * use SEPARATE instances because [MaskStrategy.configureCache] bakes
+     * Unified AOSP monochrome mask strategy. Desktop and folder use
+     * SEPARATE instances because [MaskStrategy.configureCache] bakes
      * the context label into each strategy's cache-key prefix — sharing one
      * instance across contexts would make desktop/folder cache entries
      * collide.
      */
-    private val pixelMonoDesktopMask = PixelMonochromeMaskStrategy()
-    private val pixelMonoFolderMask = PixelMonochromeMaskStrategy()
+    private val pixelMonoDesktopMask = AospMonochromeMaskStrategy()
+    private val pixelMonoFolderMask = AospMonochromeMaskStrategy()
 
     /**
-     * Pixel Default — matches Pixel Launcher's monochrome icon pipeline.
+     * AOSP Default — matches AOSP android15-release's themed icon pipeline.
      *
-     * Mask: unified PixelMonochromeMaskStrategy (NATIVE > CIELAB luminance,
-     * same for desktop and folder previews — same as Pixel Launcher).
-     * Color: Pixel Launcher dynamic tint (system accent).
+     * Mask: unified AospMonochromeMaskStrategy (NATIVE > AOSP edge-flip,
+     * same for desktop and folder previews — same as AOSP).
+     * Color: AOSP themed-icon tone mapping (primary 30/90, secondary 20).
      */
     val PIXEL_DEFAULT = ThemeDefinition(
         id = "pixel_default",
-        name = "Pixel Default",
+        name = "AOSP Default",
         desktopMask = pixelMonoDesktopMask,
         folderMask = pixelMonoFolderMask,
         color = pixelColor,

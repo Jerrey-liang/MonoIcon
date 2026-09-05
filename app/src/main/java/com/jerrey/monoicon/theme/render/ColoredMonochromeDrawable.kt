@@ -11,28 +11,33 @@ import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.LayerDrawable
 import android.content.res.ColorStateList
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 
 /**
- * A [Drawable] that renders an alpha-mask [Bitmap] with the Pixel
- * Launcher themed-icon structure (Phase 6.0 / 6.6):
+ * A [Drawable] that renders an alpha-mask [Bitmap] with the AOSP
+ * `ThemedIconDrawable` structure (Phase 7):
  *
- * - **Background plate** ([plateColor] = Pixel's
- *   `themed_icon_background_color`): a solid AdaptiveIcon background.
- * - **Plate mask**: the monochrome mask filled with the plate color using
- *   Pixel's `SRC` blend mode.
- * - **Glyph** ([color] = Pixel's `themed_icon_color`): the same mask filled
- *   with the glyph color using `SRC_IN`.
+ * - **Background plate** ([plateColor] = AOSP
+ *   `themed_icon_background_color`): a solid AdaptiveIcon background
+ *   filling the whole icon shape.
+ * - **Glyph** ([color] = AOSP `themed_icon_color`): the monochrome mask
+ *   drawn on top with `SRC_IN`, i.e. `fg·mask + bg·(1−mask)`. The mask is
+ *   pre-scaled by `1/(1+2·extraInsetFraction)` around the center to cancel
+ *   the AdaptiveIconDrawable foreground viewport expansion (AOSP's
+ *   ThemedIconDrawable has no such expansion because it is a plain
+ *   FastBitmapDrawable).
+ *
+ * AOSP draws the plate from a white shadow layer; this module has no
+ * shadow generator, so a `ColorDrawable` is the equivalent flat plate.
+ * The Pixel-style 2/3 `ScaledMonoDrawable` layers are intentionally gone.
  *
  * When [plateColor] is transparent (engine unavailable), only the glyph
  * is drawn at full bounds (the pre-6.6 behavior).
  *
- * The drawable is built as `AdaptiveIconDrawable(ColorDrawable(bg),
- * LayerDrawable(mask×bg, mask×fg))`, matching Pixel's themed adaptive icon
- * path. The HyperOS hooks and animation compatibility paths still receive
- * this outer Drawable type.
+ * The drawable is built as `AdaptiveIconDrawable(ColorDrawable(bg), glyph)`
+ * so the HyperOS hooks and animation compatibility paths still receive
+ * an AdaptiveIconDrawable outer type.
  *
  * ## [ConstantState] support
  * HyperOS [FolderPreviewIconView.refreshIconDrawable] copies the
@@ -90,19 +95,14 @@ class ColoredMonochromeDrawable(
     }
 
     private fun buildComposite(foregroundColor: Int, backgroundColor: Int): AdaptiveIconDrawable {
-        // Pixel applies SRC_IN to the AdaptiveIcon background as well.  The
-        // outer adaptive shape therefore participates in the same glyph tint
-        // pipeline as the two monochrome foreground layers.
-        val plate = ColorDrawable(backgroundColor).apply {
+        // AOSP ThemedIconDrawable.drawInternal(): the background plate is
+        // drawn first and the mono mask is tinted with the glyph color via
+        // SRC_IN on top of it. No SRC plate-mask layer, no center scaling.
+        val plate = ColorDrawable(backgroundColor)
+        val glyph = MonoGlyphDrawable(sourceMask).apply {
             colorFilter = BlendModeColorFilter(foregroundColor, BlendMode.SRC_IN)
         }
-        val plateMask = ScaledMonoDrawable(sourceMask).apply {
-            colorFilter = BlendModeColorFilter(backgroundColor, BlendMode.SRC)
-        }
-        val glyphMask = ScaledMonoDrawable(sourceMask).apply {
-            colorFilter = BlendModeColorFilter(foregroundColor, BlendMode.SRC_IN)
-        }
-        return AdaptiveIconDrawable(plate, LayerDrawable(arrayOf(plateMask, glyphMask)))
+        return AdaptiveIconDrawable(plate, glyph)
     }
 
     override fun onBoundsChange(bounds: Rect) {
@@ -138,8 +138,19 @@ class ColoredMonochromeDrawable(
 
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
-    /** Equivalent to Pixel Launcher's ScaledMonoDrawable. */
-    private class ScaledMonoDrawable(private val bitmap: Bitmap) : Drawable() {
+    /**
+     * Mono glyph drawable: the mask bitmap drawn with the viewport
+     * compensation scale.
+     *
+     * AOSP's ThemedIconDrawable is a FastBitmapDrawable drawn directly, so it
+     * renders the mask at full bounds. Our container must stay an
+     * AdaptiveIconDrawable for the HyperOS hooks, and AdaptiveIconDrawable
+     * expands its foreground canvas by (1 + 2·extraInsetFraction) before
+     * clipping back to the viewport. Drawing the mask scaled by
+     * 1/(1 + 2·extraInsetFraction) around the center cancels that expansion
+     * exactly, keeping the AOSP motif size.
+     */
+    private class MonoGlyphDrawable(private val bitmap: Bitmap) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val scale = 1.0f / ((AdaptiveIconDrawable.getExtraInsetFraction() * 2f) + 1f)
 

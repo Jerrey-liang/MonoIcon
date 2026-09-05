@@ -2,47 +2,28 @@ package com.jerrey.monoicon.theme.mask
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.InsetDrawable
-import kotlin.math.cbrt
-import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * Pixel Launcher compatible monochrome mask extractor (Phase 6.3).
+ * HyperOS compatibility mask extraction (Phase 7).
  *
- * ## Mask pixel values
- * Equi-weight grayscale matching Pixel Launcher `MonochromeIconFactory`
- * ColorMatrix (lines 150-158): alpha = (R + G + B) / 3, scaled to [0, 100].
+ * The strict mask branches now follow AOSP android15-release
+ * ([AospMonochromeFactory] + [IconNormalizerCompat]); this extractor keeps
+ * the two pieces that AOSP itself does not provide:
  *
- * ## Luminance measurement
- * [computeLuminanceDelta] and [averageLabL] use CIELAB L* (D65, CIE 1931
- * 2°), matching Pixel Launcher `LuminanceComputer.computeLuminance()`
- * which calls `n2.a.e()` → RGB→XYZ→LAB.
- *
- * ## Pipeline
- * 1. Render full AdaptiveIconDrawable → ARGB_8888
- * 2. Equi-weight grayscale per pixel → [0, 100]
- * 3. Contrast stretch + mid-tone boost (Pixel Launcher formula)
- * 4. Invert when [luminanceDelta] is negative so dark foreground artwork on
- *    a light plate remains the opaque glyph rather than the plate.
+ * - [extractPixelNativeMonochrome]: the native `<monochrome>` ALPHA_8 path
+ *   (identical in AOSP and Pixel Launcher).
+ * - [extractFromBitmap] / [estimateLuminanceDelta]: the last-resort
+ *   compatibility path for HyperOS Drawables that are neither raw legacy
+ *   inputs nor AdaptiveIcons — edge-connected plate exclusion plus the
+ *   Pixel-style grayscale stretch/mid-tone/polarity pipeline.
  */
 object LabMonochromeExtractor {
 
-    // ── Reference white (D65) in XYZ ──────────────────────────────────
-    private const val REF_X = 95.047
-    private const val REF_Y = 100.000
-    private const val REF_Z = 108.883
-
-    // ── sRGB gamma threshold ──────────────────────────────────────────
-    private const val GAMMA_THRESHOLD = 0.04045
-
-    // ── Luminance sampling resolution (matches Pixel Launcher) ────────
-    private const val SAMPLE_SIZE = 64
-
-    // ── Background bins for polarity estimation (Phase 6.6) ────────────
+    // ── Background bins for polarity estimation ────────────────────────
     private const val BG_DARK = 10
     private const val BG_MID = 11
     private const val BG_LIGHT = 12
@@ -54,48 +35,10 @@ object LabMonochromeExtractor {
     private const val MIN_FOREGROUND_RATIO = 0.02
 
     /**
-     * Generates an alpha mask from the full AdaptiveIconDrawable.
-     * Uses default polarity (darker pixels → opaque). Call
-     * [extract] with [luminanceDelta] for Pixel-polarity-aware output.
-     */
-    fun extract(drawable: AdaptiveIconDrawable): Bitmap? {
-        return extract(drawable, luminanceDelta = null)
-    }
-
-    /**
-     * Generates an alpha mask from separately rendered adaptive-icon layers.
-     * A negative [luminanceDelta] preserves Pixel's dark-foreground polarity.
-     */
-    fun extract(drawable: AdaptiveIconDrawable, luminanceDelta: Double?): Bitmap? {
-        val w = drawable.intrinsicWidth.coerceAtLeast(1)
-        val h = drawable.intrinsicHeight.coerceAtLeast(1)
-
-        // Pixel flattens the background and foreground layers directly rather
-        // than drawing the outer AdaptiveIconDrawable (which would clip them).
-        val render = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(render)
-        canvas.drawColor(Color.BLACK)
-        drawable.background?.let {
-            it.setBounds(0, 0, w, h)
-            it.draw(canvas)
-        }
-        drawable.foreground?.let {
-            it.setBounds(0, 0, w, h)
-            it.draw(canvas)
-        }
-
-        return try {
-            extractFromBitmap(render, luminanceDelta)
-        } finally {
-            render.recycle()
-        }
-    }
-
-    /**
-     * Pixel Launcher native-monochrome path.
+     * Native-monochrome path (AOSP / Pixel identical).
      *
-     * Native monochrome layers are already alpha masks. Pixel only applies
-     * the inverse AdaptiveIcon inset while rasterizing them; no luminance,
+     * Native monochrome layers are already alpha masks. Only the inverse
+     * AdaptiveIcon inset is applied while rasterizing them; no luminance,
      * polarity or edge-plate processing is involved.
      */
     fun extractPixelNativeMonochrome(drawable: Drawable, targetSize: Int): Bitmap? {
@@ -115,116 +58,13 @@ object LabMonochromeExtractor {
     }
 
     /**
-     * Pixel Launcher's forced Adaptive Icon mask path.
-     *
-     * This intentionally bypasses MonoIcon's edge-plate and polarity
-     * heuristics. It follows MonoIconThemeController: render the Adaptive Icon
-     * layers into a square intermediate bitmap, apply equal-weight grayscale,
-     * min/max stretch and the Pixel mid-tone curve, then compensate the
-     * AdaptiveIcon inset into the requested output size.
-     */
-    fun extractPixelAdaptiveIcon(drawable: AdaptiveIconDrawable, targetSize: Int): Bitmap? {
-        var flat: Bitmap? = null
-        var intermediate: Bitmap? = null
-        return try {
-            val outputSize = targetSize.coerceAtLeast(1)
-            val extraInset = AdaptiveIconDrawable.getExtraInsetFraction()
-            val bitmapSize = kotlin.math.round(
-                outputSize * 2f / ((extraInset * 2f) + 1f)
-            ).toInt().coerceAtLeast(1)
-
-            flat = Bitmap.createBitmap(bitmapSize, bitmapSize, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(flat)
-            canvas.drawColor(Color.BLACK)
-            drawable.background?.let {
-                it.setBounds(0, 0, bitmapSize, bitmapSize)
-                it.draw(canvas)
-            }
-            drawable.foreground?.let {
-                it.setBounds(0, 0, bitmapSize, bitmapSize)
-                it.draw(canvas)
-            }
-
-            val pixels = IntArray(bitmapSize * bitmapSize)
-            flat.getPixels(pixels, 0, bitmapSize, 0, 0, bitmapSize, bitmapSize)
-            flat.recycle()
-            flat = null
-
-            var min = 255
-            var max = 0
-            val grayscale = IntArray(pixels.size)
-            for (i in pixels.indices) {
-                val p = pixels[i]
-                val gray = kotlin.math.round((
-                    ((p ushr 16) and 0xFF) +
-                    ((p ushr 8) and 0xFF) +
-                    (p and 0xFF)
-                    ) / 3f).toInt().coerceIn(0, 255)
-                grayscale[i] = gray
-                min = minOf(min, gray)
-                max = maxOf(max, gray)
-            }
-
-            val alpha = ByteArray(grayscale.size)
-            if (min < max) {
-                val range = max - min
-                for (i in grayscale.indices) {
-                    val stretched = kotlin.math.round(
-                        ((grayscale[i] - min) * 255f) / range.toFloat()
-                    ).toInt().coerceIn(0, 255)
-                    alpha[i] = midToneBoost(stretched).toByte()
-                }
-            } else {
-                for (i in grayscale.indices) {
-                    alpha[i] = grayscale[i].toByte()
-                }
-            }
-
-            intermediate = Bitmap.createBitmap(bitmapSize, bitmapSize, Bitmap.Config.ALPHA_8)
-            intermediate.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(alpha))
-            val inset = InsetDrawable(BitmapDrawableCompat(intermediate), -extraInset)
-            val result = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.ALPHA_8)
-            inset.setBounds(0, 0, outputSize, outputSize)
-            inset.draw(Canvas(result))
-            intermediate.recycle()
-            intermediate = null
-            result
-        } catch (_: Throwable) {
-            null
-        } finally {
-            flat?.takeUnless { it.isRecycled }?.recycle()
-            intermediate?.takeUnless { it.isRecycled }?.recycle()
-        }
-    }
-
-    /** Minimal Bitmap-backed Drawable used for Pixel's inset raster step. */
-    private class BitmapDrawableCompat(private val bitmap: Bitmap) : Drawable() {
-        private val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
-
-        override fun draw(canvas: Canvas) {
-            canvas.drawBitmap(bitmap, null, bounds, paint)
-        }
-
-        override fun setAlpha(alpha: Int) {
-            paint.alpha = alpha
-        }
-
-        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
-            paint.colorFilter = colorFilter
-        }
-
-        @Suppress("OVERRIDE_DEPRECATION")
-        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
-    }
-
-    /**
-     * Phase 6.6: the Pixel Launcher mask pipeline for an already-rendered
-     * bitmap — used by every fallback tier so ALL mask sources share the
-     * exact same algorithm:
-     * 1. Equi-weight grayscale `(R+G+B)/3 → [0,100]`
-     * 2. min-max contrast stretch
-     * 3. mid-tone boost
-     * 4. optional inversion when [luminanceDelta] < 0
+     * The compatibility mask pipeline for an already-rendered bitmap —
+     * used by the HyperOS fallback tier:
+     * 1. Edge-connected plate detection and exclusion.
+     * 2. Equi-weight grayscale `(R+G+B)/3 → [0,100]`
+     * 3. min-max contrast stretch
+     * 4. mid-tone boost
+     * 5. optional inversion when [luminanceDelta] < 0
      *
      * The input [bitmap] is never recycled (the caller may still need it,
      * e.g. as the cache fingerprint source).
@@ -242,8 +82,6 @@ object LabMonochromeExtractor {
         val edgeBackground = detectEdgeBackground(pixels, w, h)
 
         // Step 2: equi-weight grayscale → [0, 100] range
-        // Matches Pixel Launcher ColorMatrix: [R×0.3333 + G×0.3333 + B×0.3333]
-        // (MonochromeIconFactory lines 150-158, 186)
         val lValues = FloatArray(pixels.size)
         var validCount = 0
         var lMin = Float.MAX_VALUE
@@ -280,7 +118,7 @@ object LabMonochromeExtractor {
             return silhouette
         }
 
-        // Step 3: contrast stretch + Pixel's mid-tone boost.
+        // Step 3: contrast stretch + mid-tone boost.
         val range = lMax - lMin
         val maskPixels = IntArray(pixels.size)
         for (i in pixels.indices) {
@@ -385,13 +223,13 @@ object LabMonochromeExtractor {
     }
 
     /**
-     * Phase 6.6: estimates the inversion polarity for sources WITHOUT
-     * separate background/foreground layers (bitmaps rendered from
-     * BitmapDrawable / VectorDrawable / generic drawables).
+     * Estimates the inversion polarity for sources WITHOUT separate
+     * background/foreground layers (bitmaps rendered from BitmapDrawable /
+     * VectorDrawable / generic drawables).
      *
-     * Reuses the proven 3-bin background-luminance estimation, but ONLY to
-     * decide the direction — the mask pixels themselves always go through
-     * [extractFromBitmap] (Pixel Launcher's formula):
+     * 3-bin background-luminance estimation used ONLY to decide the
+     * direction — the mask pixels themselves always go through
+     * [extractFromBitmap]:
      * - light background + darker foreground → negative delta (invert)
      * - dark background + lighter foreground → positive delta (standard)
      * - ambiguous → null (standard mapping, no inversion)
@@ -478,84 +316,10 @@ object LabMonochromeExtractor {
         return (0.299 * r + 0.587 * g + 0.114 * b).toInt()
     }
 
-    /**
-     * Pixel Launcher luminance delta (Phase 6.3).
-     *
-     * Matches `MonoIconThemeController.createThemedBitmap()` lines 172-184:
-     * 1. Render foreground alone → `averageLabL()` → fg_L*_avg
-     * 2. Clear canvas to black → render background → `averageLabL()` → bg_L*_avg
-     * 3. delta = fg_L*_avg - bg_L*_avg
-     *
-     * @return CIELAB L* mean difference (positive = foreground brighter).
-     *         NaN if the drawable has no bg/fg or rendering fails.
-     */
-    fun computeLuminanceDelta(drawable: AdaptiveIconDrawable): Double {
-        val fg = drawable.foreground ?: return Double.NaN
-        val bg = drawable.background ?: return Double.NaN
-        val w = drawable.intrinsicWidth.coerceAtLeast(1)
-        val h = drawable.intrinsicHeight.coerceAtLeast(1)
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        return try {
-            val canvas = Canvas(bmp)
-
-            // Foreground alone (on transparent → black canvas)
-            fg.setBounds(0, 0, w, h)
-            fg.draw(canvas)
-            val fgL = averageLabL(bmp)
-
-            // Pixel compares foreground-only against background+foreground.
-            canvas.drawColor(0xFF000000.toInt())
-            bg.setBounds(0, 0, w, h)
-            bg.draw(canvas)
-            fg.draw(canvas)
-            val combinedL = averageLabL(bmp)
-
-            fgL - combinedL
-        } catch (_: Throwable) {
-            Double.NaN
-        } finally {
-            bmp.recycle()
-        }
-    }
-
-    /**
-     * Pixel Launcher AVERAGE luminance across a 64×64 scaled sample.
-     * Matches `LuminanceComputer.computeLuminance()` with `ComputationType.AVERAGE`.
-     */
-    fun averageLabL(bitmap: Bitmap): Double {
-        val scaled = Bitmap.createScaledBitmap(bitmap, SAMPLE_SIZE, SAMPLE_SIZE, true)
-        val w = scaled.width; val h = scaled.height
-        val pixels = IntArray(w * h)
-        scaled.getPixels(pixels, 0, w, 0, 0, w, h)
-        if (scaled !== bitmap) scaled.recycle()
-
-        var sum = 0.0; var count = 0
-        for (p in pixels) {
-            if (((p shr 24) and 0xFF) < 32) continue
-            val r = ((p shr 16) and 0xFF) / 255f
-            val g = ((p shr 8) and 0xFF) / 255f
-            val bl = (p and 0xFF) / 255f
-            sum += rgbToLabL(r, g, bl) / 100.0
-            count++
-        }
-        return if (count > 0) sum / count else Double.NaN
-    }
-
-    // ── Pixel Launcher mid-tone boost (MonochromeIconFactory) ──────────
+    // ── Mid-tone boost (used by the compatibility fallback only) ───────
 
     internal fun midToneBoost(p: Int): Int {
         if (p > 128) return (255 - ((1.0 - (p - 128) / 128.0) * (255 - p))).toInt()
         return ((1.0 - (128.0 - p) / 128.0) * p).toInt()
-    }
-
-    // ── sRGB → CIELAB L* (D65, CIE 1931 2°) ──────────────────────────
-
-    private fun rgbToLabL(r: Float, g: Float, b: Float): Float {
-        val rl = if (r <= GAMMA_THRESHOLD) r / 12.92 else ((r + 0.055) / 1.055).pow(2.4)
-        val gl = if (g <= GAMMA_THRESHOLD) g / 12.92 else ((g + 0.055) / 1.055).pow(2.4)
-        val bl = if (b <= GAMMA_THRESHOLD) b / 12.92 else ((b + 0.055) / 1.055).pow(2.4)
-        val y = 0.2126 * rl + 0.7152 * gl + 0.0722 * bl
-        val fy = if (y / REF_Y > 0.008856) cbrt(y / REF_Y) else (7.787 * y / REF_Y) + (16.0 / 116.0)
-        return (116.0 * fy - 16.0).toFloat()
     }
 }
