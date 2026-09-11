@@ -63,6 +63,9 @@ fun SettingsScreen() {
     var restarting by remember { mutableStateOf(false) }
     var lawniconsEnabled by remember { mutableStateOf(ConfigManager.isLawniconsEnabledFromUi()) }
     var circleIconsEnabled by remember { mutableStateOf(ConfigManager.isCircleIconsEnabledFromUi()) }
+    var notificationIconsEnabled by remember {
+        mutableStateOf(ConfigManager.isNotificationIconsEnabledFromUi())
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -160,6 +163,33 @@ fun SettingsScreen() {
                                 circleIconsEnabled = value
                                 showRestartHint = true
                                 ConfigManager.setCircleIconsEnabled(value)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Phase 11: 通知中心的程序图标（SystemUI 进程）
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "通知中心图标")
+                            Text(
+                                text = "通知栏里的程序图标使用 MonoIcon 图标；修改后需重启系统界面，" +
+                                    "且需在 LSPosed 中勾选“系统界面”作用域",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = notificationIconsEnabled,
+                            onCheckedChange = { value ->
+                                notificationIconsEnabled = value
+                                showRestartHint = true
+                                ConfigManager.setNotificationIconsEnabled(value)
                             }
                         )
                     }
