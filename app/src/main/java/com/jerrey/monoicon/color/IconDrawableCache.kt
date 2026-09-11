@@ -74,8 +74,9 @@ object IconDrawableCache {
     }
 
     /**
-     * Phase 10: first cached raw drawable whose key starts with
-     * `"<packageName>/"`, or null.
+     * Phase 10: first cached raw drawable for [packageName] — either the bare
+     * package key (SystemUI notification icons, Phase 11) or a
+     * `"<packageName>/<class>"` entry (task/launcher identities) — or null.
      *
      * Recents hands us the *task's* top component, which is frequently not the
      * launcher activity captured by the RawIconProvider hook — this
@@ -85,7 +86,7 @@ object IconDrawableCache {
         if (packageName.isEmpty()) return null
         val prefix = packageName + "/"
         return synchronized(lock) {
-            store.entries.firstOrNull { it.key.startsWith(prefix) }?.value
+            store[packageName] ?: store.entries.firstOrNull { it.key.startsWith(prefix) }?.value
         }
     }
 

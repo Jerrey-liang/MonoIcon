@@ -44,6 +44,7 @@ object ConfigManager {
     private const val KEY_VARIANT_ID = "variant_id"
     private const val KEY_LAWNICONS_ENABLED = "lawnicons_enabled"
     private const val KEY_CIRCLE_ICONS = "circle_icons"
+    private const val KEY_NOTIFICATION_ICONS = "notification_icons"
 
     /** Launcher-side refresh cadence (ms). */
     private const val REFRESH_INTERVAL_MS = 1_000L
@@ -139,6 +140,15 @@ object ConfigManager {
     @Volatile
     private var lastCircleValue = false
 
+    // ── Notification app-icon toggle (Phase 11, SystemUI process) ──────
+    // Default ON: notification app icons follow the desktop look; the switch
+    // exists as an escape hatch because SystemUI is a critical process.
+    private val cachedNotificationIconsEnabled = AtomicBoolean(true)
+    @Volatile
+    private var lastNotificationIconsRefreshMs = 0L
+    @Volatile
+    private var lastNotificationIconsValue = true
+
     /**
      * Binds the framework's read-only remote preferences (call from
      * PackageLoadedParam handling, before installing hooks).
@@ -154,10 +164,13 @@ object ConfigManager {
             cachedCircleIconsEnabled.set(readRemoteCircleIcons())
             lastCircleValue = cachedCircleIconsEnabled.get()
             lastCircleRefreshMs = lastRefreshMs
+            cachedNotificationIconsEnabled.set(readRemoteNotificationIcons())
+            lastNotificationIconsValue = cachedNotificationIconsEnabled.get()
+            lastNotificationIconsRefreshMs = lastRefreshMs
             android.util.Log.i(
                 TAG,
                 "hook-side init, enabled=${cachedEnabled.get()} lawnicons=${cachedLawniconsEnabled.get()} " +
-                    "circle=${cachedCircleIconsEnabled.get()}",
+                    "circle=${cachedCircleIconsEnabled.get()} notif=${cachedNotificationIconsEnabled.get()}",
             )
         } catch (t: Throwable) {
             android.util.Log.w(TAG, "initForHooks failed: ${t.message}")
@@ -428,6 +441,78 @@ object ConfigManager {
             android.util.Log.w(TAG, "setCircleIconsEnabled failed: ${t.message}")
             try {
                 fallbackPrefs?.edit()?.putBoolean(KEY_CIRCLE_ICONS, enabled)?.apply()
+            } catch (_: Throwable) { }
+        }
+    }
+
+    // ── Notification app-icon toggle (Phase 11, SystemUI process) ─────
+
+    /**
+     * SystemUI side: whether notification app icons are rendered with MonoIcon's
+     * themed drawable (`AppIconsManager` hooks).
+     *
+     * Refresh cadence matches [isEnabled]; on a flip MonoIcon's caches are cleared so
+     * the next notification bind regenerates the icon. Already-rendered notifications
+     * (and MIUI's own bitmap caches) keep the old icon until SystemUI restarts — the
+     * settings UI shows the restart hint.
+     */
+    fun isNotificationIconsEnabled(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastNotificationIconsRefreshMs >= REFRESH_INTERVAL_MS) {
+            lastNotificationIconsRefreshMs = now
+            val value = readRemoteNotificationIcons()
+            if (value != lastNotificationIconsValue) {
+                lastNotificationIconsValue = value
+                try {
+                    CacheManager.clearAll()
+                    android.util.Log.i(TAG, "notificationIcons=$value → caches cleared")
+                } catch (t: Throwable) {
+                    android.util.Log.w(TAG, "cache clear after notif flip failed: ${t.message}")
+                }
+            }
+            cachedNotificationIconsEnabled.set(value)
+        }
+        return cachedNotificationIconsEnabled.get()
+    }
+
+    private fun readRemoteNotificationIcons(): Boolean = try {
+        remotePrefsProvider?.invoke()?.getBoolean(KEY_NOTIFICATION_ICONS, true) ?: true
+    } catch (_: Throwable) {
+        true
+    }
+
+    /** UI side: reads the notification-icon toggle (falls back to shared prefs). */
+    fun isNotificationIconsEnabledFromUi(): Boolean {
+        val service = remoteService
+        return if (service != null) {
+            try {
+                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_NOTIFICATION_ICONS, true)
+            } catch (_: Throwable) {
+                fallbackPrefs?.getBoolean(KEY_NOTIFICATION_ICONS, true) ?: true
+            }
+        } else {
+            fallbackPrefs?.getBoolean(KEY_NOTIFICATION_ICONS, true) ?: true
+        }
+    }
+
+    /** Persists the notification-icon toggle via the framework remote preferences. */
+    fun setNotificationIconsEnabled(enabled: Boolean) {
+        try {
+            val service = remoteService
+            if (service != null) {
+                service.getRemotePreferences(PREFS_NAME)
+                    .edit()
+                    .putBoolean(KEY_NOTIFICATION_ICONS, enabled)
+                    .apply()
+                android.util.Log.i(TAG, "setNotificationIconsEnabled=$enabled (remote)")
+            } else {
+                fallbackPrefs?.edit()?.putBoolean(KEY_NOTIFICATION_ICONS, enabled)?.apply()
+                android.util.Log.i(TAG, "setNotificationIconsEnabled=$enabled (fallback prefs)")
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setNotificationIconsEnabled failed: ${t.message}")
+            try {
+                fallbackPrefs?.edit()?.putBoolean(KEY_NOTIFICATION_ICONS, enabled)?.apply()
             } catch (_: Throwable) { }
         }
     }

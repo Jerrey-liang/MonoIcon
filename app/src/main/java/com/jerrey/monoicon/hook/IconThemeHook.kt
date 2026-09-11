@@ -35,7 +35,7 @@ private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
 private const val TAG_MASK = "MonoIcon.Mask"
 private const val TAG_FOLDER = "MonoIcon.FolderLifecycle"
-private const val MODULE_VERSION = "1.1.0"
+private const val MODULE_VERSION = "1.2.0"
 
 /** Boot timestamp for relative timing logs (ms since boot approx). */
 private val bootTimeNs: Long = System.nanoTime()
@@ -115,23 +115,52 @@ class IconThemeHook : XposedModule() {
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
-        if (param.packageName != "com.miui.home") return
+        val pkg = param.packageName
+        // Phase 11: the module now runs in two processes — the launcher (desktop /
+        // folders / recents) and SystemUI (notification app icons). Each gets its own
+        // hook set; neither installs the other's hooks.
+        if (pkg != "com.miui.home" && pkg != "com.android.systemui") return
 
         // Phase 4.1: load configuration before installing hooks — a disabled
-        // module installs nothing and leaves the launcher untouched.
+        // module installs nothing and leaves the host process untouched.
         ConfigManager.initForHooks(this)
         // Phase 5: initialize ThemeManager (reads theme_id from remote prefs)
         ThemeManager.initForHooks(this)
         val enabled = ConfigManager.isEnabled()
-        android.util.Log.i(TAG, "MonoIcon enabled=$enabled — ${if (enabled) "installing hooks" else "skip hooks"}")
-
         val cl = param.getDefaultClassLoader()
-        android.util.Log.i(TAG, "onPackageLoaded: package=${param.packageName} firstPackage=${param.isFirstPackage}")
+        android.util.Log.i(
+            TAG,
+            "onPackageLoaded: package=$pkg firstPackage=${param.isFirstPackage} enabled=$enabled",
+        )
+
+        if (pkg == "com.android.systemui") {
+            if (!enabled) return
+            installSystemUiHooks(cl)
+            return
+        }
+
+        android.util.Log.i(TAG, "MonoIcon enabled=$enabled — ${if (enabled) "installing hooks" else "skip hooks"}")
         android.util.Log.i(TAG, "ClassLoader: $cl")
 
         if (!enabled) return
 
         installHooks(cl)
+    }
+
+    /**
+     * SystemUI-only hook set (Phase 11): notification app icons + the guard that stops
+     * MIUI from re-styling our finished drawable. No launcher hook is installed here.
+     */
+    private fun installSystemUiHooks(cl: ClassLoader) {
+        HookRegistry.install("SystemUiNotificationIcons", required = false) {
+            SystemUiIconHooks.install(this, cl)
+        }
+        HookRegistry.install("SystemUiStyledIconGuard", required = false) {
+            SystemUiIconHooks.installStyledIconGuard(this, cl)
+        }
+
+        android.util.Log.i(TAG, "Hooks installed: ${HookRegistry.installedCount}/${HookRegistry.size}")
+        android.util.Log.i(TAG, HookRegistry.statusReport())
     }
 
     // ═══════════════════════════════════════════════════════════════

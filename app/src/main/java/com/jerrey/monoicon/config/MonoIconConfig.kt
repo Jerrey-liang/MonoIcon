@@ -25,6 +25,13 @@ data class MonoIconConfig(
      * installing an MTZ theme. Opt-in — default off.
      */
     val circleIconsEnabled: Boolean = false,
+
+    /**
+     * Phase 11: notification app icons in SystemUI use MonoIcon's themed
+     * drawable (`AppIconsManager` hooks). Default on; the switch is an escape
+     * hatch for the SystemUI process.
+     */
+    val notificationIconsEnabled: Boolean = true,
 ) {
     companion object {
         /** Default configuration (fresh install: enabled, Pixel Default theme). */
@@ -33,6 +40,7 @@ data class MonoIconConfig(
             themeId = "pixel_default",
             lawniconsEnabled = true,
             circleIconsEnabled = false,
+            notificationIconsEnabled = true,
         )
     }
 }
