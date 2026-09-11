@@ -149,7 +149,6 @@ object HctPalette {
                 val p2 = (vc.b * u / vc.a).pow(vc.j * vc.d) * 100.0 / 100.0
 
                 // Chroma from CAM16 model (line 66)
-                val et = (cos(Math.toRadians(if (hue < 20.14) hue + 360.0 else hue)) + 2.0 + 3.8) * 0.25 * 3846.153846153846 * vc.e * vc.c
                 val p1 = (50000.0 / 13.0) * vc.nTick * vc.nCB
                 val t = (hypot(a, bVal) * p1) / (u + 0.305)
                 val chroma = sqrt(p2) * (t.pow(0.9) * (1.64 - 0.29.pow(vc.f)).pow(0.73))
@@ -174,7 +173,6 @@ object HctPalette {
                 val yTarget = LstarFromTone(tone)
                 val vc = VC ?: throw IllegalStateException("ViewingConditions unavailable")
                 val p = 1.0 / (1.64 - 0.29.pow(vc.f)).pow(0.73)
-                val cosF = (cos(hueRad + 2.0) + 3.8) * 0.25 * 3846.153846153846 * vc.e * vc.c
 
                 // Newton iteration to solve for J matching the target
                 var y = sqrt(yTarget) * 11.0
@@ -191,7 +189,6 @@ object HctPalette {
 
                     // CAT02 inverse (from m8/b.java c() with inverse matrix)
                     val cat02Inv = cat02InvMatrix
-                    val xC = (cat02Inv[0][0] * u + cat02Inv[0][1] * (451.0 * aVal + u) + cat02Inv[0][2] * (cat02Inv[0][2])) * 0.0
                     // Use direct CAM16 inverse from the decompiled code
                     val cam = doubleArrayOf(
                         (u + 451.0 * aVal) / 1403.0,
@@ -228,7 +225,6 @@ object HctPalette {
     class HctSolver private constructor(
         private val hue: Double,
         private val chroma: Double,
-        private val viewCond: i8bRef
     ) {
         private val cache = HashMap<Int, Int>()
 
@@ -243,13 +239,10 @@ object HctPalette {
         companion object {
             /** Binary search: find the CAM16 where chroma at a reference tone matches target. */
             fun solveToInt(hue: Double, chroma: Double): HctSolver {
-                return HctSolver(hue, chroma, i8bRef(hue, chroma))
+                return HctSolver(hue, chroma)
             }
         }
     }
-
-    /** Thin ref holder matching i8/b internal state. */
-    private class i8bRef(val hue: Double, val chroma: Double)
 
     // ═══════════════════════════════════════════════════════════════════
     // Viewing Conditions (i8/d.java)

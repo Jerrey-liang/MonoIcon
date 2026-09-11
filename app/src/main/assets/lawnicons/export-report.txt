@@ -1,1 +1,0 @@
-bundle=v2.18.0 subset=PackagesFile appfilterItems=21092 sourcePackages=12954 selectedPackages=68 componentEntries=685 packageEntries=68 masks=77 missingMasks=0 aliases=1 bytes=301013 (0.29 MB) out=D:\Projects\Android Project\MonoIcon\app\src\main\assets\lawnicons

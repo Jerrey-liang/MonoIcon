@@ -4,7 +4,6 @@ import com.jerrey.monoicon.material2025.dynamiccolor.ColorSpec
 import com.jerrey.monoicon.material2025.dynamiccolor.DynamicScheme
 import com.jerrey.monoicon.material2025.dynamiccolor.Variant
 import com.jerrey.monoicon.material2025.hct.Hct
-import com.jerrey.monoicon.material2025.quantize.QuantizerCelebi
 import com.jerrey.monoicon.material2025.scheme.SchemeContent
 import com.jerrey.monoicon.material2025.scheme.SchemeExpressive
 import com.jerrey.monoicon.material2025.scheme.SchemeFidelity
@@ -14,7 +13,6 @@ import com.jerrey.monoicon.material2025.scheme.SchemeNeutral
 import com.jerrey.monoicon.material2025.scheme.SchemeRainbow
 import com.jerrey.monoicon.material2025.scheme.SchemeTonalSpot
 import com.jerrey.monoicon.material2025.scheme.SchemeVibrant
-import com.jerrey.monoicon.material2025.score.Score
 
 /** Pure Google Material Color Utilities 2025 calculation used by MonoIcon. */
 object Material2025ColorEngine {
@@ -56,17 +54,7 @@ object Material2025ColorEngine {
         val primaryContainerDark: Int,
     )
 
-    private const val MAX_COLORS = 128
     private const val FALLBACK_SOURCE = 0xFF4285F4.toInt()
-
-    fun fromArgbPixels(pixels: IntArray): Material2025IconColors {
-        val opaque = pixels.filter { (it ushr 24) == 0xFF }.toIntArray()
-        val input = if (opaque.isNotEmpty()) opaque else intArrayOf(FALLBACK_SOURCE)
-        val quantized = QuantizerCelebi.quantize(input, MAX_COLORS)
-        val candidates = Score.score(quantized, 4, FALLBACK_SOURCE, true)
-        val source = candidates.firstOrNull() ?: FALLBACK_SOURCE
-        return fromSource(source, candidates)
-    }
 
     fun fromSource(
         sourceColor: Int,

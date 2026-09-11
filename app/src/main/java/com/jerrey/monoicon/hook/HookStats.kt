@@ -48,27 +48,6 @@ class HookStats(
         }
     }
 
-    /** Returns the current invocation count for [methodName]. */
-    fun count(methodName: String): Long =
-        statsMap[methodName]?.count?.get() ?: 0L
-
-    /** Returns total invocations across all tracked methods. */
-    fun totalCount(): Long =
-        statsMap.values.sumOf { it.count.get() }
-
-    /** Print a full summary of all tracked methods. */
-    fun printAllSummaries() {
-        if (statsMap.isEmpty()) return
-        com.jerrey.monoicon.logging.logi(tag, "═══ Hook Statistics Summary ═══")
-        statsMap.forEach { (name, ms) -> printSummary(name, ms) }
-        com.jerrey.monoicon.logging.logi(tag, "══════════════════════════════════")
-    }
-
-    /** Reset all counters. */
-    fun reset() {
-        statsMap.clear()
-    }
-
     // ── Internal ──────────────────────────────────────────────────
 
     private fun printSummary(methodName: String, ms: MethodStats) {

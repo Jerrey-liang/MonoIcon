@@ -3,20 +3,6 @@ package com.jerrey.monoicon.logging
 import android.util.Log
 
 /**
- * Log level for filtering verbosity.
- */
-enum class LogLevel {
-    /** Verbose diagnostic information, disabled in release builds. */
-    DEBUG,
-    /** General informational messages. */
-    INFO,
-    /** Potentially harmful situations that do not cause failure. */
-    WARNING,
-    /** Error events that cause a specific operation to fail. */
-    ERROR
-}
-
-/**
  * Unified logging interface used by all MonoIcon components.
  *
  * Implementation must never throw — a failed log statement

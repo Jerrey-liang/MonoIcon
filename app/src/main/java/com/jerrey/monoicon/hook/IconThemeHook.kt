@@ -35,7 +35,7 @@ private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
 private const val TAG_MASK = "MonoIcon.Mask"
 private const val TAG_FOLDER = "MonoIcon.FolderLifecycle"
-private const val MODULE_VERSION = "1.2.0"
+private const val MODULE_VERSION = "1.2.1"
 
 /** Boot timestamp for relative timing logs (ms since boot approx). */
 private val bootTimeNs: Long = System.nanoTime()
@@ -936,7 +936,7 @@ class IconThemeHook : XposedModule() {
                 }
             }
 
-            if (colorBitmap != null && !colorBitmap.isRecycled) {
+            if (!colorBitmap.isRecycled) {
                 val extractedColor = colorExtractor.extractDominantColor(colorBitmap)
                 IconColorCache.put(component, extractedColor)
                 logd(TAG_COLOR,
@@ -1275,45 +1275,6 @@ class IconThemeHook : XposedModule() {
     }
 
     /**
-     * 当背景层为透明 ColorDrawable（monochrome 模式覆盖）时，
-     * 从前景层获取图标 artwork 并提取色彩。
-     *
-     * @return ExtractResult with color from foreground drawable, or null.
-     */
-    private fun extractFromForegroundLayers(drawable: Drawable, identity: String): ExtractResult? {
-        try {
-            val getFgMethod = drawable.javaClass.getMethod("getForegroundLayers")
-            val fgLayers = getFgMethod.invoke(drawable) as? List<*> ?: return null
-            if (fgLayers.isEmpty()) return null
-
-            // 取第一个前景层
-            val firstLayer = fgLayers[0] ?: return null
-            val getDrawableMethod = firstLayer.javaClass.getMethod("getDrawable")
-            val fgDrawable = getDrawableMethod.invoke(firstLayer) as? Drawable ?: return null
-
-            val w = fgDrawable.intrinsicWidth.coerceAtLeast(1)
-            val h = fgDrawable.intrinsicHeight.coerceAtLeast(1)
-            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bmp)
-            fgDrawable.setBounds(0, 0, w, h)
-            fgDrawable.draw(canvas)
-            val color = colorExtractor.extractDominantColor(bmp)
-            bmp.recycle()
-
-            logd(TAG_COLOR,
-                "[LayerAdaptiveColor] package=$identity " +
-                "layerFg=${fgDrawable.javaClass.simpleName} " +
-                "color=0x${color.toUInt().toString(16).uppercase().padStart(8, '0')} " +
-                "source=Foreground renderWidth=$w renderHeight=$h")
-
-            return ExtractResult(color, "Foreground", w, h)
-        } catch (t: Throwable) {
-            logw(TAG_COLOR, "[LayerAdaptiveColor] foreground extraction failed: ${t.message}")
-            return null
-        }
-    }
-
-    /**
      * 从 [LayerAdaptiveIconDrawable] 的背景层提取图标代表色。
      *
      * HyperOS 将原始 AdaptiveIconDrawable 存入 LayerAdaptiveIconDrawable 的
@@ -1443,7 +1404,7 @@ class IconThemeHook : XposedModule() {
                 }
             }
 
-            if (colorBitmap != null && !colorBitmap.isRecycled) {
+            if (!colorBitmap.isRecycled) {
                 val extractedColor = colorExtractor.extractDominantColor(colorBitmap)
                 logd(TAG_COLOR,
                     "[ColorExtract] package=$identity " +
