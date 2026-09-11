@@ -61,6 +61,7 @@ fun SettingsScreen() {
     }
     var showRestartHint by remember { mutableStateOf(false) }
     var restarting by remember { mutableStateOf(false) }
+    var lawniconsEnabled by remember { mutableStateOf(ConfigManager.isLawniconsEnabledFromUi()) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -107,6 +108,31 @@ fun SettingsScreen() {
                                 enabled = value
                                 showRestartHint = true
                                 ConfigManager.setEnabled(value)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Phase 8: 无 mono 层时优先使用内置 Lawnicons 掩码
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Lawnicons 图标优先")
+                            Text(
+                                text = "无 monochrome 层的应用使用内置 Lawnicons 字形",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = lawniconsEnabled,
+                            onCheckedChange = { value ->
+                                lawniconsEnabled = value
+                                ConfigManager.setLawniconsEnabled(value)
                             }
                         )
                     }

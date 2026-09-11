@@ -7,6 +7,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.VectorDrawable
 import com.jerrey.monoicon.cache.MonochromeCache
 import com.jerrey.monoicon.color.IconDrawableCache
+import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.image.DrawableConverter
 import com.jerrey.monoicon.logging.logd
 import com.jerrey.monoicon.mask.GenerateResult
@@ -71,24 +72,39 @@ class AospMonochromeMaskStrategy : MaskStrategy {
                     keyBitmap = mask
                     logd(TAG, "[AospMask] source=AOSP_NATIVE raw=$rawUsed")
                 } else {
-                    // Plan replay decision: near-flat single-color glyph layers
-                    // use the foreground alpha silhouette; everything else
-                    // (opaque art, artwork badges) takes the B core.
-                    val structure = adaptiveSource.foreground?.let {
-                        AospMonochromeFactory.foregroundStructure(it, size)
-                    }
-                    if (structure?.useSilhouette == true) {
-                        source = MaskStrategy.SOURCE_AOSP_ADAPTIVE_SILHOUETTE
-                        mask = AospMonochromeFactory.renderForegroundSilhouette(
-                            adaptiveSource.foreground!!, size,
+                    // Phase 8 tier: author-drawn Lawnicons mask (skips every
+                    // grayscale heuristic). Falls through to AOSP when the
+                    // bundle has no entry or the tier is disabled.
+                    val pack = tryLawnicons(identity, size)
+                    if (pack != null) {
+                        source = MaskStrategy.SOURCE_LAWNICONS
+                        mask = pack
+                        keyBitmap = pack
+                        logd(
+                            TAG,
+                            "[AospMask] source=LAWNICONS bundle=${LawniconsAssetSource.version()} " +
+                                "raw=$rawUsed identity=$identity",
                         )
-                        keyBitmap = mask
-                        logd(TAG, "[AospMask] source=AOSP_ADAPTIVE_SILHOUETTE raw=$rawUsed")
                     } else {
-                        source = MaskStrategy.SOURCE_AOSP_ADAPTIVE
-                        mask = AospMonochromeFactory.wrap(adaptiveSource, size)
-                        keyBitmap = mask
-                        logd(TAG, "[AospMask] source=AOSP_ADAPTIVE raw=$rawUsed")
+                        // Plan replay decision: near-flat single-color glyph layers
+                        // use the foreground alpha silhouette; everything else
+                        // (opaque art, artwork badges) takes the B core.
+                        val structure = adaptiveSource.foreground?.let {
+                            AospMonochromeFactory.foregroundStructure(it, size)
+                        }
+                        if (structure?.useSilhouette == true) {
+                            source = MaskStrategy.SOURCE_AOSP_ADAPTIVE_SILHOUETTE
+                            mask = AospMonochromeFactory.renderForegroundSilhouette(
+                                adaptiveSource.foreground!!, size,
+                            )
+                            keyBitmap = mask
+                            logd(TAG, "[AospMask] source=AOSP_ADAPTIVE_SILHOUETTE raw=$rawUsed")
+                        } else {
+                            source = MaskStrategy.SOURCE_AOSP_ADAPTIVE
+                            mask = AospMonochromeFactory.wrap(adaptiveSource, size)
+                            keyBitmap = mask
+                            logd(TAG, "[AospMask] source=AOSP_ADAPTIVE raw=$rawUsed")
+                        }
                     }
                 }
             } else if (
@@ -97,12 +113,24 @@ class AospMonochromeMaskStrategy : MaskStrategy {
                     d is VectorDrawable
             ) {
                 val size = aospTargetSize(preferred, d)
-                val wrapped = DrawableConverter.wrapAospLegacyIcon(preferred, size)
-                if (wrapped != null) {
-                    source = MaskStrategy.SOURCE_AOSP_LEGACY
-                    mask = AospMonochromeFactory.wrap(wrapped, size)
-                    keyBitmap = (preferred as? BitmapDrawable)?.bitmap ?: mask
-                    logd(TAG, "[AospMask] source=AOSP_LEGACY raw=$rawUsed")
+                val pack = tryLawnicons(identity, size)
+                if (pack != null) {
+                    source = MaskStrategy.SOURCE_LAWNICONS
+                    mask = pack
+                    keyBitmap = pack
+                    logd(
+                        TAG,
+                        "[AospMask] source=LAWNICONS bundle=${LawniconsAssetSource.version()} " +
+                            "raw=$rawUsed identity=$identity",
+                    )
+                } else {
+                    val wrapped = DrawableConverter.wrapAospLegacyIcon(preferred, size)
+                    if (wrapped != null) {
+                        source = MaskStrategy.SOURCE_AOSP_LEGACY
+                        mask = AospMonochromeFactory.wrap(wrapped, size)
+                        keyBitmap = (preferred as? BitmapDrawable)?.bitmap ?: mask
+                        logd(TAG, "[AospMask] source=AOSP_LEGACY raw=$rawUsed")
+                    }
                 }
             }
         } catch (_: Throwable) {
@@ -136,7 +164,9 @@ class AospMonochromeMaskStrategy : MaskStrategy {
         return GenerateResult(mask, source, rawUsed, cacheHit = false)
     }
 
-    /** Closest available equivalent to AOSP's BaseIconFactory.iconBitmapSize. */
+    /**
+     * Closest available equivalent to AOSP's BaseIconFactory.iconBitmapSize.
+     */
     private fun aospTargetSize(source: Drawable, display: Drawable): Int {
         val bitmap = (source as? BitmapDrawable)?.bitmap
         if (bitmap != null && !bitmap.isRecycled) {
@@ -145,6 +175,20 @@ class AospMonochromeMaskStrategy : MaskStrategy {
         val sourceSize = maxOf(source.intrinsicWidth, source.intrinsicHeight)
         if (sourceSize > 0) return sourceSize
         return maxOf(display.intrinsicWidth, display.intrinsicHeight).coerceAtLeast(1)
+    }
+
+    /**
+     * Phase 8: Lawnicons bundle lookup. Never throws — a missing/disabled
+     * bundle simply returns null so the AOSP branches stay in charge.
+     */
+    private fun tryLawnicons(identity: String?, size: Int): Bitmap? = try {
+        if (ConfigManager.isLawniconsEnabled()) {
+            LawniconsAssetSource.lookupMask(identity, size)
+        } else {
+            null
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     companion object {

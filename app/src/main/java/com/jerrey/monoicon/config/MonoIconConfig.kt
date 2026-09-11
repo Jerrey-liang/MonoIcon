@@ -12,9 +12,19 @@ data class MonoIconConfig(
 
     /** Active theme ID (Phase 5). Defaults to pixel_default = Phase 4 behavior. */
     val themeId: String = "pixel_default",
+
+    /**
+     * Phase 8: use the built-in Lawnicons mask bundle for icons WITHOUT a
+     * native monochrome layer (annotator-drawn glyphs, no heuristics).
+     */
+    val lawniconsEnabled: Boolean = true,
 ) {
     companion object {
         /** Default configuration (fresh install: enabled, Pixel Default theme). */
-        val DEFAULT = MonoIconConfig(enabled = true, themeId = "pixel_default")
+        val DEFAULT = MonoIconConfig(
+            enabled = true,
+            themeId = "pixel_default",
+            lawniconsEnabled = true,
+        )
     }
 }

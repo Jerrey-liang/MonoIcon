@@ -288,6 +288,8 @@ class IconThemeHook : XposedModule() {
                 PackageChangeReceiver.register(context)
                 // Phase 6.2: lazy Monet engine init (same first-View pattern)
                 PixelMonetColorEngine.init(context)
+                // Phase 8: lazy Lawnicons bundle init (module APK assets)
+                com.jerrey.monoicon.theme.mask.LawniconsAssetSource.init(context)
                 packageReceiverRegistered = true
             } catch (_: Throwable) {
                 // isolation — registration must never crash the launcher
@@ -954,6 +956,10 @@ class IconThemeHook : XposedModule() {
         val srcLabel = when (source) {
             SOURCE_NATIVE -> "NATIVE"
             SOURCE_FOREGROUND -> "FOREGROUND"
+            SOURCE_AOSP_ADAPTIVE -> "AOSP_ADAPTIVE"
+            SOURCE_AOSP_ADAPTIVE_SILHOUETTE -> "AOSP_ADAPTIVE_SILHOUETTE"
+            SOURCE_AOSP_LEGACY -> "AOSP_LEGACY"
+            SOURCE_LAWNICONS -> "LAWNICONS"
             else -> "LUMA"
         }
         logd(TAG_MASK,
@@ -1277,10 +1283,14 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
 
     companion object {
-        // Phase 3 source constants
+        // Phase 3 source constants (synced with MaskStrategy / MonochromeCache)
         const val SOURCE_NATIVE = 1
         const val SOURCE_FOREGROUND = 2
         const val SOURCE_LUMINANCE = 3
+        const val SOURCE_AOSP_ADAPTIVE = 4
+        const val SOURCE_AOSP_LEGACY = 5
+        const val SOURCE_AOSP_ADAPTIVE_SILHOUETTE = 6
+        const val SOURCE_LAWNICONS = 7
 
         // Phase 3.14: HyperOS LayerAdaptiveIconDrawable 全限定类名
         const val LAYER_ADAPTIVE_CLASS = "com.miui.home.common.drawable.LayerAdaptiveIconDrawable"

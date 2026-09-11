@@ -51,5 +51,8 @@ interface MaskStrategy {
         const val SOURCE_AOSP_ADAPTIVE = 4
         const val SOURCE_AOSP_LEGACY = 5
         const val SOURCE_AOSP_ADAPTIVE_SILHOUETTE = 6
+
+        /** Lawnicons 内置 bundle（作者绘制掩码，Phase 8）。 */
+        const val SOURCE_LAWNICONS = 7
     }
 }

@@ -89,6 +89,7 @@ class MonochromeCache(
             SOURCE_AOSP_ADAPTIVE -> "AOSP_ADAPTIVE"
             SOURCE_AOSP_ADAPTIVE_SILHOUETTE -> "AOSP_ADAPTIVE_SILHOUETTE"
             SOURCE_AOSP_LEGACY -> "AOSP_LEGACY"
+            SOURCE_LAWNICONS -> "LAWNICONS"
             else -> "LUMA"
         }
         return "$themeId|$context|$identity|${w}x${h}@$fp|$src"
@@ -102,6 +103,9 @@ class MonochromeCache(
         const val SOURCE_AOSP_ADAPTIVE = 4
         const val SOURCE_AOSP_LEGACY = 5
         const val SOURCE_AOSP_ADAPTIVE_SILHOUETTE = 6
+
+        /** Lawnicons 内置 bundle（与 MaskStrategy.SOURCE_LAWNICONS 同步）。 */
+        const val SOURCE_LAWNICONS = 7
 
         /**
          * Process-wide shared instance (Phase 4.0-A).

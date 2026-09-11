@@ -23,6 +23,7 @@ import com.jerrey.monoicon.theme.mask.AospMonochromeFactory
 import com.jerrey.monoicon.theme.mask.AospMonochromeMaskStrategy
 import com.jerrey.monoicon.theme.mask.IconNormalizerCompat
 import com.jerrey.monoicon.theme.mask.LabMonochromeExtractor
+import com.jerrey.monoicon.theme.mask.LawniconsAssetSource
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -463,6 +464,164 @@ class PixelMaskPipelineInstrumentedTest {
         assertEquals(90.0, Hct.fromInt(light.background).tone, 1.0)
         assertEquals(80.0, Hct.fromInt(dark.foreground).tone, 1.0)
         assertEquals(20.0, Hct.fromInt(dark.background).tone, 1.0)
+    }
+
+    // ── Phase 8: Lawnicons bundle tier ─────────────────────────────────
+
+    @Test
+    fun lawniconsPureLookupBuildsGlyphMask() {
+        // Synthetic bundle: white circle on transparent, alpha = glyph.
+        val glyph = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.TRANSPARENT)
+        }
+        Canvas(glyph).drawCircle(32f, 32f, 20f, Paint().apply { color = Color.WHITE })
+        val png = java.io.ByteArrayOutputStream().use { out ->
+            glyph.compress(Bitmap.CompressFormat.PNG, 100, out)
+            out.toByteArray()
+        }
+
+        val mask = LawniconsAssetSource.lookupMask(
+            identity = "com.example.pack/com.example.pack.Main",
+            size = 64,
+            index = mapOf("com.example.pack" to "test_glyph"),
+            aliases = emptyMap(),
+            reader = { java.io.ByteArrayInputStream(png) as java.io.InputStream },
+        )
+
+        assertNotNull(mask)
+        assertTrue(Color.alpha(mask!!.getPixel(32, 32)) > 220) // glyph body
+        assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)      // transparent plate
+    }
+
+    @Test
+    fun lawniconsAliasAndIndexPrecedence() {
+        val index = mapOf(
+            "com.example.pack" to "from_package",
+            "com.example.pack/com.example.pack.Main" to "from_component",
+        )
+        val aliases = mapOf("com.example.pack" to "from_alias")
+
+        // alias > component > package
+        assertEquals(
+            "from_alias",
+            LawniconsAssetSource.resolveAsset("com.example.pack/com.example.pack.Main", index, aliases),
+        )
+        assertEquals(
+            "from_component",
+            LawniconsAssetSource.resolveAsset("com.example.pack/com.example.pack.Main", index, emptyMap()),
+        )
+        assertEquals(
+            "from_package",
+            LawniconsAssetSource.resolveAsset("com.example.pack/com.example.pack.Other", index, emptyMap()),
+        )
+        // unknown / blank identities never resolve
+        assertEquals(null, LawniconsAssetSource.resolveAsset("unknown", index, aliases))
+        assertEquals(null, LawniconsAssetSource.resolveAsset("", index, aliases))
+        assertEquals(null, LawniconsAssetSource.resolveAsset(null, index, aliases))
+        // miss
+        assertEquals(null, LawniconsAssetSource.resolveAsset("com.other/x.Y", index, aliases))
+    }
+
+    @Test
+    fun lawniconsMalformedBundleReturnsNullWithoutThrowing() {
+        // Empty index
+        assertEquals(
+            null,
+            LawniconsAssetSource.lookupMask(
+                "com.example.pack/com.example.pack.Main", 64,
+                emptyMap(), emptyMap(),
+            ) { java.io.ByteArrayInputStream(ByteArray(0)) },
+        )
+        // Reader explodes
+        assertEquals(
+            null,
+            LawniconsAssetSource.lookupMask(
+                "com.example.pack/com.example.pack.Main", 64,
+                mapOf("com.example.pack" to "boom"), emptyMap(),
+            ) { throw IllegalStateException("boom") },
+        )
+        // Reader returns null (entry missing)
+        assertEquals(
+            null,
+            LawniconsAssetSource.lookupMask(
+                "com.example.pack/com.example.pack.Main", 64,
+                mapOf("com.example.pack" to "missing"), emptyMap(),
+            ) { null },
+        )
+    }
+
+    @Test
+    fun lawniconsNormalizesGlyphToHeuristicTileFraction() {
+        // Regression guard for the "enlarged Lawnicons icons" bug.
+        // Geometry contract: Lawnicons 215px canvas ÷ MonetIconGenerator
+        // 320px icon canvas = 0.6719, matching the heuristic tier's ~56.5%
+        // glyph footprint (Lawnicons content maxes out at ~83% of its canvas:
+        // 0.833 × 0.6719 ≈ 0.56).
+        // Synthetic source: 48/64 = 75% content → expected ≈ 0.75 × 0.6719 × 64 ≈ 32px.
+        val glyph = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.TRANSPARENT)
+        }
+        Canvas(glyph).drawRect(8f, 8f, 56f, 56f, Paint().apply { color = Color.WHITE })
+        val png = java.io.ByteArrayOutputStream().use { out ->
+            glyph.compress(Bitmap.CompressFormat.PNG, 100, out)
+            out.toByteArray()
+        }
+
+        val mask = LawniconsAssetSource.lookupMask(
+            identity = "com.example.pack/com.example.pack.Main",
+            size = 64,
+            index = mapOf("com.example.pack" to "framed"),
+            aliases = emptyMap(),
+            reader = { java.io.ByteArrayInputStream(png) as java.io.InputStream },
+        )
+
+        assertNotNull(mask)
+        val bounds = findBounds(mask!!) { it > 32 }
+        assertNotNull(bounds)
+        assertTrue("width=${bounds!!.width()}", bounds.width() in 31..34)
+        assertTrue("height=${bounds.height()}", bounds.height() in 31..34)
+    }
+
+    @Test
+    fun lawniconsRealBundleLookupHitsCoveredPackage() {
+        // Uses the real module APK assets when available (build ships the
+        // bundle); skips gracefully when the tier cannot initialise.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        LawniconsAssetSource.init(context)
+        val mask = LawniconsAssetSource.lookupMask(
+            "com.tencent.mobileqq/com.tencent.mobileqq.activity.SplashActivity",
+            192,
+        )
+        org.junit.Assume.assumeTrue("Lawnicons bundle not available in this build", mask != null)
+
+        assertNotNull(mask)
+        assertTrue(Color.alpha(mask!!.getPixel(96, 96)) > 0)
+        assertTrue(mask.width == 192 && mask.height == 192)
+    }
+
+    @Test
+    fun lawniconsMissFallsBackToAospTier() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val identity = "com.example.notinpack/whatever.Main"
+        val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.TRANSPARENT)
+        }
+        Canvas(fg).drawRect(24f, 24f, 40f, 40f, Paint().apply { color = Color.BLACK })
+        IconDrawableCache.put(
+            identity,
+            AdaptiveIconDrawable(ColorDrawable(Color.WHITE), BitmapDrawable(context.resources, fg)),
+        )
+        val display = AdaptiveIconDrawable(ColorDrawable(Color.WHITE), ColorDrawable(Color.WHITE))
+        val strategy = AospMonochromeMaskStrategy().apply {
+            configureCache("aosp_test", "instrumented")
+        }
+
+        val result = strategy.generate(display, identity)
+
+        assertNotNull(result)
+        assertNotNull(result!!.mask)
+        assertTrue(result.source != 7) // never the Lawnicons tier for an uncovered package
+        IconDrawableCache.remove(identity)
     }
 
     // ── Helpers ────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ package com.jerrey.monoicon.config
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
+import com.jerrey.monoicon.cache.CacheManager
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
@@ -39,6 +40,7 @@ object ConfigManager {
     private const val KEY_ENABLED = "enabled"
     private const val KEY_THEME_ID = "theme_id"
     private const val KEY_VARIANT_ID = "variant_id"
+    private const val KEY_LAWNICONS_ENABLED = "lawnicons_enabled"
 
     /** Launcher-side refresh cadence (ms). */
     private const val REFRESH_INTERVAL_MS = 1_000L
@@ -118,6 +120,13 @@ object ConfigManager {
     @Volatile
     private var lastRefreshMs = 0L
 
+    // ── Lawnicons bundle toggle (Phase 8) ──────────────────────────────
+    private val cachedLawniconsEnabled = AtomicBoolean(true)
+    @Volatile
+    private var lastLawniconsRefreshMs = 0L
+    @Volatile
+    private var lastLawniconsValue = true
+
     /**
      * Binds the framework's read-only remote preferences (call from
      * PackageLoadedParam handling, before installing hooks).
@@ -127,7 +136,13 @@ object ConfigManager {
             remotePrefsProvider = { getRemotePrefs(api) }
             cachedEnabled.set(readRemote())
             lastRefreshMs = SystemClock.elapsedRealtime()
-            android.util.Log.i(TAG, "hook-side init, enabled=${cachedEnabled.get()}")
+            cachedLawniconsEnabled.set(readRemoteLawnicons())
+            lastLawniconsValue = cachedLawniconsEnabled.get()
+            lastLawniconsRefreshMs = lastRefreshMs
+            android.util.Log.i(
+                TAG,
+                "hook-side init, enabled=${cachedEnabled.get()} lawnicons=${cachedLawniconsEnabled.get()}",
+            )
         } catch (t: Throwable) {
             android.util.Log.w(TAG, "initForHooks failed: ${t.message}")
         }
@@ -247,6 +262,77 @@ object ConfigManager {
             android.util.Log.w(TAG, "setVariantId failed: ${t.message}")
             try {
                 fallbackPrefs?.edit()?.putString(KEY_VARIANT_ID, normalized)?.apply()
+            } catch (_: Throwable) { }
+        }
+    }
+
+    // ── Lawnicons bundle toggle (Phase 8) ─────────────────────────────
+
+    /**
+     * Launcher side: whether the built-in Lawnicons mask bundle may be used
+     * for icons without a native monochrome layer.
+     *
+     * Refresh cadence matches [isEnabled]. When the value flips, every cached
+     * mask was produced by the other branch, so the mask caches are cleared
+     * once — otherwise the change would only take effect for new icons.
+     */
+    fun isLawniconsEnabled(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastLawniconsRefreshMs >= REFRESH_INTERVAL_MS) {
+            lastLawniconsRefreshMs = now
+            val value = readRemoteLawnicons()
+            if (value != lastLawniconsValue) {
+                lastLawniconsValue = value
+                try {
+                    CacheManager.clearAll()
+                    android.util.Log.i(TAG, "lawniconsEnabled=$value → mask caches cleared")
+                } catch (t: Throwable) {
+                    android.util.Log.w(TAG, "cache clear after toggle failed: ${t.message}")
+                }
+            }
+            cachedLawniconsEnabled.set(value)
+        }
+        return cachedLawniconsEnabled.get()
+    }
+
+    private fun readRemoteLawnicons(): Boolean = try {
+        remotePrefsProvider?.invoke()?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: true
+    } catch (_: Throwable) {
+        true
+    }
+
+    /** UI side: reads the Lawnicons toggle (falls back to shared prefs). */
+    fun isLawniconsEnabledFromUi(): Boolean {
+        val service = remoteService
+        return if (service != null) {
+            try {
+                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_LAWNICONS_ENABLED, true)
+            } catch (_: Throwable) {
+                fallbackPrefs?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: true
+            }
+        } else {
+            fallbackPrefs?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: true
+        }
+    }
+
+    /** Persists the Lawnicons toggle via the framework remote preferences. */
+    fun setLawniconsEnabled(enabled: Boolean) {
+        try {
+            val service = remoteService
+            if (service != null) {
+                service.getRemotePreferences(PREFS_NAME)
+                    .edit()
+                    .putBoolean(KEY_LAWNICONS_ENABLED, enabled)
+                    .apply()
+                android.util.Log.i(TAG, "setLawniconsEnabled=$enabled (remote)")
+            } else {
+                fallbackPrefs?.edit()?.putBoolean(KEY_LAWNICONS_ENABLED, enabled)?.apply()
+                android.util.Log.i(TAG, "setLawniconsEnabled=$enabled (fallback prefs)")
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setLawniconsEnabled failed: ${t.message}")
+            try {
+                fallbackPrefs?.edit()?.putBoolean(KEY_LAWNICONS_ENABLED, enabled)?.apply()
             } catch (_: Throwable) { }
         }
     }
