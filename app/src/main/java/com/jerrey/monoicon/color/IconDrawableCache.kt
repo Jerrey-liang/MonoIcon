@@ -73,6 +73,22 @@ object IconDrawableCache {
         }
     }
 
+    /**
+     * Phase 10: first cached raw drawable whose key starts with
+     * `"<packageName>/"`, or null.
+     *
+     * Recents hands us the *task's* top component, which is frequently not the
+     * launcher activity captured by the RawIconProvider hook — this
+     * package-level fallback keeps the raw-APK mask tier working there.
+     */
+    fun getByPackage(packageName: String): Drawable? {
+        if (packageName.isEmpty()) return null
+        val prefix = packageName + "/"
+        return synchronized(lock) {
+            store.entries.firstOrNull { it.key.startsWith(prefix) }?.value
+        }
+    }
+
     fun clear() {
         synchronized(lock) {
             store.clear()

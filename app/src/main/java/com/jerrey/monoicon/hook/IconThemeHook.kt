@@ -24,6 +24,7 @@ import com.jerrey.monoicon.theme.IconContext
 import com.jerrey.monoicon.theme.ThemeManager
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.theme.render.ColoredMonochromeDrawable
+import com.jerrey.monoicon.theme.render.ThemedIconBuilder
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedModule
@@ -172,6 +173,8 @@ class IconThemeHook : XposedModule() {
         // become circular without an MTZ theme (all hooks optional/pass-through
         // while the circle_icons toggle is off).
         CircleIconHooks.install(this, cl)
+        // Phase 10: recents task icons — same themed drawable as the desktop.
+        HookRegistry.install("RecentsIcon", required = false) { installRecentsIcon(cl) }
 
         android.util.Log.i(TAG, "Hooks installed: ${HookRegistry.installedCount}/${HookRegistry.size}")
         android.util.Log.i(TAG, HookRegistry.statusReport())
@@ -1048,24 +1051,158 @@ class IconThemeHook : XposedModule() {
         extractOriginalIconColor(d, identity)
 
         // Phase 6.0: combined mask + color (IconColorCache hit → app-specific hue)
-        val iconResult = ThemeManager.currentTheme.generateIcon(d, identity, IconContext.DESKTOP)
-        val maskBitmap = iconResult.mask ?: return null
+        // Phase 10: shared builder — recents (Hook 11) renders identically.
+        val themed = ThemedIconBuilder.build(d, identity) ?: return null
 
         // Phase 3.16: log mask bitmap quality
-        diagMaskRender(maskBitmap, identity, iconResult.source)
+        diagMaskRender(themed.mask, identity, themed.source)
+        return Pair(themed.drawable, themed.mask)
+    }
 
-        // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
-        // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
-        val safeMask = maskBitmap.copy(Bitmap.Config.ARGB_8888, false) ?: maskBitmap
-        return Pair(
-            ColoredMonochromeDrawable(
-                safeMask,
-                iconResult.color,
-                iconResult.plate,
-                ConfigManager.iconShape(),
-            ),
-            safeMask,
-        )
+    // ═══════════════════════════════════════════════════════════════
+    // Hook 11: recents task icons (Phase 10)
+    //
+    // HyperOS recents loads its per-task icons through
+    // `com.android.systemui.shared.recents.model.IconLoader` (packaged inside
+    // the launcher APK), which composes MIUI icons via IconCustomizer — the
+    // reason the task switcher showed raw app icons that were merely clipped
+    // round by the Phase 9 shape hijack.
+    //
+    // Three points are needed, because MIUI has *two* ways to obtain an icon:
+    //  1. `IconLoader.getAndInvalidateIfModified()` / `getIcon()` return value —
+    //     consumed by `Task.setIconForTask()` (icon / cti1Icon / cti2Icon).
+    //  2. `TaskKeyLruCache.put()` — MIUI stores its *own* drawable inside those
+    //     methods (via `mTempCachingList` → `updateTempToCache()`), and
+    //     `RecentsTaskLoader.loadTaskData()` binds `task.icon` straight from the
+    //     cache (`mIconCache.getAndInvalidateIfModified(task.key)`, L266).
+    //     Without theming the write, that path kept showing the raw app icon.
+    // The cache is shared with thumbnails / labels / content descriptions, so
+    // only `Drawable` values are rewritten.
+    //
+    // Badge policy (Phase 10 decision C): the drawable is replaced
+    // unconditionally, so work-profile / dual-app badges are dropped — the same
+    // trade-off the desktop hook already makes.
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun installRecentsIcon(cl: ClassLoader) {
+        val loaderClass = cl.loadClass("com.android.systemui.shared.recents.model.IconLoader")
+        val cacheClass = cl.loadClass("com.android.systemui.shared.recents.model.TaskKeyLruCache")
+        val taskKeyClass = cl.loadClass("com.android.systemui.shared.recents.model.Task\$TaskKey")
+        var installed = 0
+
+        val invalidate = try {
+            loaderClass.getDeclaredMethod(
+                "getAndInvalidateIfModified",
+                taskKeyClass,
+                android.app.ActivityManager.TaskDescription::class.java,
+                android.content.res.Resources::class.java,
+                Boolean::class.javaPrimitiveType,
+            )
+        } catch (_: Throwable) {
+            null
+        }
+        if (invalidate != null) {
+            hookRecentsIconMethod(invalidate, "getAndInvalidateIfModified")
+            installed++
+        }
+
+        val getIcon = try {
+            loaderClass.getDeclaredMethod(
+                "getIcon",
+                taskKeyClass,
+                android.app.ActivityManager.TaskDescription::class.java,
+            )
+        } catch (_: Throwable) {
+            null
+        }
+        if (getIcon != null) {
+            hookRecentsIconMethod(getIcon, "getIcon")
+            installed++
+        }
+
+        val put = try {
+            cacheClass.getDeclaredMethod("put", taskKeyClass, Any::class.java)
+        } catch (_: Throwable) {
+            null
+        }
+        if (put != null) {
+            hookRecentsIconCachePut(put)
+            installed++
+        }
+
+        if (installed == 0) {
+            throw NoSuchMethodException("IconLoader exposes no icon entry point")
+        }
+        android.util.Log.i(TAG, "  ✓ RecentsIcon methods=$installed")
+    }
+
+    /**
+     * Themes the drawable *before* MIUI caches it, so every reader of the
+     * recents icon cache (including `RecentsTaskLoader.loadTaskData()`, which
+     * bypasses the loader) gets MonoIcon's icon.
+     */
+    private fun hookRecentsIconCachePut(method: java.lang.reflect.Method) {
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
+
+                val key: Any = chain.getArg(0) as? Any ?: return@intercept chain.proceed()
+                // Thumbnails / labels / descriptions share this cache.
+                val icon = chain.getArg(1) as? Drawable ?: return@intercept chain.proceed()
+
+                val identity = RecentsIconCompat.identity(key)
+                val themed = try {
+                    ThemedIconBuilder.build(RecentsIconCompat.sourceDrawable(identity, icon), identity)
+                } catch (t: Throwable) {
+                    loge(TAG, "[Recents:cachePut] generate failed: ${t.message}", t)
+                    null
+                } ?: return@intercept chain.proceed()
+
+                logd(
+                    TAG,
+                    "[Recents:cachePut] replaced=true identity=${identity ?: "NULL"} src=${themed.source}",
+                )
+                chain.proceed(arrayOf(key, themed.drawable))
+            }
+    }
+
+    private fun hookRecentsIconMethod(method: java.lang.reflect.Method, label: String) {
+        deoptimize(method)
+
+        hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain: Chain ->
+                // Phase 4.1: master switch — disabled = untouched recents
+                if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
+
+                val start = System.nanoTime()
+                val original = try {
+                    chain.proceed()
+                } catch (t: Throwable) {
+                    logw(TAG, "[Recents:$label] proceed threw: ${t.message}")
+                    null
+                }
+                val icon = original as? Drawable ?: return@intercept original
+
+                val identity = RecentsIconCompat.identity(chain.getArg(0))
+                val themed = try {
+                    ThemedIconBuilder.build(RecentsIconCompat.sourceDrawable(identity, icon), identity)
+                } catch (t: Throwable) {
+                    loge(TAG, "[Recents:$label] generate failed: ${t.message}", t)
+                    null
+                } ?: return@intercept icon
+
+                logd(
+                    TAG,
+                    "[Recents:$label] replaced=true identity=${identity ?: "NULL"} " +
+                        "src=${themed.source} " +
+                        "cost=${(System.nanoTime() - start) / 1_000_000L}ms",
+                )
+                themed.drawable
+            }
     }
 
     // ═══════════════════════════════════════════════════════════════
