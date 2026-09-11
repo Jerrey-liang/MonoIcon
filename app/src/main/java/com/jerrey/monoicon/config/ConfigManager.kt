@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
 import com.jerrey.monoicon.cache.CacheManager
+import com.jerrey.monoicon.theme.mask.MiuiIconShapeCompat
+import com.jerrey.monoicon.theme.render.IconShape
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
@@ -41,6 +43,7 @@ object ConfigManager {
     private const val KEY_THEME_ID = "theme_id"
     private const val KEY_VARIANT_ID = "variant_id"
     private const val KEY_LAWNICONS_ENABLED = "lawnicons_enabled"
+    private const val KEY_CIRCLE_ICONS = "circle_icons"
 
     /** Launcher-side refresh cadence (ms). */
     private const val REFRESH_INTERVAL_MS = 1_000L
@@ -127,6 +130,15 @@ object ConfigManager {
     @Volatile
     private var lastLawniconsValue = true
 
+    // ── Circle icon shape toggle (Phase 9) ─────────────────────────────
+    // Default OFF: the shape feature changes the desktop look globally, so it
+    // stays opt-in and the code is a no-op until the user enables it.
+    private val cachedCircleIconsEnabled = AtomicBoolean(false)
+    @Volatile
+    private var lastCircleRefreshMs = 0L
+    @Volatile
+    private var lastCircleValue = false
+
     /**
      * Binds the framework's read-only remote preferences (call from
      * PackageLoadedParam handling, before installing hooks).
@@ -139,9 +151,13 @@ object ConfigManager {
             cachedLawniconsEnabled.set(readRemoteLawnicons())
             lastLawniconsValue = cachedLawniconsEnabled.get()
             lastLawniconsRefreshMs = lastRefreshMs
+            cachedCircleIconsEnabled.set(readRemoteCircleIcons())
+            lastCircleValue = cachedCircleIconsEnabled.get()
+            lastCircleRefreshMs = lastRefreshMs
             android.util.Log.i(
                 TAG,
-                "hook-side init, enabled=${cachedEnabled.get()} lawnicons=${cachedLawniconsEnabled.get()}",
+                "hook-side init, enabled=${cachedEnabled.get()} lawnicons=${cachedLawniconsEnabled.get()} " +
+                    "circle=${cachedCircleIconsEnabled.get()}",
             )
         } catch (t: Throwable) {
             android.util.Log.w(TAG, "initForHooks failed: ${t.message}")
@@ -333,6 +349,85 @@ object ConfigManager {
             android.util.Log.w(TAG, "setLawniconsEnabled failed: ${t.message}")
             try {
                 fallbackPrefs?.edit()?.putBoolean(KEY_LAWNICONS_ENABLED, enabled)?.apply()
+            } catch (_: Throwable) { }
+        }
+    }
+
+    // ── Circle icon shape toggle (Phase 9) ────────────────────────────
+
+    /**
+     * Launcher side: whether icons are rendered with the circular silhouette
+     * (MIUI `IconCustomizer` config hijack + MonoIcon drawable clip), without
+     * installing an MTZ theme.
+     *
+     * Refresh cadence matches [isEnabled]. On a flip, MIUI's own icon caches
+     * are cleared (which also resets the parsed `IconConfig`, so the next
+     * composition picks up the new mask) together with MonoIcon's caches.
+     * Icons already rendered keep their old shape until the launcher rebinds
+     * them — the settings UI therefore shows the restart hint.
+     */
+    fun isCircleIconsEnabled(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastCircleRefreshMs >= REFRESH_INTERVAL_MS) {
+            lastCircleRefreshMs = now
+            val value = readRemoteCircleIcons()
+            if (value != lastCircleValue) {
+                lastCircleValue = value
+                try {
+                    CacheManager.clearAll()
+                    MiuiIconShapeCompat.invalidateMiuiCaches()
+                    android.util.Log.i(TAG, "circleIcons=$value → icon caches cleared")
+                } catch (t: Throwable) {
+                    android.util.Log.w(TAG, "cache clear after circle flip failed: ${t.message}")
+                }
+            }
+            cachedCircleIconsEnabled.set(value)
+        }
+        return cachedCircleIconsEnabled.get()
+    }
+
+    /** Silhouette to use for MonoIcon's own drawables right now. */
+    fun iconShape(): IconShape =
+        if (isCircleIconsEnabled()) IconShape.CIRCLE else IconShape.SQUIRCLE
+
+    private fun readRemoteCircleIcons(): Boolean = try {
+        remotePrefsProvider?.invoke()?.getBoolean(KEY_CIRCLE_ICONS, false) ?: false
+    } catch (_: Throwable) {
+        false
+    }
+
+    /** UI side: reads the circle-icon toggle (falls back to shared prefs). */
+    fun isCircleIconsEnabledFromUi(): Boolean {
+        val service = remoteService
+        return if (service != null) {
+            try {
+                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_CIRCLE_ICONS, false)
+            } catch (_: Throwable) {
+                fallbackPrefs?.getBoolean(KEY_CIRCLE_ICONS, false) ?: false
+            }
+        } else {
+            fallbackPrefs?.getBoolean(KEY_CIRCLE_ICONS, false) ?: false
+        }
+    }
+
+    /** Persists the circle-icon toggle via the framework remote preferences. */
+    fun setCircleIconsEnabled(enabled: Boolean) {
+        try {
+            val service = remoteService
+            if (service != null) {
+                service.getRemotePreferences(PREFS_NAME)
+                    .edit()
+                    .putBoolean(KEY_CIRCLE_ICONS, enabled)
+                    .apply()
+                android.util.Log.i(TAG, "setCircleIconsEnabled=$enabled (remote)")
+            } else {
+                fallbackPrefs?.edit()?.putBoolean(KEY_CIRCLE_ICONS, enabled)?.apply()
+                android.util.Log.i(TAG, "setCircleIconsEnabled=$enabled (fallback prefs)")
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setCircleIconsEnabled failed: ${t.message}")
+            try {
+                fallbackPrefs?.edit()?.putBoolean(KEY_CIRCLE_ICONS, enabled)?.apply()
             } catch (_: Throwable) { }
         }
     }

@@ -18,6 +18,13 @@ data class MonoIconConfig(
      * native monochrome layer (annotator-drawn glyphs, no heuristics).
      */
     val lawniconsEnabled: Boolean = true,
+
+    /**
+     * Phase 9: render icons with the circular silhouette (MIUI
+     * `IconCustomizer` config hijack + MonoIcon drawable clip) without
+     * installing an MTZ theme. Opt-in — default off.
+     */
+    val circleIconsEnabled: Boolean = false,
 ) {
     companion object {
         /** Default configuration (fresh install: enabled, Pixel Default theme). */
@@ -25,6 +32,7 @@ data class MonoIconConfig(
             enabled = true,
             themeId = "pixel_default",
             lawniconsEnabled = true,
+            circleIconsEnabled = false,
         )
     }
 }
