@@ -53,9 +53,11 @@ import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
  * HyperOS ships a **square** framework `config_icon_mask`
  * (`M50,0L100,0 100,100 0,100 0,0z`), so the shape of our composite is not
  * decided by MIUI: with [IconShape.CIRCLE] the drawable clips itself to the
- * AOSP-equivalent circle ([CircleIconShape]) at draw time. The clip is
- * derived from the current bounds, so it survives rescaling and the folder
- * preview clones created through [getConstantState].
+ * AOSP-equivalent circle ([CircleIconShape]) at draw time, **after** the AOSP
+ * whole-icon normalization (scale ≈ 0.913 + transparent padding), matching
+ * `BaseIconFactory.drawIconBitmap()` on a Pixel. The geometry is derived from
+ * the current bounds, so it survives rescaling and the folder preview clones
+ * created through [getConstantState].
  */
 class ColoredMonochromeDrawable(
     mask: Bitmap,
@@ -90,8 +92,9 @@ class ColoredMonochromeDrawable(
         refreshDynamicColors()
         val target = bounds
         if (target.width() <= 0 || target.height() <= 0) return
-        composite.bounds = target
-        val clip = clipPathFor(target)
+        val content = contentBoundsFor(target)
+        composite.bounds = content
+        val clip = clipPathFor(target, content)
         if (clip == null) {
             composite.draw(canvas)
         } else {
@@ -106,14 +109,26 @@ class ColoredMonochromeDrawable(
     }
 
     /**
-     * Circle clip for [target] ([IconShape.CIRCLE]) or null when the icon is
-     * left to the framework mask ([IconShape.SQUIRCLE]). Recomputed only when
-     * the bounds change.
+     * Bounds the composite is drawn into.
+     *
+     * With [IconShape.CIRCLE] this is the AOSP-normalized inset rect
+     * (`BaseIconFactory.drawIconBitmap()`): the whole icon — plate included —
+     * is scaled to `sqrt(375/576 / maskArea)` ≈ 0.913 and centred, so the ring
+     * around it stays **transparent** (wallpaper shows through) exactly like a
+     * Pixel icon. [IconShape.SQUIRCLE] keeps the previous full-bleed behavior.
      */
-    private fun clipPathFor(target: Rect): Path? {
+    private fun contentBoundsFor(target: Rect): Rect =
+        if (sourceShape == IconShape.CIRCLE) CircleIconShape.insetBounds(target) else target
+
+    /**
+     * Circle clip for the circle shape (applied to the already inset
+     * [content] rect, so the visible circle matches the AOSP diameter) or null
+     * for [IconShape.SQUIRCLE]. Recomputed only when the bounds change.
+     */
+    private fun clipPathFor(target: Rect, content: Rect): Path? {
         val cachedBounds = clipBounds
         if (cachedBounds != null && cachedBounds == target) return clipPath
-        val computed = CircleIconShape.clipPath(sourceShape, target)
+        val computed = CircleIconShape.clipPath(sourceShape, content)
         clipPath = computed
         clipBounds = Rect(target)
         return computed

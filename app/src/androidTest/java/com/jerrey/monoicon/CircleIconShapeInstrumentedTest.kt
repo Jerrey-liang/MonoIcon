@@ -160,29 +160,71 @@ class CircleIconShapeInstrumentedTest {
     // ── Renderer ──────────────────────────────────────────────────────
 
     @Test
-    fun moduleDrawableCircleClipErasesCorners() {
-        val bitmap = render(IconShape.CIRCLE)
-        val plate = bitmap.getPixel(size / 2, 20)
-        val glyph = bitmap.getPixel(size / 2, size / 2)
+    fun aospNormalizationScaleMatchesIconNormalizer() {
+        // IconNormalizer.normalizeAdaptiveIcon() → sqrt(375/576 / maskArea).
+        // The area is Region-measured (AOSP GraphicsUtils.getArea), which for
+        // this 4-arc path is ≈0.781 rather than the analytic π/4 = 0.7854.
+        val fraction = CircleIconShape.areaFraction()
+        assertTrue("area fraction=$fraction", fraction in 0.775f..0.790f)
 
-        // Colours come from PixelMonetColorEngine at draw time, so only the
-        // structure is asserted (plate vs glyph, inside vs outside the circle).
-        assertTrue("plate visible inside the circle", Color.alpha(plate) > 0)
+        val scale = CircleIconShape.aospScale()
+        assertTrue("scale=$scale", scale in 0.905f..0.918f)
+        assertEquals(
+            "scale must equal sqrt(MAX_SQUARE_AREA_FACTOR / area)",
+            kotlin.math.sqrt((375f / 576f) / fraction),
+            scale,
+            1e-4f,
+        )
+
+        // BaseIconFactory.drawIconBitmap(): offset = max(blur, size*(1-scale)/2)
+        val inset = CircleIconShape.insetBounds(Rect(0, 0, size, size))
+        val expectedOffset = Math.round(size * (1f - scale) / 2f)
+        assertEquals(expectedOffset, inset.left)
+        assertEquals(expectedOffset, inset.top)
+        assertEquals(size - expectedOffset, inset.right)
+        assertEquals(size - expectedOffset, inset.bottom)
+        // 1.68/48 = 3.5% blur room is smaller than the ~4.3% scale offset here.
+        assertTrue("scale offset must dominate", expectedOffset > kotlin.math.ceil(size * 1.68f / 48f))
+    }
+
+    @Test
+    fun moduleDrawableCircleIsInsetWithTransparentPadding() {
+        val bitmap = render(IconShape.CIRCLE)
+
+        // Visible diameter ≈ scale × size, centred (transparent ring around it).
+        val row = size / 2
+        var first = -1
+        var last = -1
+        for (x in 0 until size) {
+            if (Color.alpha(bitmap.getPixel(x, row)) > 0) {
+                if (first < 0) first = x
+                last = x
+            }
+        }
+        assertTrue("visible icon found on the centre row", first >= 0 && last > first)
+        val diameter = (last - first + 1).toFloat() / size
+        assertEquals("AOSP scale diameter", CircleIconShape.aospScale(), diameter, 0.02f)
+
+        // The ring is transparent — never filled with the plate colour.
+        assertEquals("top padding", 0, Color.alpha(bitmap.getPixel(size / 2, 3)))
+        assertEquals("bottom padding", 0, Color.alpha(bitmap.getPixel(size / 2, size - 4)))
+        assertEquals("left padding", 0, Color.alpha(bitmap.getPixel(3, size / 2)))
+        assertEquals("right padding", 0, Color.alpha(bitmap.getPixel(size - 4, size / 2)))
+        assertEquals("corner padding", 0, Color.alpha(bitmap.getPixel(4, 4)))
+
+        // Inside the (smaller) circle: plate near the top, glyph at the centre.
+        val inset = CircleIconShape.insetBounds(Rect(0, 0, size, size))
+        val plate = bitmap.getPixel(size / 2, inset.top + 6)
+        val glyph = bitmap.getPixel(size / 2, size / 2)
+        assertTrue("plate visible just inside the circle", Color.alpha(plate) > 0)
         assertTrue("glyph visible at the centre", Color.alpha(glyph) > 0)
         assertNotEquals("glyph differs from plate", plate, glyph)
-        assertEquals("top-left corner erased", 0, Color.alpha(bitmap.getPixel(4, 4)))
+        // 40 px from the corner lies outside the inset circle (r ≈ 174.8).
         assertEquals(
-            "bottom-right corner erased",
-            0,
-            Color.alpha(bitmap.getPixel(size - 5, size - 5)),
-        )
-        assertEquals(
-            "outside the circle but inside the squircle corner",
+            "outside the inset circle",
             0,
             Color.alpha(bitmap.getPixel(40, 40)),
         )
-        // dx = dy = 130 from the centre → r = 183.8 < 192, i.e. just inside.
-        assertTrue("just inside the circle", Color.alpha(bitmap.getPixel(62, 62)) > 0)
     }
 
     @Test
@@ -195,6 +237,11 @@ class CircleIconShapeInstrumentedTest {
         )
         assertTrue("plate visible near the top edge", Color.alpha(bitmap.getPixel(size / 2, 20)) > 0)
         assertTrue("glyph visible at the centre", Color.alpha(bitmap.getPixel(size / 2, size / 2)) > 0)
+        // Squircle keeps the previous full-bleed behaviour: no AOSP padding.
+        assertTrue(
+            "no padding without the circle shape",
+            Color.alpha(bitmap.getPixel(size / 2, 3)) > 0,
+        )
         // HyperOS's framework config_icon_mask is a full square, so without our
         // clip this squircle-corner sample stays inside the launcher mask.
         assertTrue(
