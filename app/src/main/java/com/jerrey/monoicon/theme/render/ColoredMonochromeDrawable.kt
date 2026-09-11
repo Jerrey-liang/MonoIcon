@@ -191,6 +191,7 @@ class ColoredMonochromeDrawable(
     override fun getConstantState(): ConstantState =
         ColoredMonoState(sourceMask, sourceColor, sourcePlateColor, sourceShape)
 
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
     /**
@@ -225,6 +226,8 @@ class ColoredMonochromeDrawable(
         override fun getAlpha(): Int = paint.alpha
         override fun getIntrinsicWidth(): Int = bitmap.width
         override fun getIntrinsicHeight(): Int = bitmap.height
+
+        @Suppress("OVERRIDE_DEPRECATION")
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 

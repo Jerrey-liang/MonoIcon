@@ -10,6 +10,7 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Runtime configuration bridge between the settings UI and the hook runtime
@@ -55,11 +56,22 @@ object ConfigManager {
     private var remoteService: XposedService? = null
     private var fallbackPrefs: SharedPreferences? = null
 
+    /** Guards the one-shot UI-side initialization (MainActivity may be recreated). */
+    private val uiInitDone = AtomicBoolean(false)
+
+    /** Number of framework listener registrations performed (test/diagnostic). */
+    private val uiInitRegistrations = AtomicInteger(0)
+
     /**
      * Registers for the framework service binder and binds the module
      * SharedPreferences as fallback. Call from Application/MainActivity.
+     *
+     * Idempotent: the activity is recreated on configuration changes, and each
+     * call would otherwise register another [XposedServiceHelper.OnServiceListener]
+     * that the framework keeps forever.
      */
     fun init(context: Context) {
+        if (!uiInitDone.compareAndSet(false, true)) return
         try {
             fallbackPrefs = context.applicationContext
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -76,10 +88,14 @@ object ConfigManager {
                     }
                 }
             })
+            uiInitRegistrations.incrementAndGet()
         } catch (t: Throwable) {
             android.util.Log.w(TAG, "init failed: ${t.message}")
         }
     }
+
+    /** Test/diagnostic hook: how many times the framework listener was registered. */
+    internal fun uiInitRegistrationCount(): Int = uiInitRegistrations.get()
 
     /** Reads the toggle (UI side; falls back to shared prefs). */
     fun isEnabledFromUi(): Boolean {

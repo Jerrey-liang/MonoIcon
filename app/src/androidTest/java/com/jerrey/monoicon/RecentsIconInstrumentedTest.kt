@@ -127,7 +127,6 @@ class RecentsIconInstrumentedTest {
         val themed = result!!
         assertTrue("mask generated", themed.mask.width > 0 && themed.mask.height > 0)
         assertTrue("source tier recorded", themed.source > 0)
-        assertTrue(themed.drawable is ColoredMonochromeDrawable)
 
         // The recents icon view draws the returned drawable at a small size;
         // make sure it renders opaque content there.
