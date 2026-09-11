@@ -62,6 +62,7 @@ fun SettingsScreen() {
     var showRestartHint by remember { mutableStateOf(false) }
     var restarting by remember { mutableStateOf(false) }
     var lawniconsEnabled by remember { mutableStateOf(ConfigManager.isLawniconsEnabledFromUi()) }
+    var circleIconsEnabled by remember { mutableStateOf(ConfigManager.isCircleIconsEnabledFromUi()) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -133,6 +134,32 @@ fun SettingsScreen() {
                             onCheckedChange = { value ->
                                 lawniconsEnabled = value
                                 ConfigManager.setLawniconsEnabled(value)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Phase 9: 圆形图标（劫持 MIUI IconCustomizer，无需主题）
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "圆形图标（无需主题）")
+                            Text(
+                                text = "MIUI 图标与 MonoIcon 图标统一裁成圆形；修改后需重启桌面",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = circleIconsEnabled,
+                            onCheckedChange = { value ->
+                                circleIconsEnabled = value
+                                showRestartHint = true
+                                ConfigManager.setCircleIconsEnabled(value)
                             }
                         )
                     }
