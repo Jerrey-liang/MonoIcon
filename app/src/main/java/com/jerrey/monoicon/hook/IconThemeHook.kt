@@ -34,7 +34,7 @@ private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
 private const val TAG_MASK = "MonoIcon.Mask"
 private const val TAG_FOLDER = "MonoIcon.FolderLifecycle"
-private const val MODULE_VERSION = "1.0.1"
+private const val MODULE_VERSION = "1.1.0"
 
 /** Boot timestamp for relative timing logs (ms since boot approx). */
 private val bootTimeNs: Long = System.nanoTime()
@@ -168,6 +168,10 @@ class IconThemeHook : XposedModule() {
         // for MonoIcon drawables (root cause of the remaining stretch — see
         // installFillDrawableSkipJniHook).
         HookRegistry.install("FillDrawableSkipJni", required = true) { installFillDrawableSkipJniHook(cl) }
+        // Phase 9: circle icon shape — hijack MIUI's icon config/mask so icons
+        // become circular without an MTZ theme (all hooks optional/pass-through
+        // while the circle_icons toggle is off).
+        CircleIconHooks.install(this, cl)
 
         android.util.Log.i(TAG, "Hooks installed: ${HookRegistry.installedCount}/${HookRegistry.size}")
         android.util.Log.i(TAG, HookRegistry.statusReport())
@@ -395,7 +399,12 @@ class IconThemeHook : XposedModule() {
             // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
             // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
             val safeMask = mask.copy(Bitmap.Config.ARGB_8888, false) ?: mask
-            val replacement = ColoredMonochromeDrawable(safeMask, iconResult.color, iconResult.plate)
+            val replacement = ColoredMonochromeDrawable(
+                safeMask,
+                iconResult.color,
+                iconResult.plate,
+                ConfigManager.iconShape(),
+            )
 
             logd(TAG_FOLDER,
                 "[${logPrefix}Replace] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
@@ -1048,7 +1057,15 @@ class IconThemeHook : XposedModule() {
         // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
         // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
         val safeMask = maskBitmap.copy(Bitmap.Config.ARGB_8888, false) ?: maskBitmap
-        return Pair(ColoredMonochromeDrawable(safeMask, iconResult.color, iconResult.plate), safeMask)
+        return Pair(
+            ColoredMonochromeDrawable(
+                safeMask,
+                iconResult.color,
+                iconResult.plate,
+                ConfigManager.iconShape(),
+            ),
+            safeMask,
+        )
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -6,6 +6,7 @@ import android.graphics.BlendModeColorFilter
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
@@ -47,22 +48,36 @@ import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
  *
  * ## Launcher tint resistance
  * [setTintList] is intentionally a no-op.
+ *
+ * ## Shape (Phase 9)
+ * HyperOS ships a **square** framework `config_icon_mask`
+ * (`M50,0L100,0 100,100 0,100 0,0z`), so the shape of our composite is not
+ * decided by MIUI: with [IconShape.CIRCLE] the drawable clips itself to the
+ * AOSP-equivalent circle ([CircleIconShape]) at draw time. The clip is
+ * derived from the current bounds, so it survives rescaling and the folder
+ * preview clones created through [getConstantState].
  */
 class ColoredMonochromeDrawable(
     mask: Bitmap,
     color: Int,
     plateColor: Int = 0,
+    shape: IconShape = IconShape.SQUIRCLE,
 ) : Drawable() {
 
     /** The source mask (retained for ConstantState copy). */
     private val sourceMask: Bitmap = mask
     private val sourceColor: Int = color
     private val sourcePlateColor: Int = plateColor
+    private val sourceShape: IconShape = shape
 
     @Volatile private var currentColor: Int = color
     @Volatile private var currentPlateColor: Int = plateColor
     private var alphaValue: Int = 255
     private var composite: AdaptiveIconDrawable
+
+    /** Cached circle clip for the current bounds (null = no clipping). */
+    @Volatile private var clipPath: Path? = null
+    @Volatile private var clipBounds: Rect? = null
 
     init {
         composite = buildComposite(color, plateColor)
@@ -76,7 +91,32 @@ class ColoredMonochromeDrawable(
         val target = bounds
         if (target.width() <= 0 || target.height() <= 0) return
         composite.bounds = target
-        composite.draw(canvas)
+        val clip = clipPathFor(target)
+        if (clip == null) {
+            composite.draw(canvas)
+        } else {
+            val save = canvas.save()
+            try {
+                canvas.clipPath(clip)
+                composite.draw(canvas)
+            } finally {
+                canvas.restoreToCount(save)
+            }
+        }
+    }
+
+    /**
+     * Circle clip for [target] ([IconShape.CIRCLE]) or null when the icon is
+     * left to the framework mask ([IconShape.SQUIRCLE]). Recomputed only when
+     * the bounds change.
+     */
+    private fun clipPathFor(target: Rect): Path? {
+        val cachedBounds = clipBounds
+        if (cachedBounds != null && cachedBounds == target) return clipPath
+        val computed = CircleIconShape.clipPath(sourceShape, target)
+        clipPath = computed
+        clipBounds = Rect(target)
+        return computed
     }
 
     private fun refreshDynamicColors() {
@@ -134,7 +174,7 @@ class ColoredMonochromeDrawable(
     override fun getIntrinsicHeight(): Int = sourceMask.height
 
     override fun getConstantState(): ConstantState =
-        ColoredMonoState(sourceMask, sourceColor, sourcePlateColor)
+        ColoredMonoState(sourceMask, sourceColor, sourcePlateColor, sourceShape)
 
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
@@ -182,8 +222,9 @@ class ColoredMonochromeDrawable(
         private val mask: Bitmap,
         private val color: Int,
         private val plateColor: Int,
+        private val shape: IconShape,
     ) : ConstantState() {
-        override fun newDrawable(): Drawable = ColoredMonochromeDrawable(mask, color, plateColor)
+        override fun newDrawable(): Drawable = ColoredMonochromeDrawable(mask, color, plateColor, shape)
         override fun getChangingConfigurations(): Int = 0
     }
 }
