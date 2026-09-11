@@ -33,7 +33,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
-import com.jerrey.monoicon.theme.ThemeManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,9 +40,10 @@ import kotlinx.coroutines.withContext
 /**
  * MonoIcon settings screen (Phase 5).
  *
- * Master ON/OFF switch + theme selector. Both write the module's remote
- * preferences via [ConfigManager]; the launcher hook process picks up
- * changes within one refresh interval or on next launcher start.
+ * Switches for the master toggle, Lawnicons, the circle shape and notification
+ * icons, plus the Material 2025 colour variant. All write the module's remote
+ * preferences via [ConfigManager]; the hook processes pick up changes within
+ * one refresh interval or on next process start.
  *
  * Also offers a one-tap HyperOS Launcher restart (Phase 6.5): reinstall /
  * theme change requires a launcher process restart to reload the module.
@@ -51,7 +51,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen() {
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
-    var selectedTheme by remember { mutableStateOf(ThemeManager.currentThemeId()) }
     var selectedVariant by remember {
         mutableStateOf(
             Material2025ColorEngine.VariantId
@@ -247,44 +246,6 @@ fun SettingsScreen() {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Theme selector (Phase 5) ─────────────────────────────────
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Theme",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    ThemeManager.availableThemes.forEach { theme ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = selectedTheme == theme.id,
-                                onClick = {
-                                    selectedTheme = theme.id
-                                    showRestartHint = true
-                                    ThemeManager.setTheme(theme.id)
-                                }
-                            )
-                            Text(
-                                text = theme.name,
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
 
             // ── Quick launcher restart (Phase 6.5) ──────────────────────
 
