@@ -63,6 +63,8 @@ dependencies {
     // Miuix — MIUI/HyperOS-style Compose UI for the settings screen
     // (0.7.2 is the last line built with Kotlin 2.2.x / Compose MP 1.9.x)
     implementation(libs.miuix)
+    // Haze — backdrop blur used by the liquid-glass bottom navigation
+    implementation(libs.haze)
 
     // AndroidX
     implementation(libs.androidx.core.ktx)

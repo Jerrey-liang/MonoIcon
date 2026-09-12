@@ -1,274 +1,216 @@
 package com.jerrey.monoicon.ui.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
-import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Button
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Checkbox
+import com.jerrey.monoicon.ui.AppLanguage
+import com.jerrey.monoicon.ui.LocalStrings
+import com.jerrey.monoicon.ui.stringsFor
+import com.jerrey.monoicon.ui.systemPrefersChinese
+import dev.chrisbanes.haze.HazeDefaults
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.icons.useful.Back
+import top.yukonga.miuix.kmp.icon.icons.useful.Edit
+import top.yukonga.miuix.kmp.icon.icons.useful.Info
+import top.yukonga.miuix.kmp.icon.icons.useful.Settings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * MonoIcon settings screen, rebuilt with Miuix (MIUI/HyperOS design language)
- * on top of the Monet dynamic colour scheme from [MonoIconTheme].
+ * Settings host (Phase 13).
  *
- * Layout follows the HyperOS settings convention: `SmallTitle` section headers
- * above `Card` groups of `BasicComponent` rows, with the switches as row
- * actions.
- *
- * All state still comes from / goes to [ConfigManager] (module remote
- * preferences); the hook processes pick changes up within one refresh interval
- * or on their next start.
+ * Three Miuix tabs — 概览 / 模块设置 / 图标样式 — whose content scrolls behind a
+ * floating **liquid-glass** bottom navigation bar (Haze backdrop blur + border
+ * highlight). The overview tab opens the runtime-log and about pages as
+ * secondary screens with a back arrow.
  */
+private enum class MainTab(val icon: ImageVector) {
+    OVERVIEW(MiuixIcons.Useful.Info),
+    MODULE(MiuixIcons.Useful.Settings),
+    ICON_STYLE(MiuixIcons.Useful.Edit),
+}
+
+private enum class Overlay { NONE, LOGS, ABOUT }
+
 @Composable
 fun SettingsScreen() {
-    var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
-    var selectedVariant by remember {
-        mutableStateOf(
-            Material2025ColorEngine.VariantId
-                .fromId(ConfigManager.getVariantIdFromUi())
-                .id
-        )
-    }
-    var showRestartHint by remember { mutableStateOf(false) }
-    var restarting by remember { mutableStateOf(false) }
-    var lawniconsEnabled by remember { mutableStateOf(ConfigManager.isLawniconsEnabledFromUi()) }
-    var circleIconsEnabled by remember { mutableStateOf(ConfigManager.isCircleIconsEnabledFromUi()) }
-    var notificationIconsEnabled by remember {
-        mutableStateOf(ConfigManager.isNotificationIconsEnabledFromUi())
-    }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    var language by remember { mutableStateOf(AppLanguage.fromId(ConfigManager.getLanguageFromUi())) }
+    val strings = stringsFor(language, systemPrefersChinese(context))
 
-    Scaffold(
-        topBar = {
-            SmallTopAppBar(title = "MonoIcon")
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // ── Module status ─────────────────────────────────────────
-            SmallTitle(text = "模块状态")
-            Card {
-                BasicComponent(
-                    title = "Monochrome Icons",
-                    summary = "总开关：关闭后模块不处理任何图标",
-                    rightActions = {
-                        Switch(
-                            checked = enabled,
-                            onCheckedChange = { value ->
-                                enabled = value
-                                showRestartHint = true
-                                ConfigManager.setEnabled(value)
-                            },
-                        )
-                    },
-                )
-                BasicComponent(
-                    title = "Lawnicons 图标优先",
-                    summary = "无 monochrome 层的应用使用内置 Lawnicons 字形",
-                    rightActions = {
-                        Switch(
-                            checked = lawniconsEnabled,
-                            onCheckedChange = { value ->
-                                lawniconsEnabled = value
-                                ConfigManager.setLawniconsEnabled(value)
-                            },
-                        )
-                    },
-                )
-                BasicComponent(
-                    title = "圆形图标（无需主题）",
-                    summary = "MIUI 图标与 MonoIcon 图标统一裁成圆形；修改后需重启桌面",
-                    rightActions = {
-                        Switch(
-                            checked = circleIconsEnabled,
-                            onCheckedChange = { value ->
-                                circleIconsEnabled = value
-                                showRestartHint = true
-                                ConfigManager.setCircleIconsEnabled(value)
-                            },
-                        )
-                    },
-                )
-                BasicComponent(
-                    title = "通知中心图标",
-                    summary = "通知栏程序图标使用 MonoIcon 图标；修改后需重启系统界面",
-                    rightActions = {
-                        Switch(
-                            checked = notificationIconsEnabled,
-                            onCheckedChange = { value ->
-                                notificationIconsEnabled = value
-                                showRestartHint = true
-                                ConfigManager.setNotificationIconsEnabled(value)
-                            },
-                        )
-                    },
-                )
+    CompositionLocalProvider(LocalStrings provides strings) {
+        var tab by remember { mutableStateOf(MainTab.OVERVIEW) }
+        var overlay by remember { mutableStateOf(Overlay.NONE) }
+        val hazeState = rememberHazeState()
+
+        BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
+
+        val title = when (overlay) {
+            Overlay.LOGS -> strings.logsTitle
+            Overlay.ABOUT -> strings.about
+            Overlay.NONE -> when (tab) {
+                MainTab.OVERVIEW -> "MonoIcon"
+                MainTab.MODULE -> strings.moduleSettings
+                MainTab.ICON_STYLE -> strings.iconStyle
             }
+        }
 
-            // ── Colour variant ────────────────────────────────────────
-            SmallTitle(text = "Material Dynamic Color 2025")
-            Card {
-                Text(
-                    text = "用于图标配色的取色方案",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
-                )
-                Material2025ColorEngine.VariantId.entries.forEach { variant ->
-                    BasicComponent(
-                        title = variant.label,
-                        summary = if (variant.id == "tonal_spot") "默认 Material You 风格" else null,
-                        rightActions = {
-                            Checkbox(
-                                checked = selectedVariant == variant.id,
-                                onCheckedChange = { checked ->
-                                    if (checked) {
-                                        selectedVariant = variant.id
-                                        showRestartHint = true
-                                        ConfigManager.setVariantId(variant.id)
-                                    }
-                                },
-                            )
-                        },
-                        onClick = {
-                            selectedVariant = variant.id
-                            showRestartHint = true
-                            ConfigManager.setVariantId(variant.id)
-                        },
-                    )
-                }
-            }
-
-            // ── Launcher restart ──────────────────────────────────────
-            SmallTitle(text = "重启桌面")
-            Card {
-                BasicComponent(
-                    title = "重启 HyperOS 桌面",
-                    summary = "重装模块或切换主题/形状后，重启桌面才能完全生效（首次需要授予 root）",
-                    rightActions = {
-                        Button(
-                            onClick = {
-                                if (restarting) return@Button
-                                restarting = true
-                                scope.launch {
-                                    val ok = withContext(Dispatchers.IO) {
-                                        restartHyperOSLauncher(context)
-                                    }
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        if (ok) "已重启桌面" else "重启失败：请授予 MonoIcon root 权限",
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    ).show()
-                                    restarting = false
-                                }
-                            },
-                            enabled = !restarting,
-                        ) {
-                            Text(text = if (restarting) "重启中…" else "重启")
+        Scaffold(
+            topBar = {
+                SmallTopAppBar(
+                    title = title,
+                    navigationIcon = {
+                        if (overlay != Overlay.NONE) {
+                            IconButton(onClick = { overlay = Overlay.NONE }) {
+                                Icon(
+                                    imageVector = MiuixIcons.Useful.Back,
+                                    contentDescription = strings.back,
+                                )
+                            }
                         }
                     },
                 )
-            }
+            },
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MiuixTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                // ── Page content (blur source for the glass bar) ───────
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .hazeSource(hazeState)
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = 4.dp, bottom = 120.dp),
+                ) {
+                    when (overlay) {
+                        Overlay.LOGS -> LogScreen()
+                        Overlay.ABOUT -> AboutScreen()
+                        Overlay.NONE -> when (tab) {
+                            MainTab.OVERVIEW -> OverviewScreen(
+                                onOpenLogs = { overlay = Overlay.LOGS },
+                                onOpenAbout = { overlay = Overlay.ABOUT },
+                            )
 
-            if (showRestartHint) {
-                Text(
-                    text = "配置已修改，请重启桌面 / 系统界面以完全生效。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                )
-            }
+                            MainTab.MODULE -> ModuleSettingsScreen(
+                                language = language,
+                                onLanguageChange = { language = it },
+                            )
 
-            // ── About ─────────────────────────────────────────────────
-            SmallTitle(text = "关于")
-            Card {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "MonoIcon 把 HyperOS 应用图标转换为单色 Material You 主题图标。",
-                        style = MiuixTheme.textStyles.body2,
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "作用域：com.miui.home（桌面 / 最近任务）· com.android.systemui（通知中心）",
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            MainTab.ICON_STYLE -> IconStyleScreen()
+                        }
+                    }
+                }
+
+                // ── Liquid-glass bottom navigation ─────────────────────
+                if (overlay == Overlay.NONE) {
+                    GlassNavigationBar(
+                        tab = tab,
+                        onTabChange = { tab = it },
+                        hazeState = hazeState,
+                        labels = listOf(strings.overview, strings.moduleSettings, strings.iconStyle),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
-/**
- * Restarts the HyperOS launcher (com.miui.home).
- *
- * Primary path: `su` + `am force-stop` + `am start HOME` — deterministic on
- * rooted devices; falls back to asking the system to start HOME.
- *
- * @return true when the launcher was restarted (or at least killed).
- */
-private fun restartHyperOSLauncher(context: android.content.Context): Boolean {
-    val pkg = "com.miui.home"
-    val commands = listOf(
-        "am force-stop $pkg; " +
-            "am start -a android.intent.action.MAIN -c android.intent.category.HOME",
-        "su -c 'am force-stop $pkg'; su -c 'am start -a android.intent.action.MAIN -c android.intent.category.HOME'",
-    )
-    for (cmd in commands) {
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            val finished = process.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
-            if (finished && process.exitValue() == 0) return true
-        } catch (_: Throwable) {
-            // try the next strategy
+@Composable
+private fun GlassNavigationBar(
+    tab: MainTab,
+    onTabChange: (MainTab) -> Unit,
+    hazeState: HazeState,
+    labels: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(28.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .hazeEffect(
+                state = hazeState,
+                style = HazeDefaults.style(
+                    backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
+                    blurRadius = 32.dp,
+                    noiseFactor = 0.02f,
+                ),
+            )
+            .border(
+                width = 1.dp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantActions.copy(alpha = 0.12f),
+                shape = shape,
+            )
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MainTab.entries.forEachIndexed { index, entry ->
+            val selected = entry == tab
+            val color = if (selected) {
+                MiuixTheme.colorScheme.primary
+            } else {
+                MiuixTheme.colorScheme.onSurfaceVariantSummary
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { onTabChange(entry) }
+                    .padding(horizontal = 18.dp, vertical = 4.dp)
+                    .alpha(if (selected) 1f else 0.85f),
+            ) {
+                Icon(
+                    imageVector = entry.icon,
+                    contentDescription = labels.getOrNull(index),
+                    tint = color,
+                )
+                Text(
+                    text = labels.getOrNull(index).orEmpty(),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = color,
+                )
+            }
         }
-    }
-    return try {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_MAIN)
-                .addCategory(android.content.Intent.CATEGORY_HOME)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-        true
-    } catch (_: Throwable) {
-        false
     }
 }

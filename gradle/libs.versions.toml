@@ -9,6 +9,7 @@ libxposedService = "101.0.0"
 lifecycleRuntimeKtx = "2.9.4"
 activityCompose = "1.10.1"
 miuix = "0.7.2"
+haze = "1.7.2"
 junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
@@ -29,6 +30,8 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 # Miuix — HyperOS/MIUI-style Compose UI (UI only; icons are themed by the hooks)
 miuix = { group = "top.yukonga.miuix.kmp", name = "miuix", version.ref = "miuix" }
+# Haze — backdrop blur (liquid glass) for the bottom navigation bar
+haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

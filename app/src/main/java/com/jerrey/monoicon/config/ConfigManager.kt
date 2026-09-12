@@ -46,6 +46,10 @@ object ConfigManager {
     private const val KEY_LAWNICONS_ENABLED = "lawnicons_enabled"
     private const val KEY_CIRCLE_ICONS = "circle_icons"
     private const val KEY_NOTIFICATION_ICONS = "notification_icons"
+    private const val KEY_LANGUAGE = "ui_language"
+
+    /** Language ids: system default / Simplified Chinese / English. */
+    private const val LANGUAGE_SYSTEM = "system"
 
     /** Launcher-side refresh cadence (ms). */
     private const val REFRESH_INTERVAL_MS = 1_000L
@@ -96,6 +100,58 @@ object ConfigManager {
 
     /** Test/diagnostic hook: how many times the framework listener was registered. */
     internal fun uiInitRegistrationCount(): Int = uiInitRegistrations.get()
+
+    /**
+     * The framework service bound in this (settings) process, or null when the
+     * module is not activated in LSPosed. Used by the overview status card.
+     */
+    fun xposedService(): XposedService? = remoteService
+
+    // ── UI language (Phase 13) ────────────────────────────────────────
+
+    /**
+     * Reads the UI language **directly from the module shared preferences**.
+     *
+     * Must work before [init] runs (it is called from
+     * `MainActivity.attachBaseContext`, i.e. before `onCreate`), so it does not
+     * use the framework service.
+     */
+    fun languageFromPrefs(context: Context): String = try {
+        context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_LANGUAGE, LANGUAGE_SYSTEM) ?: LANGUAGE_SYSTEM
+    } catch (_: Throwable) {
+        LANGUAGE_SYSTEM
+    }
+
+    /** UI side: the selected language id (`system` / `zh` / `en`). */
+    fun getLanguageFromUi(): String = fallbackPrefs?.getString(KEY_LANGUAGE, LANGUAGE_SYSTEM)
+        ?: languageOrSystem()
+
+    private fun languageOrSystem(): String = try {
+        remoteService?.getRemotePreferences(PREFS_NAME)?.getString(KEY_LANGUAGE, LANGUAGE_SYSTEM)
+            ?: LANGUAGE_SYSTEM
+    } catch (_: Throwable) {
+        LANGUAGE_SYSTEM
+    }
+
+    /**
+     * Persists the language both in the module shared preferences (read by
+     * `attachBaseContext`) and, when available, in the framework remote
+     * preferences so the hook processes see the same value.
+     */
+    fun setLanguage(languageId: String) {
+        try {
+            fallbackPrefs?.edit()?.putString(KEY_LANGUAGE, languageId)?.apply()
+            remoteService?.getRemotePreferences(PREFS_NAME)
+                ?.edit()
+                ?.putString(KEY_LANGUAGE, languageId)
+                ?.apply()
+            android.util.Log.i(TAG, "setLanguage=$languageId")
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setLanguage failed: ${t.message}")
+        }
+    }
 
     /** Reads the toggle (UI side; falls back to shared prefs). */
     fun isEnabledFromUi(): Boolean {
