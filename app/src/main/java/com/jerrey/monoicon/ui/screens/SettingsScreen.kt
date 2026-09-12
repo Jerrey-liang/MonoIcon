@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -47,8 +48,6 @@ import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.highlight.Highlight
-import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
 import top.yukonga.miuix.kmp.blur.noiseDither
 import top.yukonga.miuix.kmp.blur.blendColors
 import top.yukonga.miuix.kmp.blur.BlurColors
@@ -173,7 +172,8 @@ fun SettingsScreen() {
                         labels = listOf(strings.overview, strings.moduleSettings, strings.iconStyle),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                            // LSPosed 量出来的胶囊几何：左右边距 40dp、离底 ~14dp、高 61dp
+                            .padding(horizontal = 40.dp, vertical = 14.dp),
                     )
                 }
             }
@@ -182,13 +182,24 @@ fun SettingsScreen() {
 }
 
 /**
- * Liquid-glass bottom navigation — miuix-blur engine (same implementation as
- * LSPosed Manager):
- *  - the content scrolling underneath is recorded via `Modifier.layerBackdrop`;
- *  - `Modifier.drawBackdrop` blurs it through a downsample pyramid and paints it
- *    inside the capsule shape (no refraction, unlike the Haze Glass path);
- *  - an SDF rim highlight (`BloomStroke`) + a translucent surface tint give the
- *    "glass slab" look instead of a colour-fringed crystal.
+ * Liquid-glass bottom navigation — miuix-blur engine, wired exactly like LSPosed
+ * Manager's nav bar (`bt3.c` → `ng2.f0`):
+ *  - the page content is recorded through `Modifier.layerBackdrop`;
+ *  - `Modifier.drawBackdrop` blurs it (25.dp, noise 0.0045) and paints **one**
+ *    `SrcOver` layer of the theme surface at alpha 0.8 inside the capsule;
+ *  - **no rim highlight**: LSPosed's nav bar passes `highlight = null`.
+ *
+ * Two traps found while matching this against the decompiled manager:
+ *  1. miuix's bundled `BloomStroke.GlassStroke*` presets carry `blendMode = 0`
+ *     (== `BlendMode.Clear`) and `HighlightDrawingKt` paints the shader over the
+ *     whole node rect; the BloomStroke SDF skips only the area further than
+ *     `R = max(cornerRadius, innerBlurRadius)` from the edge — for a *capsule*
+ *     that band is half the height, i.e. the whole shape. The result was the flat
+ *     grey plate we saw (the slab erased, then re-tinted over black).
+ *  2. In Material 3 the glass reads as a faint capsule only because `surface`
+ *     sits ~4/255 below `background`. This device's Monet palette has them
+ *     *identical*, so a literal copy is invisible on an empty page — hence the
+ *     20% nudge towards `surfaceContainerHigh` (≈ LSPosed's 250,242,251).
  */
 @Composable
 private fun GlassNavigationBar(
@@ -201,16 +212,11 @@ private fun GlassNavigationBar(
 ) {
     val colors = MiuixTheme.colorScheme
     val shape = RoundedCornerShape(percent = 50)
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    // 表面染色：LSPosed 那种"浅色磨砂板"靠这一层半透明 surface（空列表 = 不染色 = 没有底）
+    val glassTint = lerp(colors.surface, colors.surfaceContainerHigh, 0.2f)
     val blurColors = BlurColors(
         blendColors = listOf(
             BlendColorEntry(
-                color = if (dark) {
-                    colors.surfaceContainerHigh.copy(alpha = 0.35f)
-                } else {
-                    colors.surface.copy(alpha = 0.55f)
-                },
+                color = glassTint.copy(alpha = 0.8f),
                 mode = BlurBlendMode.SrcOver,
             ),
         ),
@@ -218,7 +224,6 @@ private fun GlassNavigationBar(
         contrast = 1f,
         saturation = 1f,
     )
-    val rim = if (dark) BloomStroke.GlassStrokeMiddleDark else BloomStroke.GlassStrokeMiddleLight
     val barModifier = if (glassReady) {
         modifier
             .fillMaxWidth()
@@ -226,17 +231,14 @@ private fun GlassNavigationBar(
                 backdrop = backdrop,
                 shape = { shape },
                 effects = {
-                    blur(40f, 40f)
+                    blur(25.dp.toPx(), 25.dp.toPx())
                     noiseDither(0.0045f)
                     blendColors(blurColors)
                 },
-                highlight = {
-                    Highlight(width = 1.dp, alpha = 1f, style = rim)
-                },
             )
-            .padding(vertical = 8.dp)
+            .padding(vertical = 4.dp)
     } else {
-        modifier.fillMaxWidth().padding(vertical = 8.dp)
+        modifier.fillMaxWidth().padding(vertical = 4.dp)
     }
 
     Row(
