@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,21 +40,23 @@ import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
-import dev.chrisbanes.haze.HazeInput
-import dev.chrisbanes.haze.HazePerformanceMode
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.glass.GlassReducedMotionPolicy
-import dev.chrisbanes.haze.glass.GlassStyle
-import dev.chrisbanes.haze.glass.GlassTransformPivot
-import dev.chrisbanes.haze.glass.GlassTransformTarget
-import dev.chrisbanes.haze.glass.hazeGlass
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.blur
+import top.yukonga.miuix.kmp.blur.highlight.Highlight
+import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
+import top.yukonga.miuix.kmp.blur.noiseDither
+import top.yukonga.miuix.kmp.blur.blendColors
+import top.yukonga.miuix.kmp.blur.BlurColors
+import top.yukonga.miuix.kmp.blur.BlurBlendMode
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Theme
@@ -87,7 +90,13 @@ fun SettingsScreen() {
     CompositionLocalProvider(LocalStrings provides strings) {
         var tab by remember { mutableStateOf(MainTab.OVERVIEW) }
         var overlay by remember { mutableStateOf(Overlay.NONE) }
-        val hazeState = rememberHazeState()
+        val backdrop = rememberLayerBackdrop()
+        // 玻璃（含 source 侧整屏图层录制）延迟挂载：每进程首次 AGSL 编译 + 首帧图层录制开销很大
+        var glassReady by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(150)
+            glassReady = true
+        }
 
         BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
 
@@ -130,7 +139,8 @@ fun SettingsScreen() {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .hazeSource(hazeState)
+                        .background(MiuixTheme.colorScheme.background)
+                        .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                         .verticalScroll(rememberScrollState())
                         .padding(top = 4.dp, bottom = 120.dp),
                 ) {
@@ -158,7 +168,8 @@ fun SettingsScreen() {
                     GlassNavigationBar(
                         tab = tab,
                         onTabChange = { tab = it },
-                        hazeState = hazeState,
+                        backdrop = backdrop,
+                        glassReady = glassReady,
                         labels = listOf(strings.overview, strings.moduleSettings, strings.iconStyle),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -171,68 +182,65 @@ fun SettingsScreen() {
 }
 
 /**
- * Liquid-glass bottom navigation.
- *
- * Approximates Apple's Liquid Glass material with what Compose/Haze can do on
- * Android (Haze 1.7 has no lens refraction):
- *  - real backdrop blur of the content scrolling underneath, with a progressive
- *    fade at the bottom edge (HIG: "content scrolls under the bars with edge
- *    blur/fade");
- *  - palette-adaptive tint: two low-alpha tints derived from the Monet scheme;
- *  - specular edge highlight (bright at the top, falling off towards the
- *    bottom) plus an ambient shadow;
- *  - capsule shape (HIG: capsule controls, concentric radii);
- *  - interactive feedback: press scaling and a lighter selected "island".
+ * Liquid-glass bottom navigation — miuix-blur engine (same implementation as
+ * LSPosed Manager):
+ *  - the content scrolling underneath is recorded via `Modifier.layerBackdrop`;
+ *  - `Modifier.drawBackdrop` blurs it through a downsample pyramid and paints it
+ *    inside the capsule shape (no refraction, unlike the Haze Glass path);
+ *  - an SDF rim highlight (`BloomStroke`) + a translucent surface tint give the
+ *    "glass slab" look instead of a colour-fringed crystal.
  */
-@OptIn(dev.chrisbanes.haze.ExperimentalHazeApi::class)
 @Composable
 private fun GlassNavigationBar(
     tab: MainTab,
     onTabChange: (MainTab) -> Unit,
-    hazeState: HazeState,
+    backdrop: LayerBackdrop,
+    glassReady: Boolean,
     labels: List<String>,
     modifier: Modifier = Modifier,
 ) {
     val colors = MiuixTheme.colorScheme
     val shape = RoundedCornerShape(percent = 50)
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    // One interaction source for the whole bar: it drives Glass's touch light
-    // and the pressed transform.
-    val barInteraction = remember { MutableInteractionSource() }
-    val glassStyle = GlassStyle {
-        shape(shape)
-        tint(colors.surfaceContainer.copy(alpha = 0.28f))
-        backgroundColor(colors.surfaceContainer.copy(alpha = 0.18f))
-        // Real optics: light bends towards the edges (lensing) instead of a
-        // uniform frosted blur.
-        optics(
-            refractionStrength = 0.65f,
-            depth = 0.45f,
-        )
-        specularIntensity(if (dark) 0.30f else 0.45f)
-        edgeSoftness(14.dp)
-        edgeShadow(Color.Black.copy(alpha = if (dark) 0.20f else 0.08f))
-        chromaticAberrationStrength(0.05f)
-        interactionLightRadiusFraction(0.7f)
-        pressed { scale(0.98f) }
+    // 表面染色：LSPosed 那种"浅色磨砂板"靠这一层半透明 surface（空列表 = 不染色 = 没有底）
+    val blurColors = BlurColors(
+        blendColors = listOf(
+            BlendColorEntry(
+                color = if (dark) {
+                    colors.surfaceContainerHigh.copy(alpha = 0.35f)
+                } else {
+                    colors.surface.copy(alpha = 0.55f)
+                },
+                mode = BlurBlendMode.SrcOver,
+            ),
+        ),
+        brightness = 0f,
+        contrast = 1f,
+        saturation = 1f,
+    )
+    val rim = if (dark) BloomStroke.GlassStrokeMiddleDark else BloomStroke.GlassStrokeMiddleLight
+    val barModifier = if (glassReady) {
+        modifier
+            .fillMaxWidth()
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { shape },
+                effects = {
+                    blur(40f, 40f)
+                    noiseDither(0.0045f)
+                    blendColors(blurColors)
+                },
+                highlight = {
+                    Highlight(width = 1.dp, alpha = 1f, style = rim)
+                },
+            )
+            .padding(vertical = 8.dp)
+    } else {
+        modifier.fillMaxWidth().padding(vertical = 8.dp)
     }
 
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(elevation = 18.dp, shape = shape, clip = false)
-            .clip(shape)
-            .hazeGlass(
-                input = HazeInput.Backdrop(hazeState),
-                style = glassStyle,
-                performanceMode = HazePerformanceMode.Adaptive,
-                expandLayerBounds = true,
-                interactionSource = barInteraction,
-                interactionTransformTarget = GlassTransformTarget.MaterialOnly,
-                interactionTransformPivot = GlassTransformPivot.Pointer,
-                interactionReducedMotionPolicy = GlassReducedMotionPolicy.System,
-            )
-            .padding(vertical = 8.dp),
+        modifier = barModifier,
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
