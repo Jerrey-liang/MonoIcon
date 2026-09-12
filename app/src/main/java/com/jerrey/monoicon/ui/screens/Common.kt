@@ -10,18 +10,19 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * Large left-aligned page title (Apple HIG Liquid Glass: 34pt bold large title,
- * left aligned, content scrolls underneath the navigation layer).
+ * Large left-aligned page title, measured off LSPosed Manager's overview page
+ * (1080x2400 @2.625): 32sp bold, left inset 28dp, cap top ~103dp below the screen
+ * top, ~27dp of air before the first card.
  */
 @Composable
 fun LargeScreenTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MiuixTheme.textStyles.headline1.copy(
-            fontSize = 34.sp,
+            fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
         ),
         color = MiuixTheme.colorScheme.onBackground,
-        modifier = modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
+        modifier = modifier.padding(start = 26.dp, top = 47.dp, bottom = 12.dp),
     )
 }

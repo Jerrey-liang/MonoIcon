@@ -71,11 +71,13 @@ fun OverviewScreen(
         LargeScreenTitle(text = "MonoIcon")
 
         // ── Status hero card (LSPosed-style, light tone) ──────────────
+        // Geometry measured off LSPosed's activation card (1080x2400 @2.625):
+        // 12dp side margins, 110dp tall, "已激活" 22sp, inset 16dp/14dp.
         val heroShape = RoundedCornerShape(24.dp)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 12.dp),
             shape = heroShape,
             color = MiuixTheme.colorScheme.primaryContainer,
             contentColor = MiuixTheme.colorScheme.onPrimaryContainer,
@@ -86,14 +88,14 @@ fun OverviewScreen(
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .size(140.dp)
-                        .offset(x = 42.dp)
+                        .size(110.dp)
+                        .offset(x = 34.dp)
                         .border(
-                            width = 7.dp,
+                            width = 6.dp,
                             color = MiuixTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.22f),
                             shape = CircleShape,
                         )
-                        .padding(32.dp),
+                        .padding(26.dp),
                 ) {
                     Icon(
                         imageVector = MiuixIcons.Regular.Ok,
@@ -102,16 +104,23 @@ fun OverviewScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                Column(
+                    modifier = Modifier.padding(
+                        start = 16.dp,
+                        top = 14.dp,
+                        end = 16.dp,
+                        bottom = 4.dp,
+                    ),
+                ) {
                     Text(
                         text = if (status.active) strings.active else strings.inactive,
                         style = MiuixTheme.textStyles.headline1.copy(
-                            fontSize = 30.sp,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                         ),
                         color = MiuixTheme.colorScheme.onPrimaryContainer,
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(1.dp))
                     Text(
                         text = status.frameworkLabel,
                         style = MiuixTheme.textStyles.body2.copy(
@@ -120,6 +129,7 @@ fun OverviewScreen(
                         ),
                         color = MiuixTheme.colorScheme.onPrimaryContainer,
                     )
+                    Spacer(modifier = Modifier.height(7.dp))
                     Text(
                         text = "API ${status.apiVersion}",
                         style = MiuixTheme.textStyles.body2.copy(
