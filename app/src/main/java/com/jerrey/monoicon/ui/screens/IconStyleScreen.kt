@@ -19,7 +19,8 @@ import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.ModuleLogs
-import com.jerrey.monoicon.ui.restartHyperOSLauncher
+import com.jerrey.monoicon.ui.XposedState
+import com.jerrey.monoicon.ui.restartScopedApps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -148,18 +149,22 @@ fun IconStyleScreen(
             }
         }
 
-        SmallTitle(text = strings.launcherRestart)
+        SmallTitle(text = strings.scopeRestart)
         Card(modifier = Modifier.padding(horizontal = 16.dp)) {
             BasicComponent(
-                title = strings.launcherRestart,
-                summary = strings.launcherRestartSummary,
+                title = strings.scopeRestart,
+                summary = strings.scopeRestartSummary,
                 endActions = {
                     Button(
                         onClick = {
                             if (restarting) return@Button
                             restarting = true
                             scope.launch {
-                                val ok = withContext(Dispatchers.IO) { restartHyperOSLauncher(context) }
+                                val targets = XposedState.snapshot().scope
+                                    .ifEmpty { XposedState.REQUIRED_SCOPE }
+                                val ok = withContext(Dispatchers.IO) {
+                                    restartScopedApps(context, targets)
+                                }
                                 android.widget.Toast.makeText(
                                     context,
                                     if (ok) strings.restartDone else strings.restartFailed,
