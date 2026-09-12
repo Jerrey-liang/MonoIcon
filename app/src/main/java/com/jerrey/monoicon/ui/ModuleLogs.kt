@@ -37,6 +37,9 @@ object ModuleLogs {
     private val buffer = ArrayDeque<String>()
     private val sequence = AtomicInteger(0)
 
+    /** Result of a system-log read: whether `su` worked plus the matching lines. */
+    data class LogResult(val rootAvailable: Boolean, val lines: List<String>)
+
     /** Records one settings-process event. */
     fun append(tag: String, message: String) {
         synchronized(buffer) {
@@ -49,21 +52,29 @@ object ModuleLogs {
     fun inAppLogs(): List<String> = synchronized(buffer) { buffer.toList() }
 
     /**
-     * Module logs from logcat (newest last), or null when root is unavailable.
-     * Runs a blocking `su` call — use from a background dispatcher.
+     * Module logs from logcat, or `rootAvailable = false` when `su` is missing or
+     * denied. Runs a blocking `su` call — use from a background dispatcher.
      */
-    fun readSystemLogs(lines: Int = 300): List<String>? {
+    fun readSystemLogs(lines: Int = 300): LogResult {
         val tagArgs = TAGS.joinToString(" ")
         val command = "logcat -d -t $lines -s $tagArgs"
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val output = process.inputStream.bufferedReader().use { it.readLines() }
-            val finished = process.waitFor(6, TimeUnit.SECONDS)
+            val finished = process.waitFor(8, TimeUnit.SECONDS)
+            val exitCode = if (finished) process.exitValue() else -1
             process.destroy()
-            if (!finished && output.isEmpty()) return null
-            if (output.size == 1 && output[0].contains("not found")) null else output
-        } catch (_: Throwable) {
-            null
+            if (!finished || exitCode != 0) {
+                LogResult(rootAvailable = false, lines = emptyList())
+            } else {
+                LogResult(
+                    rootAvailable = true,
+                    lines = output.filter { it.isNotBlank() && it.contains("MonoIcon") },
+                )
+            }
+        } catch (t: Throwable) {
+            append("Logs", "su logcat failed: ${t.message}")
+            LogResult(rootAvailable = false, lines = emptyList())
         }
     }
 }

@@ -56,7 +56,7 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
     var restartHint by remember { mutableStateOf(false) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SmallTitle(text = strings.iconStyle)
+        LargeScreenTitle(text = strings.iconStyle)
 
         Card(modifier = Modifier.padding(horizontal = 16.dp)) {
             BasicComponent(

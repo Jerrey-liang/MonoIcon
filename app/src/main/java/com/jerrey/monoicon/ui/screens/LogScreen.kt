@@ -38,7 +38,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun LogScreen(modifier: Modifier = Modifier) {
     val strings = LocalStrings.current
     val scope = rememberCoroutineScope()
-    var systemLogs by remember { mutableStateOf<List<String>?>(null) }
+    var systemLogs by remember { mutableStateOf<ModuleLogs.LogResult?>(null) }
     var loading by remember { mutableStateOf(true) }
 
     suspend fun reload() {
@@ -58,8 +58,8 @@ fun LogScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        val lines = systemLogs
-        if (lines == null) {
+        val result = systemLogs
+        if (result != null && !result.rootAvailable) {
             Card(modifier = Modifier.padding(horizontal = 16.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
@@ -75,9 +75,17 @@ fun LogScreen(modifier: Modifier = Modifier) {
                     )
                 }
             }
-            LogLines(ModuleLogs.inAppLogs(), strings.logsEmpty)
-        } else {
-            LogLines(lines, strings.logsEmpty)
+        }
+
+        LogLines(
+            lines = result?.lines.orEmpty(),
+            emptyText = strings.logsEmpty,
+        )
+
+        // Settings-process events are always available (no root needed).
+        val inApp = ModuleLogs.inAppLogs()
+        if (inApp.isNotEmpty()) {
+            LogLines(lines = inApp, emptyText = strings.logsEmpty)
         }
     }
 }

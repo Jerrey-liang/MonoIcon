@@ -19,6 +19,7 @@ data class XposedState(
     val bound: Boolean,
     val frameworkName: String?,
     val frameworkVersion: String?,
+    val frameworkVersionCode: Long,
     val apiVersion: Int,
     val scope: List<String>,
 ) {
@@ -26,11 +27,22 @@ data class XposedState(
 
     fun hasScope(packageName: String): Boolean = scope.any { it == packageName }
 
+    /**
+     * Framework version as displayed by LSPosed itself, e.g. `2.1.1(7790)`.
+     * Falls back to whichever part the framework reports.
+     */
+    val frameworkLabel: String
+        get() {
+            val version = frameworkVersion?.takeIf { it.isNotBlank() } ?: return "—"
+            return if (frameworkVersionCode > 0) "$version($frameworkVersionCode)" else version
+        }
+
     companion object {
         val UNAVAILABLE = XposedState(
             bound = false,
             frameworkName = null,
             frameworkVersion = null,
+            frameworkVersionCode = 0L,
             apiVersion = 0,
             scope = emptyList(),
         )
@@ -47,6 +59,7 @@ data class XposedState(
                     bound = true,
                     frameworkName = service.frameworkName,
                     frameworkVersion = service.frameworkVersion,
+                    frameworkVersionCode = service.frameworkVersionCode,
                     apiVersion = service.apiVersion,
                     scope = service.scope ?: emptyList(),
                 )
