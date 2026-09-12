@@ -14,12 +14,12 @@ android {
 
     defaultConfig {
         applicationId = "com.jerrey.monoicon"
-        // Android 15 (API 35) and newer only — Haze 2 Glass needs the AGSL
-        // runtime-shader path (API 33+) and we no longer ship a fallback.
+        // Android 15 (API 35) and newer only — the miuix-blur glass engine needs the
+        // AGSL runtime-shader path (API 33+) and we no longer ship a fallback.
         minSdk = 35
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.5.0"
+        versionCode = 9
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -66,11 +66,8 @@ dependencies {
     // (0.9.x: UI in miuix-ui, icons in miuix-icons)
     implementation(libs.miuix.ui)
     implementation(libs.miuix.icons)
-    // miuix-blur: LSPosed 同款玻璃引擎（Phase B 接线中）
+    // miuix-blur: 液态玻璃底栏（与 LSPosed Manager 同引擎：图层录制 + 降采样金字塔模糊 + SDF 高光）
     implementation(libs.miuix.blur)
-    // Haze 2 — backdrop blur + refraction-driven Glass for the bottom navigation
-    implementation(libs.haze)
-    implementation(libs.haze.glass)
 
     // AndroidX
     implementation(libs.androidx.core.ktx)
