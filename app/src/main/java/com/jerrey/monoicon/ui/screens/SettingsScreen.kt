@@ -38,8 +38,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -116,13 +114,15 @@ fun SettingsScreen() {
             }
         }
 
-        // 次级页：内容里带大标题，顶栏只留返回键；滚过大标题之后顶栏才切成居中标题。
+        // 大标题收起：次级页（运行日志/关于）和内容较长的"图标样式"页都用同一套逻辑 ——
+        // 顶栏只留返回键/空白，滚过大标题之后才切成居中标题。
+        val collapseTitle = overlay != Overlay.NONE || tab == MainTab.ICON_STYLE
         val scrollState = rememberScrollState()
         var titleBottomPx by remember { mutableStateOf(0) }
         val barTitleVisible by remember {
             derivedStateOf { titleBottomPx > 0 && scrollState.value >= titleBottomPx }
         }
-        LaunchedEffect(overlay) {
+        LaunchedEffect(overlay, tab) {
             scrollState.scrollTo(0)
             titleBottomPx = 0
         }
@@ -130,16 +130,19 @@ fun SettingsScreen() {
         Scaffold(
             topBar = {
                 // Main tabs carry their own large left-aligned title (Liquid
-                // Glass large-title pattern); only secondary pages need a bar.
-                if (overlay != Overlay.NONE) {
+                // Glass large-title pattern); secondary pages need the bar for
+                // their back affordance.
+                if (collapseTitle) {
                     SmallTopAppBar(
                         title = if (barTitleVisible) title else "",
                         navigationIcon = {
-                            IconButton(onClick = { overlay = Overlay.NONE }) {
-                                Icon(
-                                    imageVector = MiuixIcons.Regular.Back,
-                                    contentDescription = strings.back,
-                                )
+                            if (overlay != Overlay.NONE) {
+                                IconButton(onClick = { overlay = Overlay.NONE }) {
+                                    Icon(
+                                        imageVector = MiuixIcons.Regular.Back,
+                                        contentDescription = strings.back,
+                                    )
+                                }
                             }
                         },
                     )
@@ -163,12 +166,12 @@ fun SettingsScreen() {
                 ) {
                     when (overlay) {
                         Overlay.LOGS -> {
-                            OverlayLargeTitle(text = title) { titleBottomPx = it }
+                            CollapsibleLargeTitle(text = title) { titleBottomPx = it }
                             LogScreen()
                         }
 
                         Overlay.ABOUT -> {
-                            OverlayLargeTitle(text = title) { titleBottomPx = it }
+                            CollapsibleLargeTitle(text = title) { titleBottomPx = it }
                             AboutScreen()
                         }
 
@@ -183,7 +186,9 @@ fun SettingsScreen() {
                                 onLanguageChange = { language = it },
                             )
 
-                            MainTab.ICON_STYLE -> IconStyleScreen()
+                            MainTab.ICON_STYLE -> IconStyleScreen(
+                                onTitleBottomPositioned = { titleBottomPx = it },
+                            )
                         }
                     }
                 }
@@ -205,22 +210,6 @@ fun SettingsScreen() {
             }
         }
     }
-}
-
-/**
- * Large title for the secondary pages (运行日志 / 关于). It scrolls with the page and
- * reports its bottom edge so the top bar can switch from "back arrow only" to the
- * collapsed centred [SmallTopAppBar] title once the large title has scrolled away —
- * the large-title pattern LSPosed/iOS use.
- */
-@Composable
-private fun OverlayLargeTitle(text: String, onBottomPositioned: (Int) -> Unit) {
-    LargeScreenTitle(
-        text = text,
-        modifier = Modifier.onGloballyPositioned { coordinates ->
-            onBottomPositioned((coordinates.positionInParent().y + coordinates.size.height).toInt())
-        },
-    )
 }
 
 /**

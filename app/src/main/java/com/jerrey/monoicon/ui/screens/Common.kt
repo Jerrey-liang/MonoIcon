@@ -3,6 +3,8 @@ package com.jerrey.monoicon.ui.screens
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -24,5 +26,21 @@ fun LargeScreenTitle(text: String, modifier: Modifier = Modifier) {
         ),
         color = MiuixTheme.colorScheme.onBackground,
         modifier = modifier.padding(start = 26.dp, top = 47.dp, bottom = 12.dp),
+    )
+}
+
+/**
+ * Large title that also reports its bottom edge (in scroll-content coordinates) through
+ * [onBottomPositioned]. Hosts use it to keep the top bar title hidden while the large
+ * title is on screen and switch to the collapsed centred title once it has scrolled
+ * away — the large-title pattern used by LSPosed/iOS.
+ */
+@Composable
+fun CollapsibleLargeTitle(text: String, onBottomPositioned: (Int) -> Unit) {
+    LargeScreenTitle(
+        text = text,
+        modifier = Modifier.onGloballyPositioned { coordinates ->
+            onBottomPositioned((coordinates.positionInParent().y + coordinates.size.height).toInt())
+        },
     )
 }
