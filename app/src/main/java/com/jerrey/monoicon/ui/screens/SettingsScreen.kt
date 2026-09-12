@@ -1,10 +1,8 @@
 package com.jerrey.monoicon.ui.screens
 
-import android.app.ActivityManager
-import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,21 +11,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -36,17 +25,28 @@ import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Checkbox
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * MonoIcon settings screen (Phase 5).
+ * MonoIcon settings screen, rebuilt with Miuix (MIUI/HyperOS design language)
+ * on top of the Monet dynamic colour scheme from [MonoIconTheme].
  *
- * Switches for the master toggle, Lawnicons, the circle shape and notification
- * icons, plus the Material 2025 colour variant. All write the module's remote
- * preferences via [ConfigManager]; the hook processes pick up changes within
- * one refresh interval or on next process start.
+ * Layout follows the HyperOS settings convention: `SmallTitle` section headers
+ * above `Card` groups of `BasicComponent` rows, with the switches as row
+ * actions.
  *
- * Also offers a one-tap HyperOS Launcher restart (Phase 6.5): reinstall /
- * theme change requires a launcher process restart to reload the module.
+ * All state still comes from / goes to [ConfigManager] (module remote
+ * preferences); the hook processes pick changes up within one refresh interval
+ * or on their next start.
  */
 @Composable
 fun SettingsScreen() {
@@ -68,275 +68,171 @@ fun SettingsScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    Scaffold { paddingValues ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(paddingValues)
-                .padding(16.dp)
+    Scaffold(
+        topBar = {
+            SmallTopAppBar(title = "MonoIcon")
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = "MonoIcon",
-                style = MaterialTheme.typography.titleLarge
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Master switch ──────────────────────────────────────────
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Module Status",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "Monochrome Icons")
+            // ── Module status ─────────────────────────────────────────
+            SmallTitle(text = "模块状态")
+            Card {
+                BasicComponent(
+                    title = "Monochrome Icons",
+                    summary = "总开关：关闭后模块不处理任何图标",
+                    rightActions = {
                         Switch(
                             checked = enabled,
                             onCheckedChange = { value ->
                                 enabled = value
                                 showRestartHint = true
                                 ConfigManager.setEnabled(value)
-                            }
+                            },
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Phase 8: 无 mono 层时优先使用内置 Lawnicons 掩码
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "Lawnicons 图标优先")
-                            Text(
-                                text = "无 monochrome 层的应用使用内置 Lawnicons 字形",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    },
+                )
+                BasicComponent(
+                    title = "Lawnicons 图标优先",
+                    summary = "无 monochrome 层的应用使用内置 Lawnicons 字形",
+                    rightActions = {
                         Switch(
                             checked = lawniconsEnabled,
                             onCheckedChange = { value ->
                                 lawniconsEnabled = value
                                 ConfigManager.setLawniconsEnabled(value)
-                            }
+                            },
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Phase 9: 圆形图标（劫持 MIUI IconCustomizer，无需主题）
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "圆形图标（无需主题）")
-                            Text(
-                                text = "MIUI 图标与 MonoIcon 图标统一裁成圆形；修改后需重启桌面",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    },
+                )
+                BasicComponent(
+                    title = "圆形图标（无需主题）",
+                    summary = "MIUI 图标与 MonoIcon 图标统一裁成圆形；修改后需重启桌面",
+                    rightActions = {
                         Switch(
                             checked = circleIconsEnabled,
                             onCheckedChange = { value ->
                                 circleIconsEnabled = value
                                 showRestartHint = true
                                 ConfigManager.setCircleIconsEnabled(value)
-                            }
+                            },
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Phase 11: 通知中心的程序图标（SystemUI 进程）
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "通知中心图标")
-                            Text(
-                                text = "通知栏里的程序图标使用 MonoIcon 图标；修改后需重启系统界面，" +
-                                    "且需在 LSPosed 中勾选“系统界面”作用域",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    },
+                )
+                BasicComponent(
+                    title = "通知中心图标",
+                    summary = "通知栏程序图标使用 MonoIcon 图标；修改后需重启系统界面",
+                    rightActions = {
                         Switch(
                             checked = notificationIconsEnabled,
                             onCheckedChange = { value ->
                                 notificationIconsEnabled = value
                                 showRestartHint = true
                                 ConfigManager.setNotificationIconsEnabled(value)
-                            }
+                            },
                         )
-                    }
-                }
+                    },
+                )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Material Dynamic Color Variant ─────────────────────────
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+            // ── Colour variant ────────────────────────────────────────
+            SmallTitle(text = "Material Dynamic Color 2025")
+            Card {
+                Text(
+                    text = "用于图标配色的取色方案",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
                 )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Material Dynamic Color 2025",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Select the palette variant used for icon colors.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Material2025ColorEngine.availableVariants.forEach { variant ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = selectedVariant == variant.id,
-                                onClick = {
-                                    selectedVariant = variant.id
-                                    showRestartHint = true
-                                    ConfigManager.setVariantId(variant.id)
-                                }
+                Material2025ColorEngine.VariantId.entries.forEach { variant ->
+                    BasicComponent(
+                        title = variant.label,
+                        summary = if (variant.id == "tonal_spot") "默认 Material You 风格" else null,
+                        rightActions = {
+                            Checkbox(
+                                checked = selectedVariant == variant.id,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        selectedVariant = variant.id
+                                        showRestartHint = true
+                                        ConfigManager.setVariantId(variant.id)
+                                    }
+                                },
                             )
-                            Column(modifier = Modifier.padding(start = 8.dp)) {
-                                Text(text = variant.label)
-                                if (variant.id == "tonal_spot") {
-                                    Text(
-                                        text = "Default Material You style",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Quick launcher restart (Phase 6.5) ──────────────────────
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Launcher Restart",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            restarting = true
-                            scope.launch {
-                                val ok = withContext(Dispatchers.IO) {
-                                    restartHyperOSLauncher(context)
-                                }
-                                Toast.makeText(
-                                    context,
-                                    if (ok) "HyperOS Launcher restarted"
-                                    else "Restart failed — grant MonoIcon root access and retry",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                restarting = false
-                            }
                         },
-                        enabled = !restarting
-                    ) {
-                        Text(if (restarting) "Restarting…" else "Restart HyperOS Launcher")
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Restart the launcher to reload the module after " +
-                                "reinstall or theme switch. The first use asks for " +
-                                "root access.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        onClick = {
+                            selectedVariant = variant.id
+                            showRestartHint = true
+                            ConfigManager.setVariantId(variant.id)
+                        },
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Restart hint ───────────────────────────────────────────
+            // ── Launcher restart ──────────────────────────────────────
+            SmallTitle(text = "重启桌面")
+            Card {
+                BasicComponent(
+                    title = "重启 HyperOS 桌面",
+                    summary = "重装模块或切换主题/形状后，重启桌面才能完全生效（首次需要授予 root）",
+                    rightActions = {
+                        Button(
+                            onClick = {
+                                if (restarting) return@Button
+                                restarting = true
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) {
+                                        restartHyperOSLauncher(context)
+                                    }
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        if (ok) "已重启桌面" else "重启失败：请授予 MonoIcon root 权限",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                    restarting = false
+                                }
+                            },
+                            enabled = !restarting,
+                        ) {
+                            Text(text = if (restarting) "重启中…" else "重启")
+                        }
+                    },
+                )
+            }
 
             if (showRestartHint) {
-                Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Configuration changed. Restart HyperOS Launcher " +
-                            "to apply completely.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "配置已修改，请重启桌面 / 系统界面以完全生效。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp),
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Info card ──────────────────────────────────────────────
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
+            // ── About ─────────────────────────────────────────────────
+            SmallTitle(text = "关于")
+            Card {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "About",
-                        style = MaterialTheme.typography.bodyLarge
+                        text = "MonoIcon 把 HyperOS 应用图标转换为单色 Material You 主题图标。",
+                        style = MiuixTheme.textStyles.body2,
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "MonoIcon converts HyperOS app icons to monochrome " +
-                                "Material You themed icons. This module runs in the " +
-                                "launcher process and requires LSPosed to function.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Target: com.miui.home (HyperOS Launcher)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "作用域：com.miui.home（桌面 / 最近任务）· com.android.systemui（通知中心）",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
@@ -345,30 +241,32 @@ fun SettingsScreen() {
  * Restarts the HyperOS launcher (com.miui.home).
  *
  * Primary path: `su` + `am force-stop` + `am start HOME` — deterministic on
- * rooted devices (LSPosed implies root). Falls back to
- * [ActivityManager.killBackgroundProcesses] when root is unavailable and
- * the launcher happens to be in the background.
+ * rooted devices; falls back to asking the system to start HOME.
  *
  * @return true when the launcher was restarted (or at least killed).
  */
-private fun restartHyperOSLauncher(context: Context): Boolean {
+private fun restartHyperOSLauncher(context: android.content.Context): Boolean {
     val pkg = "com.miui.home"
-    val suOk = try {
-        val proc = Runtime.getRuntime().exec(
-            arrayOf(
-                "su", "-c",
-                "am force-stop $pkg; " +
-                    "am start -a android.intent.action.MAIN -c android.intent.category.HOME"
-            )
-        )
-        proc.waitFor() == 0
-    } catch (_: Throwable) {
-        false
+    val commands = listOf(
+        "am force-stop $pkg; " +
+            "am start -a android.intent.action.MAIN -c android.intent.category.HOME",
+        "su -c 'am force-stop $pkg'; su -c 'am start -a android.intent.action.MAIN -c android.intent.category.HOME'",
+    )
+    for (cmd in commands) {
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+            val finished = process.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
+            if (finished && process.exitValue() == 0) return true
+        } catch (_: Throwable) {
+            // try the next strategy
+        }
     }
-    if (suOk) return true
     return try {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        am.killBackgroundProcesses(pkg)
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_HOME)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
         true
     } catch (_: Throwable) {
         false

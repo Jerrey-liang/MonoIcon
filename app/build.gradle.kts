@@ -16,8 +16,8 @@ android {
         applicationId = "com.jerrey.monoicon"
         minSdk = 31
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.2.1"
+        versionCode = 6
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -59,7 +59,10 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material.icons.extended)
+
+    // Miuix — MIUI/HyperOS-style Compose UI for the settings screen
+    // (0.7.2 is the last line built with Kotlin 2.2.x / Compose MP 1.9.x)
+    implementation(libs.miuix)
 
     // AndroidX
     implementation(libs.androidx.core.ktx)

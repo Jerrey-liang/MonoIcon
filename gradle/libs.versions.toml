@@ -8,6 +8,7 @@ libxposedApi = "101.0.1"
 libxposedService = "101.0.0"
 lifecycleRuntimeKtx = "2.9.4"
 activityCompose = "1.10.1"
+miuix = "0.7.2"
 junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
@@ -25,7 +26,9 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# Miuix — HyperOS/MIUI-style Compose UI (UI only; icons are themed by the hooks)
+miuix = { group = "top.yukonga.miuix.kmp", name = "miuix", version.ref = "miuix" }
 
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

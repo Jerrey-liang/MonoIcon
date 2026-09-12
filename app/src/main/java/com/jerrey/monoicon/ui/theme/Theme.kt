@@ -1,34 +1,26 @@
 package com.jerrey.monoicon.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.platformDynamicColors
 
 /**
- * MonoIcon Compose theme.
+ * MonoIcon settings theme — Miuix (MIUI/HyperOS design language) with Monet
+ * dynamic colours.
  *
- * Material You dynamic colors only: `minSdk = 31`, so
- * `dynamicLight/DarkColorScheme` is always available and there is no static
- * fallback branch to keep.
+ * [platformDynamicColors] derives a full Miuix [top.yukonga.miuix.kmp.theme.Colors]
+ * scheme from the system wallpaper palette (Android 12+/API 31+, which is our
+ * `minSdk`), so the settings UI follows the device theme exactly like HyperOS
+ * system apps do. No static fallback branch is needed.
  */
 @Composable
 fun MonoIconTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val context = LocalContext.current
-    val colorScheme = if (darkTheme) {
-        dynamicDarkColorScheme(context)
-    } else {
-        dynamicLightColorScheme(context)
-    }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
+    MiuixTheme(
+        colors = platformDynamicColors(dark = darkTheme),
+        content = content,
     )
 }
