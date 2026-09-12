@@ -5,6 +5,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,8 +56,8 @@ import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.icon.extended.Edit
-import top.yukonga.miuix.kmp.icon.extended.Info
+import top.yukonga.miuix.kmp.icon.extended.Theme
+import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -69,9 +71,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * The overview tab opens the runtime-log and about pages as secondary screens.
  */
 private enum class MainTab(val icon: ImageVector) {
-    OVERVIEW(MiuixIcons.Regular.Info),
+    OVERVIEW(MiuixIcons.Regular.Home),
     MODULE(MiuixIcons.Regular.Settings),
-    ICON_STYLE(MiuixIcons.Regular.Edit),
+    ICON_STYLE(MiuixIcons.Regular.Theme),
 }
 
 private enum class Overlay { NONE, LOGS, ABOUT }
@@ -239,10 +241,10 @@ private fun GlassNavigationBar(
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             val scale by animateFloatAsState(
-                targetValue = if (pressed) 0.90f else 1f,
+                targetValue = if (pressed) 0.92f else 1f,
                 label = "navItemScale",
             )
-            val color = if (selected) colors.primary else colors.onSurfaceVariantSummary
+            val color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariantSummary
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -250,20 +252,22 @@ private fun GlassNavigationBar(
                 modifier = Modifier
                     .graphicsLayer { scaleX = scale; scaleY = scale }
                     .clip(RoundedCornerShape(percent = 50))
+                    // LSPosed-style selection pill behind the whole item.
                     .background(
-                        if (selected) colors.primary.copy(alpha = 0.12f) else Color.Transparent,
+                        if (selected) colors.primaryContainer else Color.Transparent,
                     )
                     .clickable(
                         interactionSource = interaction,
                         indication = null,
                     ) { onTabChange(entry) }
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
             ) {
                 Icon(
                     imageVector = entry.icon,
                     contentDescription = labels.getOrNull(index),
                     tint = color,
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = labels.getOrNull(index).orEmpty(),
                     style = MiuixTheme.textStyles.footnote2.copy(fontSize = 11.sp),
