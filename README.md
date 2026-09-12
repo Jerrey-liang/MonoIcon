@@ -137,4 +137,5 @@ $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 
 ## 许可
 
-本仓库目前没有 LICENSE 文件；如需分发或二次修改，请先补充许可证，并遵守上述第三方组件的许可条款。
+本项目以 **Apache License 2.0** 发布，见 [LICENSE](LICENSE)。二次分发时请同时遵守上述第三方组件的许可条款
+（LSPosed / libxposed API、Miuix、Lawnicons、Material Color Utilities、AndroidX）。
