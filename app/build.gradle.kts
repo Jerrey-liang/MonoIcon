@@ -7,8 +7,8 @@ plugins {
 android {
     namespace = "com.jerrey.monoicon"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
+        version = release(37) {
+            minorApiLevel = 2
         }
     }
 

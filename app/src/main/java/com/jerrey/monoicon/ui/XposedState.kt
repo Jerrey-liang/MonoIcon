@@ -61,7 +61,7 @@ data class XposedState(
                     frameworkVersion = service.frameworkVersion,
                     frameworkVersionCode = service.frameworkVersionCode,
                     apiVersion = service.apiVersion,
-                    scope = service.scope ?: emptyList(),
+                    scope = service.scope.toList(),
                 )
             } catch (_: Throwable) {
                 UNAVAILABLE

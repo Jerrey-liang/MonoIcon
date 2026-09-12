@@ -1178,7 +1178,7 @@ class IconThemeHook : XposedModule() {
             .intercept { chain: Chain ->
                 if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
 
-                val key: Any = chain.getArg(0) as? Any ?: return@intercept chain.proceed()
+                val key: Any = chain.getArg(0) ?: return@intercept chain.proceed()
                 // Thumbnails / labels / descriptions share this cache.
                 val icon = chain.getArg(1) as? Drawable ?: return@intercept chain.proceed()
 

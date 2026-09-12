@@ -102,7 +102,7 @@ object PixelMonetColorEngine {
 
     private fun logWallpaper(colors: WallpaperColors, source: String) {
         if (!LogcatLogger.isDebugEnabled) return
-        val snapshot = "$source primary=${formatNullable(colors.primaryColor?.toArgb())} secondary=${formatNullable(colors.secondaryColor?.toArgb())} tertiary=${formatNullable(colors.tertiaryColor?.toArgb())} hints=${colors.colorHints}"
+        val snapshot = "$source primary=${formatNullable(colors.primaryColor.toArgb())} secondary=${formatNullable(colors.secondaryColor?.toArgb())} tertiary=${formatNullable(colors.tertiaryColor?.toArgb())} hints=${colors.colorHints}"
         if (snapshot == lastLoggedWallpaper) return
         lastLoggedWallpaper = snapshot
         logd(TAG, "wallpaper_colors $snapshot")
