@@ -66,6 +66,8 @@ dependencies {
     // (0.9.x: UI in miuix-ui, icons in miuix-icons)
     implementation(libs.miuix.ui)
     implementation(libs.miuix.icons)
+    // miuix-blur: LSPosed 同款玻璃引擎（Phase B 接线中）
+    implementation(libs.miuix.blur)
     // Haze 2 — backdrop blur + refraction-driven Glass for the bottom navigation
     implementation(libs.haze)
     implementation(libs.haze.glass)

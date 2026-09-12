@@ -28,13 +28,13 @@ data class XposedState(
     fun hasScope(packageName: String): Boolean = scope.any { it == packageName }
 
     /**
-     * Framework version as displayed by LSPosed itself, e.g. `2.1.1(7790)`.
+     * Framework version as displayed by LSPosed itself, e.g. `2.1.1 (7790)`.
      * Falls back to whichever part the framework reports.
      */
     val frameworkLabel: String
         get() {
             val version = frameworkVersion?.takeIf { it.isNotBlank() } ?: return "—"
-            return if (frameworkVersionCode > 0) "$version($frameworkVersionCode)" else version
+            return if (frameworkVersionCode > 0) "$version ($frameworkVersionCode)" else version
         }
 
     companion object {

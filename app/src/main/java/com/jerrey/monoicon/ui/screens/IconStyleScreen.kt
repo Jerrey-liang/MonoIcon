@@ -38,7 +38,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * variant and the launcher restart needed to apply them.
  */
 @Composable
-fun IconStyleScreen(modifier: Modifier = Modifier) {
+fun IconStyleScreen(
+    modifier: Modifier = Modifier,
+    onTitleBottomPositioned: ((Int) -> Unit)? = null,
+) {
     val strings = LocalStrings.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -57,7 +60,13 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
     var restartHint by remember { mutableStateOf(false) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        LargeScreenTitle(text = strings.iconStyle)
+        // Same large-title behaviour as the secondary pages: the host keeps its top bar
+        // title hidden until this title has scrolled out of sight.
+        if (onTitleBottomPositioned != null) {
+            CollapsibleLargeTitle(text = strings.iconStyle, onBottomPositioned = onTitleBottomPositioned)
+        } else {
+            LargeScreenTitle(text = strings.iconStyle)
+        }
 
         Card(modifier = Modifier.padding(horizontal = 16.dp)) {
             BasicComponent(
