@@ -186,14 +186,14 @@ object DrawableConverter {
      * Retrieves the native monochrome layer from an [AdaptiveIconDrawable]
      * via reflection.
      *
-     * [AdaptiveIconDrawable.getMonochrome] is a hidden API (added in API 33).
-     * On API < 33 or if reflection fails, returns `null` silently.
+     * [AdaptiveIconDrawable.getMonochrome] is a hidden API (added in API 33);
+     * since `minSdk` is 35 the platform always provides it. If reflection fails
+     * (vendor ROM changed the member), returns `null` silently.
      *
      * @param drawable The adaptive icon to query.
      * @return The monochrome [Drawable], or `null` if unavailable.
      */
     fun getMonochromeLayer(drawable: AdaptiveIconDrawable): Drawable? {
-        if (android.os.Build.VERSION.SDK_INT < 33) return null
         return try {
             val method = AdaptiveIconDrawable::class.java.getDeclaredMethod("getMonochrome")
             method.isAccessible = true

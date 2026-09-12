@@ -1,8 +1,8 @@
 name=MonoIcon
-version=1.4.0
-versionCode=7
+version=1.5.0
+versionCode=8
 author=Jerrey
 description=Convert HyperOS app icons to monochrome Material You themed icons
 minApiVersion=101
-targetApiVersion=101
+targetApiVersion=102
 staticScope=false

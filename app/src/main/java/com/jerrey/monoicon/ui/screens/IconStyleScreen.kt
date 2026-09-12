@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
@@ -62,7 +63,7 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
             BasicComponent(
                 title = strings.circleIcons,
                 summary = strings.circleIconsSummary,
-                rightActions = {
+                endActions = {
                     Switch(
                         checked = circleIconsEnabled,
                         onCheckedChange = { value ->
@@ -77,7 +78,7 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
             BasicComponent(
                 title = strings.lawnicons,
                 summary = strings.lawniconsSummary,
-                rightActions = {
+                endActions = {
                     Switch(
                         checked = lawniconsEnabled,
                         onCheckedChange = { value ->
@@ -91,7 +92,7 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
             BasicComponent(
                 title = strings.notificationIcons,
                 summary = strings.notificationIconsSummary,
-                rightActions = {
+                endActions = {
                     Switch(
                         checked = notificationIconsEnabled,
                         onCheckedChange = { value ->
@@ -117,16 +118,14 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
                 BasicComponent(
                     title = variant.label,
                     summary = if (variant.id == "tonal_spot") strings.variantDefaultHint else null,
-                    rightActions = {
+                    endActions = {
                         Checkbox(
-                            checked = selectedVariant == variant.id,
-                            onCheckedChange = { checked ->
-                                if (checked) {
-                                    selectedVariant = variant.id
-                                    restartHint = true
-                                    ConfigManager.setVariantId(variant.id)
-                                    ModuleLogs.append("Settings", "variant=${variant.id}")
-                                }
+                            state = ToggleableState(selectedVariant == variant.id),
+                            onClick = {
+                                selectedVariant = variant.id
+                                restartHint = true
+                                ConfigManager.setVariantId(variant.id)
+                                ModuleLogs.append("Settings", "variant=${variant.id}")
                             },
                         )
                     },
@@ -145,7 +144,7 @@ fun IconStyleScreen(modifier: Modifier = Modifier) {
             BasicComponent(
                 title = strings.launcherRestart,
                 summary = strings.launcherRestartSummary,
-                rightActions = {
+                endActions = {
                     Button(
                         onClick = {
                             if (restarting) return@Button

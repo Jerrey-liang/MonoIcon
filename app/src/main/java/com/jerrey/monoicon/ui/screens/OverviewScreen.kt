@@ -100,7 +100,7 @@ fun OverviewScreen(
                 BasicComponent(
                     title = pkg,
                     summary = if (granted) strings.scopeGranted else strings.scopeMissing,
-                    rightActions = {
+                    endActions = {
                         Text(
                             text = if (granted) "✓" else "✗",
                             style = top.yukonga.miuix.kmp.theme.MiuixTheme.textStyles.body1,

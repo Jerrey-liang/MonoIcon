@@ -8,8 +8,8 @@ libxposedApi = "102.0.0"
 libxposedService = "102.0.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
-miuix = "0.7.2"
-haze = "1.7.2"
+miuix = "0.9.3"
+haze = "2.0.0-beta03"
 junit = "4.13.2"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
@@ -28,10 +28,16 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 
-# Miuix — HyperOS/MIUI-style Compose UI (UI only; icons are themed by the hooks)
-miuix = { group = "top.yukonga.miuix.kmp", name = "miuix", version.ref = "miuix" }
-# Haze — backdrop blur (liquid glass) for the bottom navigation bar
+# Miuix — HyperOS/MIUI-style Compose UI (UI only; icons are themed by the hooks).
+# 0.9.x split the icon set into its own artifact and moved it to
+# top.yukonga.miuix.kmp.icon.extended, exposed on weight variants
+# (MiuixIcons.Regular / .Medium / …) instead of the old Useful/Basic sets.
+miuix-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-ui", version.ref = "miuix" }
+miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons", version.ref = "miuix" }
+# Haze 2 — typed Glass effect (backdrop blur + refraction optics) for the
+# liquid-glass bottom navigation. Blur lives in haze-blur, glass in haze-glass.
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
+haze-glass = { group = "dev.chrisbanes.haze", name = "haze-glass", version.ref = "haze" }
 
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

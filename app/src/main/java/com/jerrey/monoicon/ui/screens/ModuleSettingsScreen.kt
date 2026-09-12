@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.ui.AppLanguage
@@ -46,7 +47,7 @@ fun ModuleSettingsScreen(
             BasicComponent(
                 title = strings.masterSwitch,
                 summary = strings.masterSwitchSummary,
-                rightActions = {
+                endActions = {
                     Switch(
                         checked = enabled,
                         onCheckedChange = { value ->
@@ -71,15 +72,13 @@ fun ModuleSettingsScreen(
                 BasicComponent(
                     title = label,
                     summary = if (option == AppLanguage.SYSTEM) strings.languageSummary else null,
-                    rightActions = {
+                    endActions = {
                         Checkbox(
-                            checked = language == option,
-                            onCheckedChange = { checked ->
-                                if (checked) {
-                                    onLanguageChange(option)
-                                    ConfigManager.setLanguage(option.id)
-                                    ModuleLogs.append("Settings", "language=${option.id}")
-                                }
+                            state = ToggleableState(language == option),
+                            onClick = {
+                                onLanguageChange(option)
+                                ConfigManager.setLanguage(option.id)
+                                ModuleLogs.append("Settings", "language=${option.id}")
                             },
                         )
                     },

@@ -3,7 +3,6 @@ package com.jerrey.monoicon.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -26,9 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,10 +37,14 @@ import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
-import dev.chrisbanes.haze.HazeProgressive
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.glass.GlassReducedMotionPolicy
+import dev.chrisbanes.haze.glass.GlassStyle
+import dev.chrisbanes.haze.glass.GlassTransformPivot
+import dev.chrisbanes.haze.glass.GlassTransformTarget
+import dev.chrisbanes.haze.glass.hazeGlass
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import top.yukonga.miuix.kmp.basic.Icon
@@ -52,24 +53,25 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.icons.useful.Back
-import top.yukonga.miuix.kmp.icon.icons.useful.Edit
-import top.yukonga.miuix.kmp.icon.icons.useful.Info
-import top.yukonga.miuix.kmp.icon.icons.useful.Settings
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Edit
+import top.yukonga.miuix.kmp.icon.extended.Info
+import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Settings host (Phase 13).
  *
  * Three Miuix tabs — 概览 / 模块设置 / 图标样式 — whose content scrolls behind a
- * floating **liquid-glass** bottom navigation bar (Haze backdrop blur + border
- * highlight). The overview tab opens the runtime-log and about pages as
- * secondary screens with a back arrow.
+ * floating **liquid-glass** bottom navigation bar. The glass is Haze 2's typed
+ * Glass effect (`hazeGlass` + `GlassStyle`), i.e. real backdrop refraction
+ * (optics/specular/fresnel/chromatic aberration) rather than a plain blur.
+ * The overview tab opens the runtime-log and about pages as secondary screens.
  */
 private enum class MainTab(val icon: ImageVector) {
-    OVERVIEW(MiuixIcons.Useful.Info),
-    MODULE(MiuixIcons.Useful.Settings),
-    ICON_STYLE(MiuixIcons.Useful.Edit),
+    OVERVIEW(MiuixIcons.Regular.Info),
+    MODULE(MiuixIcons.Regular.Settings),
+    ICON_STYLE(MiuixIcons.Regular.Edit),
 }
 
 private enum class Overlay { NONE, LOGS, ABOUT }
@@ -107,7 +109,7 @@ fun SettingsScreen() {
                         navigationIcon = {
                             IconButton(onClick = { overlay = Overlay.NONE }) {
                                 Icon(
-                                    imageVector = MiuixIcons.Useful.Back,
+                                    imageVector = MiuixIcons.Regular.Back,
                                     contentDescription = strings.back,
                                 )
                             }
@@ -180,6 +182,7 @@ fun SettingsScreen() {
  *  - capsule shape (HIG: capsule controls, concentric radii);
  *  - interactive feedback: press scaling and a lighter selected "island".
  */
+@OptIn(dev.chrisbanes.haze.ExperimentalHazeApi::class)
 @Composable
 private fun GlassNavigationBar(
     tab: MainTab,
@@ -190,64 +193,43 @@ private fun GlassNavigationBar(
 ) {
     val colors = MiuixTheme.colorScheme
     val shape = RoundedCornerShape(percent = 50)
-    // Liquid Glass adapts to the appearance: the bright rim reads as glass in
-    // light mode but would glare in dark mode, so the highlight scales down.
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    val rimTop = if (dark) 0.26f else 0.75f
-    val rimMid = if (dark) 0.05f else 0.10f
-    val sheen = if (dark) 0.05f else 0.10f
-    val bottomShade = if (dark) 0.12f else 0.05f
-    val specular = Brush.verticalGradient(
-        colors = listOf(
-            Color.White.copy(alpha = rimTop),
-            Color.White.copy(alpha = rimMid),
-            colors.onSurfaceVariantActions.copy(alpha = 0.10f),
-        ),
-    )
+    // One interaction source for the whole bar: it drives Glass's touch light
+    // and the pressed transform.
+    val barInteraction = remember { MutableInteractionSource() }
+    val glassStyle = GlassStyle {
+        shape(shape)
+        tint(colors.surfaceContainer.copy(alpha = 0.28f))
+        backgroundColor(colors.surfaceContainer.copy(alpha = 0.18f))
+        // Real optics: light bends towards the edges (lensing) instead of a
+        // uniform frosted blur.
+        optics(
+            refractionStrength = 0.65f,
+            depth = 0.45f,
+        )
+        specularIntensity(if (dark) 0.30f else 0.45f)
+        edgeSoftness(14.dp)
+        edgeShadow(Color.Black.copy(alpha = if (dark) 0.20f else 0.08f))
+        chromaticAberrationStrength(0.05f)
+        interactionLightRadiusFraction(0.7f)
+        pressed { scale(0.98f) }
+    }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .shadow(elevation = 18.dp, shape = shape, clip = false)
             .clip(shape)
-            .hazeEffect(state = hazeState) {
-                blurRadius = 60.dp
-                noiseFactor = 0.012f
-                // Keep the base translucent so the blurred backdrop stays visible.
-                backgroundColor = colors.surfaceContainer.copy(alpha = 0.35f)
-                tints = listOf(
-                    HazeTint(colors.primary.copy(alpha = 0.08f)),
-                    HazeTint(colors.surfaceContainer.copy(alpha = 0.30f)),
-                )
-                progressive = HazeProgressive.verticalGradient(
-                    startIntensity = 1f,
-                    endIntensity = 0.7f,
-                )
-            }
-            // Edge refraction: light gathers on the top rim, shadow on the bottom.
-            .border(width = 0.8.dp, brush = specular, shape = shape)
-            .drawWithContent {
-                drawContent()
-                // Diagonal sheen across the surface (light bending highlight).
-                drawRect(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = sheen),
-                            Color.Transparent,
-                            Color.White.copy(alpha = sheen * 0.3f),
-                        ),
-                        start = androidx.compose.ui.geometry.Offset.Zero,
-                        end = androidx.compose.ui.geometry.Offset(size.width, size.height),
-                    ),
-                )
-                // Inner bottom shading for volume.
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        0.65f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = bottomShade),
-                    ),
-                )
-            }
+            .hazeGlass(
+                input = HazeInput.Backdrop(hazeState),
+                style = glassStyle,
+                performanceMode = HazePerformanceMode.Adaptive,
+                expandLayerBounds = true,
+                interactionSource = barInteraction,
+                interactionTransformTarget = GlassTransformTarget.MaterialOnly,
+                interactionTransformPivot = GlassTransformPivot.Pointer,
+                interactionReducedMotionPolicy = GlassReducedMotionPolicy.System,
+            )
             .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,

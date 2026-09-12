@@ -14,10 +14,12 @@ android {
 
     defaultConfig {
         applicationId = "com.jerrey.monoicon"
-        minSdk = 31
+        // Android 15 (API 35) and newer only — Haze 2 Glass needs the AGSL
+        // runtime-shader path (API 33+) and we no longer ship a fallback.
+        minSdk = 35
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.4.0"
+        versionCode = 8
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -61,10 +63,12 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
 
     // Miuix — MIUI/HyperOS-style Compose UI for the settings screen
-    // (0.7.2 is the last line built with Kotlin 2.2.x / Compose MP 1.9.x)
-    implementation(libs.miuix)
-    // Haze — backdrop blur used by the liquid-glass bottom navigation
+    // (0.9.x: UI in miuix-ui, icons in miuix-icons)
+    implementation(libs.miuix.ui)
+    implementation(libs.miuix.icons)
+    // Haze 2 — backdrop blur + refraction-driven Glass for the bottom navigation
     implementation(libs.haze)
+    implementation(libs.haze.glass)
 
     // AndroidX
     implementation(libs.androidx.core.ktx)
