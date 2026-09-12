@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,7 +81,7 @@ fun OverviewScreen(
                 .padding(horizontal = 12.dp),
             shape = heroShape,
             color = MiuixTheme.colorScheme.primaryContainer,
-            contentColor = MiuixTheme.colorScheme.onPrimaryContainer,
+            contentColor = Color.Black,
         ) {
             Box(modifier = Modifier.clip(heroShape)) {
                 // Oversized circle-check watermark bleeding off the right edge,
@@ -118,7 +119,7 @@ fun OverviewScreen(
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                         ),
-                        color = MiuixTheme.colorScheme.onPrimaryContainer,
+                        color = Color.Black,
                     )
                     Spacer(modifier = Modifier.height(1.dp))
                     Text(
@@ -127,7 +128,7 @@ fun OverviewScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = MiuixTheme.colorScheme.onPrimaryContainer,
+                        color = Color.Black,
                     )
                     Spacer(modifier = Modifier.height(7.dp))
                     Text(
@@ -136,7 +137,7 @@ fun OverviewScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = MiuixTheme.colorScheme.onPrimaryContainer,
+                        color = Color.Black,
                     )
                 }
             }

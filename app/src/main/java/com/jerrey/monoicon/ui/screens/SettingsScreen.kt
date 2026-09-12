@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +38,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -113,13 +116,24 @@ fun SettingsScreen() {
             }
         }
 
+        // 次级页：内容里带大标题，顶栏只留返回键；滚过大标题之后顶栏才切成居中标题。
+        val scrollState = rememberScrollState()
+        var titleBottomPx by remember { mutableStateOf(0) }
+        val barTitleVisible by remember {
+            derivedStateOf { titleBottomPx > 0 && scrollState.value >= titleBottomPx }
+        }
+        LaunchedEffect(overlay) {
+            scrollState.scrollTo(0)
+            titleBottomPx = 0
+        }
+
         Scaffold(
             topBar = {
                 // Main tabs carry their own large left-aligned title (Liquid
                 // Glass large-title pattern); only secondary pages need a bar.
                 if (overlay != Overlay.NONE) {
                     SmallTopAppBar(
-                        title = title,
+                        title = if (barTitleVisible) title else "",
                         navigationIcon = {
                             IconButton(onClick = { overlay = Overlay.NONE }) {
                                 Icon(
@@ -144,12 +158,20 @@ fun SettingsScreen() {
                         .fillMaxSize()
                         .background(MiuixTheme.colorScheme.background)
                         .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scrollState)
                         .padding(top = 4.dp, bottom = 120.dp),
                 ) {
                     when (overlay) {
-                        Overlay.LOGS -> LogScreen()
-                        Overlay.ABOUT -> AboutScreen()
+                        Overlay.LOGS -> {
+                            OverlayLargeTitle(text = title) { titleBottomPx = it }
+                            LogScreen()
+                        }
+
+                        Overlay.ABOUT -> {
+                            OverlayLargeTitle(text = title) { titleBottomPx = it }
+                            AboutScreen()
+                        }
+
                         Overlay.NONE -> when (tab) {
                             MainTab.OVERVIEW -> OverviewScreen(
                                 onOpenLogs = { overlay = Overlay.LOGS },
@@ -183,6 +205,22 @@ fun SettingsScreen() {
             }
         }
     }
+}
+
+/**
+ * Large title for the secondary pages (运行日志 / 关于). It scrolls with the page and
+ * reports its bottom edge so the top bar can switch from "back arrow only" to the
+ * collapsed centred [SmallTopAppBar] title once the large title has scrolled away —
+ * the large-title pattern LSPosed/iOS use.
+ */
+@Composable
+private fun OverlayLargeTitle(text: String, onBottomPositioned: (Int) -> Unit) {
+    LargeScreenTitle(
+        text = text,
+        modifier = Modifier.onGloballyPositioned { coordinates ->
+            onBottomPositioned((coordinates.positionInParent().y + coordinates.size.height).toInt())
+        },
+    )
 }
 
 /**
