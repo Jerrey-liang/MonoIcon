@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.ui.AppLanguage
+import com.jerrey.monoicon.ui.AppStrings
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
@@ -73,14 +74,24 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * Three Miuix tabs — 概览 / 模块设置 / 图标样式 — whose content scrolls behind a
  * floating **liquid-glass** bottom navigation bar. The glass is Haze 2's typed
- * Glass effect (`hazeGlass` + `GlassStyle`), i.e. real backdrop refraction
- * (optics/specular/fresnel/chromatic aberration) rather than a plain blur.
- * The overview tab opens the runtime-log and about pages as secondary screens.
+ * Settings host (Phase 13). Three Miuix tabs — 概览 / 图标样式 / 模块设置 — whose content
+ * scrolls behind a floating **liquid-glass** bottom navigation bar built on
+ * miuix-blur, the engine LSPosed Manager uses (blurred backdrop + one translucent
+ * surface layer; no refraction). The overview tab opens the runtime-log and about
+ * pages as secondary screens.
  */
+/** Bottom navigation tabs, in bar order (概览 / 图标样式 / 模块设置). */
 private enum class MainTab(val icon: ImageVector) {
     OVERVIEW(MiuixIcons.Regular.Home),
-    MODULE(MiuixIcons.Regular.Settings),
     ICON_STYLE(MiuixIcons.Regular.Theme),
+    MODULE(MiuixIcons.Regular.Settings),
+}
+
+/** Bar label for a tab; derived here so the label order can never drift from the enum. */
+private fun MainTab.label(strings: AppStrings): String = when (this) {
+    MainTab.OVERVIEW -> strings.overview
+    MainTab.ICON_STYLE -> strings.iconStyle
+    MainTab.MODULE -> strings.moduleSettings
 }
 
 private enum class Overlay { NONE, LOGS, ABOUT }
@@ -200,7 +211,7 @@ fun SettingsScreen() {
                         onTabChange = { tab = it },
                         backdrop = backdrop,
                         glassReady = glassReady,
-                        labels = listOf(strings.overview, strings.moduleSettings, strings.iconStyle),
+                        labels = MainTab.entries.map { it.label(strings) },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             // LSPosed 量出来的胶囊几何：左右边距 40dp、离底 ~14dp、高 61dp
