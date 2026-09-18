@@ -64,6 +64,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.shadow.Shadow
@@ -231,7 +232,30 @@ fun LiquidGlassNavigationBar(
     val accentColor = MiuixTheme.colorScheme.primary
     val tabContentColor = MiuixTheme.colorScheme.onSurface
     val surfaceContainer = MiuixTheme.colorScheme.surfaceContainer
-    val containerColor = if (isBlurActive) surfaceContainer.copy(alpha = 0.4f) else surfaceContainer
+    // Low alpha on purpose: over a FLAT backdrop there is nothing for the blur to
+    // pick up, so the tint is the bar's entire appearance. At 0.4 it read as a
+    // solid tonal band — grey in light theme, black in dark theme (the dark
+    // TonalSpot scheme puts `background` and `surfaceContainer` within a few
+    // tones of each other near black). Letting more of the backdrop through keeps
+    // it a translucent layer rather than a plate.
+    val containerColor = if (isBlurActive) surfaceContainer.copy(alpha = 0.3f) else surfaceContainer
+    // Resting rim light. Without it a flat backdrop leaves the pill with no edge
+    // definition whatsoever; the specular edge is what makes glass read as glass
+    // when there is no content behind it to refract. This is the same preset the
+    // press states use, just held at a constant low alpha.
+    val restingHighlight = if (isDark) {
+        Highlight.GlassStrokeMiddleDark.copy(alpha = 0.5f)
+    } else {
+        Highlight.GlassStrokeMiddleLight.copy(alpha = 0.6f)
+    }
+    // Very soft top edge so the rim has something to sit against; a glass surface
+    // catches a little more light on the side facing the (assumed overhead) light.
+    val surfaceSheen = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = if (isDark) 0.05f else 0.16f),
+            Color.Transparent,
+        ),
+    )
 
     val tabsBackdrop = rememberLayerBackdrop()
     val density = LocalDensity.current
@@ -443,14 +467,24 @@ fun LiquidGlassNavigationBar(
                                             refractionAmount = 24.dp.toPx(),
                                         )
                                     },
-                                    highlight = { baseHighlight.value.copy(alpha = 0.75f) },
+                                    // Constant rim light, brightening while pressed. This is
+                                    // what gives the pill an edge when the backdrop is flat.
+                                    highlight = {
+                                        val press = dampedDrag.pressProgress
+                                        baseHighlight.value.copy(
+                                            alpha = restingHighlight.alpha + (0.75f - restingHighlight.alpha) * press,
+                                        )
+                                    },
                                     layerBlock = {
                                         val width = size.width.coerceAtLeast(1f)
                                         val s = lerp(1f, 1f + 16.dp.toPx() / width, dampedDrag.pressProgress)
                                         scaleX = s
                                         scaleY = s
                                     },
-                                    onDrawSurface = { drawRect(containerColor) },
+                                    onDrawSurface = {
+                                        drawRect(containerColor)
+                                        drawRect(brush = surfaceSheen)
+                                    },
                                 )
                             } else {
                                 Modifier.background(containerColor, pillShape)
