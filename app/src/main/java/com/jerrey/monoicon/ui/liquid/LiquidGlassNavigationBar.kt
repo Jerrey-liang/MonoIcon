@@ -141,6 +141,21 @@ private fun pillRim(shape: Shape, alpha: Float): Modifier = Modifier.drawWithCon
 /** Gap between the pill and the bottom of the area the Scaffold handed us. */
 val LiquidGlassBarVisualGap = 12.dp
 
+/**
+ * How far the selection pill (and, together with it, the tab content) expands
+ * while pressed. 78/56 is the reference implementation's ratio and the value the
+ * rest of the press physics (`DampedDragAnimation.pressedScale`) is tuned for, so
+ * both must stay in step.
+ *
+ * It is deliberately tied to [LiquidGlassBarPillHeight]: the pill's content box is
+ * 56dp inside a 64dp bar, and the bar itself does NOT scale, so this factor has to
+ * stay inside the bar instead of spilling past it.
+ */
+const val PressScale = 78f / 56f
+
+/** Content height of the selection pill inside [LiquidGlassBarHeight]. */
+val LiquidGlassBarPillHeight = 56.dp
+
 private val LocalIosTabScale = staticCompositionLocalOf { { 1f } }
 
 private val iosIndicatorSpecular: Highlight = Highlight(
@@ -225,6 +240,13 @@ fun LiquidGlassNavigationBar(
         ),
     )
 
+    // Selection is expressed by the tinted pill behind the icon and label rather
+    // than by recolouring the label itself. The label colour is not mixed toward
+    // `onPrimaryContainer` because that role is tuned against an opaque container:
+    // the pill here sits over glass, so at these alphas it has far less contrast
+    // than the role assumes and the label would lose legibility.
+    val selectedFill = MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
+
     val tabsBackdrop = rememberLayerBackdrop()
     val density = LocalDensity.current
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
@@ -266,7 +288,7 @@ fun LiquidGlassNavigationBar(
             valueRange = 0f..(tabsCount - 1).toFloat(),
             visibilityThreshold = 0.001f,
             initialScale = 1f,
-            pressedScale = 78f / 56f,
+            pressedScale = PressScale,
             canDrag = { position ->
                 position.x in 0f..totalWidthPx
             },
@@ -343,6 +365,11 @@ fun LiquidGlassNavigationBar(
 
     val combinedBackdrop = backdrop?.let { rememberCombinedBackdrop(it, tabsBackdrop) }
 
+    // ONE press transform for the movable group. The selection pill and the tab
+    // content are separate nodes but both read this same factor, so they scale
+    // together and cannot produce a double image.
+    val pressScale: () -> Float = { lerp(1f, PressScale, dampedDrag.pressProgress) }
+
     val tabsContent: @Composable RowScope.() -> Unit = {
         val tabScale = LocalIosTabScale.current
         items.forEachIndexed { index, item ->
@@ -401,93 +428,27 @@ fun LiquidGlassNavigationBar(
                 .fillMaxWidth(),
             contentAlignment = Alignment.CenterStart,
         ) {
-            CompositionLocalProvider(LocalContentColor provides tabContentColor) {
-                Row(
-                    modifier = Modifier
-                        .selectableGroup()
-                        .onSizeChanged { coords ->
-                            totalWidthPx = coords.width.toFloat()
-                            val contentWidthPx = totalWidthPx - with(density) { 8.dp.toPx() }
-                            tabWidthPx = (contentWidthPx / tabsCount).coerceAtLeast(0f)
-                        }
-                        .graphicsLayer { translationX = panelOffset }
-                        .dropShadow(
-                            shape = pillShape,
-                            shadow = Shadow(
-                                radius = 10.dp,
-                                color = Color.Black,
-                                // Lighter in light theme to avoid a visible gray fringe.
-                                alpha = if (isDark) 0.2f else 0.1f,
-                            ),
-                        )
-                        .then(
-                            if (isBlurActive && backdrop != null) {
-                                Modifier.drawBackdrop(
-                                    backdrop = backdrop,
-                                    shape = { pillShape },
-                                    effects = {
-                                        // 24dp lens refraction + 16dp press-scale reach, raised before blur() reads it.
-                                        padding = maxOf(padding, 40.dp.toPx())
-                                        vibrancy()
-                                        blur(4.dp.toPx(), 4.dp.toPx())
-                                        lens(
-                                            refractionHeight = 24.dp.toPx(),
-                                            refractionAmount = 24.dp.toPx(),
-                                        )
-                                    },
-                                    // Constant rim light, brightening while pressed. This is
-                                    // what gives the pill an edge when the backdrop is flat.
-                                    highlight = {
-                                        val press = dampedDrag.pressProgress
-                                        baseHighlight.copy(
-                                            alpha = restingHighlight.alpha + (0.75f - restingHighlight.alpha) * press,
-                                        )
-                                    },
-                                    layerBlock = {
-                                        val width = size.width.coerceAtLeast(1f)
-                                        val s = lerp(1f, 1f + 16.dp.toPx() / width, dampedDrag.pressProgress)
-                                        scaleX = s
-                                        scaleY = s
-                                    },
-                                    onDrawSurface = {
-                                        drawRect(containerColor)
-                                        drawRect(brush = surfaceSheen)
-                                    },
-                                )
-                            } else {
-                                Modifier.background(containerColor, pillShape)
-                            },
-                        )
-                        .then(
-                            if (isBlurActive) {
-                                interactiveHighlight.modifier.then(interactiveHighlight.gestureModifier)
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .then(dampedDrag.modifier)
-                        .height(LiquidGlassBarHeight)
-                        .padding(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    content = tabsContent,
-                )
-            }
-
-            if (isBlurActive && backdrop != null) {
-                CompositionLocalProvider(
-                    LocalIosTabScale provides { lerp(1f, 1.2f, dampedDrag.pressProgress) },
-                    LocalContentColor provides accentColor,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clearAndSetSemantics {}
-                            .alpha(0f)
-                            .layerBackdrop(tabsBackdrop)
-                            .graphicsLayer { translationX = panelOffset }
-                            .drawBackdrop(
+            // ── Row A: the glass surface. It never scales. ────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .dropShadow(
+                        shape = pillShape,
+                        shadow = Shadow(
+                            radius = 10.dp,
+                            color = Color.Black,
+                            // Lighter in light theme to avoid a visible gray fringe.
+                            alpha = if (isDark) 0.2f else 0.1f,
+                        ),
+                    )
+                    .then(
+                        if (isBlurActive && backdrop != null) {
+                            Modifier.drawBackdrop(
                                 backdrop = backdrop,
                                 shape = { pillShape },
                                 effects = {
+                                    // 24dp lens refraction + press-scale reach, raised before blur() reads it.
+                                    padding = maxOf(padding, 40.dp.toPx())
                                     vibrancy()
                                     blur(4.dp.toPx(), 4.dp.toPx())
                                     lens(
@@ -495,94 +456,108 @@ fun LiquidGlassNavigationBar(
                                         refractionAmount = 24.dp.toPx(),
                                     )
                                 },
-                                onDrawSurface = { drawRect(containerColor) },
+                                // Constant rim light, brightening while pressed. This is
+                                // what gives the pill an edge when the backdrop is flat.
+                                highlight = {
+                                    val press = dampedDrag.pressProgress
+                                    baseHighlight.copy(
+                                        alpha = restingHighlight.alpha + (0.75f - restingHighlight.alpha) * press,
+                                    )
+                                },
+                                onDrawSurface = {
+                                    drawRect(containerColor)
+                                    drawRect(brush = surfaceSheen)
+                                },
                             )
-                            .then(interactiveHighlight.modifier)
-                            .height(56.dp)
-                            .padding(horizontal = 4.dp),
+                        } else {
+                            Modifier.background(containerColor, pillShape)
+                        },
+                    )
+                    .then(
+                        if (isBlurActive) {
+                            interactiveHighlight.modifier.then(interactiveHighlight.gestureModifier)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .then(dampedDrag.modifier)
+                    .height(LiquidGlassBarHeight),
+            )
+
+            // ── Selection pill. A SIBLING of the tab Row, not a child. ───
+            // Inside the Row its fixed width was measured as a plain (non-weighted)
+            // child, which took 311px out of the row before the weighted slots were
+            // resolved and squeezed all three tabs into the right-hand 621px. As a
+            // sibling it is overlayed instead, so the slots keep the full width.
+            if (isBlurActive && backdrop != null && tabWidthPx > 0f) {
+                val tabWidthDp = with(density) { tabWidthPx.toDp() }
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            val slotCenter = dampedDrag.value * tabWidthPx
+                            translationX =
+                                if (isLtr) slotCenter + panelOffset
+                                else -slotCenter + panelOffset
+                            val s = pressScale()
+                            scaleX = s
+                            scaleY = s
+                        }
+                        .drawBackdrop(
+                            backdrop = combinedBackdrop ?: backdrop,
+                            shape = { pillShape },
+                            effects = {
+                                vibrancy()
+                                blur(4.dp.toPx(), 4.dp.toPx())
+                                lens(
+                                    refractionHeight = 24.dp.toPx(),
+                                    refractionAmount = 24.dp.toPx(),
+                                )
+                            },
+                            // No Miuix Highlight here: its BloomStroke paints a white
+                            // stroke with BlendMode.Plus, which is a no-op on a light
+                            // backdrop, so what survives is the shader's own black
+                            // coverage — a black rim in light theme. A plain SrcOver
+                            // stroke reads correctly in both themes.
+                            highlight = { null },
+                            onDrawSurface = { drawRect(selectedFill) },
+                        )
+                        .then(
+                            pillRim(
+                                shape = pillShape,
+                                alpha = if (isDark) 0.12f else 0.18f,
+                            ),
+                        )
+                        .height(LiquidGlassBarPillHeight)
+                        .width(tabWidthDp),
+                )
+            }
+
+            // ── Row B: the tab content. The ONLY copy. ────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onSizeChanged { coords ->
+                        totalWidthPx = coords.width.toFloat()
+                        val contentWidthPx = totalWidthPx - with(density) { 8.dp.toPx() }
+                        tabWidthPx = (contentWidthPx / tabsCount).coerceAtLeast(0f)
+                    }
+                    .height(LiquidGlassBarHeight)
+                    .padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The ONLY copy of the tab content. Each slot scales about its own
+                // centre by the same factor as the selection pill (see
+                // `LocalIosTabScale`), so the pill and its content grow as one object
+                // and both stay inside their slot instead of overflowing the bar.
+                CompositionLocalProvider(LocalIosTabScale provides pressScale) {
+                    Row(
+                        modifier = Modifier
+                            .selectableGroup()
+                            .fillMaxWidth()
+                            .height(LiquidGlassBarPillHeight),
                         verticalAlignment = Alignment.CenterVertically,
                         content = tabsContent,
                     )
-                }
-            }
-
-            if (tabWidthPx > 0f) {
-                val tabWidthDp = with(density) { tabWidthPx.toDp() }
-                if (isBlurActive && combinedBackdrop != null) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .graphicsLayer {
-                                val singleTabWidth = tabWidthPx
-                                val progressOffset = dampedDrag.value * singleTabWidth
-                                translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
-                            }
-                            .drawBackdrop(
-                                backdrop = combinedBackdrop,
-                                shape = { pillShape },
-                                effects = {
-                                    val progress = dampedDrag.pressProgress
-                                    lens(
-                                        refractionHeight = 10.dp.toPx() * progress,
-                                        refractionAmount = 14.dp.toPx() * progress,
-                                        depthEffect = true,
-                                        chromaticAberration = 0.12f,
-                                    )
-                                },
-                                // No Miuix Highlight here: its BloomStroke paints a white
-                                // stroke with BlendMode.Plus, which is a no-op on a light
-                                // backdrop, so what survives is the shader's own black
-                                // coverage — a black rim on the light theme, revealed once
-                                // the press scale enlarges the layer. A plain SrcOver stroke
-                                // reads the same on dark and correctly on light.
-                                highlight = { null },
-                                layerBlock = {
-                                    scaleX = dampedDrag.scaleX
-                                    scaleY = dampedDrag.scaleY
-                                    val v = dampedDrag.velocity / 10f
-                                    scaleX /= 1f - (v * 0.75f).coerceIn(-0.2f, 0.2f)
-                                    scaleY *= 1f - (v * 0.25f).coerceIn(-0.2f, 0.2f)
-                                },
-                            )
-                            .then(
-                                pillRim(
-                                    shape = pillShape,
-                                    alpha = if (isDark) 0.12f else 0.18f,
-                                ),
-                            )
-                            .height(56.dp)
-                            .width(tabWidthDp),
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .graphicsLayer {
-                                val progressOffset = dampedDrag.value * tabWidthPx
-                                translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
-                            }
-                            .clip(pillShape)
-                            .background(accentColor.copy(alpha = 0.15f), pillShape)
-                            .height(56.dp)
-                            .width(tabWidthDp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        CompositionLocalProvider(LocalContentColor provides accentColor) {
-                            Row(
-                                modifier = Modifier
-                                    .clearAndSetSemantics {}
-                                    .wrapContentWidth(align = Alignment.Start, unbounded = true)
-                                    .requiredWidth(with(density) { (totalWidthPx - 8.dp.toPx()).toDp() })
-                                    .height(56.dp)
-                                    .graphicsLayer {
-                                        val progressOffset = dampedDrag.value * tabWidthPx
-                                        translationX = if (isLtr) -progressOffset else progressOffset
-                                    },
-                                verticalAlignment = Alignment.CenterVertically,
-                                content = tabsContent,
-                            )
-                        }
-                    }
                 }
             }
         }
