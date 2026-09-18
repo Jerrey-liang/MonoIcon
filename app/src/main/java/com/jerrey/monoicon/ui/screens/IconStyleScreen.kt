@@ -40,6 +40,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @Composable
 fun IconStyleScreen(
+    variant: String,
+    onVariantChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     onTitleBottomPositioned: ((Int) -> Unit)? = null,
 ) {
@@ -51,11 +53,6 @@ fun IconStyleScreen(
     var circleIconsEnabled by remember { mutableStateOf(ConfigManager.isCircleIconsEnabledFromUi()) }
     var notificationIconsEnabled by remember {
         mutableStateOf(ConfigManager.isNotificationIconsEnabledFromUi())
-    }
-    var selectedVariant by remember {
-        mutableStateOf(
-            Material2025ColorEngine.VariantId.fromId(ConfigManager.getVariantIdFromUi()).id
-        )
     }
     var restarting by remember { mutableStateOf(false) }
     var restartHint by remember { mutableStateOf(false) }
@@ -124,26 +121,26 @@ fun IconStyleScreen(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
             )
-            Material2025ColorEngine.VariantId.entries.forEach { variant ->
+            Material2025ColorEngine.VariantId.entries.forEach { entry ->
                 BasicComponent(
-                    title = variant.label,
-                    summary = if (variant.id == "tonal_spot") strings.variantDefaultHint else null,
+                    title = entry.label,
+                    summary = if (entry.id == "tonal_spot") strings.variantDefaultHint else null,
                     endActions = {
                         Checkbox(
-                            state = ToggleableState(selectedVariant == variant.id),
+                            state = ToggleableState(variant == entry.id),
                             onClick = {
-                                selectedVariant = variant.id
+                                onVariantChange(entry.id)
                                 restartHint = true
-                                ConfigManager.setVariantId(variant.id)
-                                ModuleLogs.append("Settings", "variant=${variant.id}")
+                                ConfigManager.setVariantId(entry.id)
+                                ModuleLogs.append("Settings", "variant=${entry.id}")
                             },
                         )
                     },
                     onClick = {
-                        selectedVariant = variant.id
+                        onVariantChange(entry.id)
                         restartHint = true
-                        ConfigManager.setVariantId(variant.id)
-                        ModuleLogs.append("Settings", "variant=${variant.id}")
+                        ConfigManager.setVariantId(entry.id)
+                        ModuleLogs.append("Settings", "variant=${entry.id}")
                     },
                 )
             }

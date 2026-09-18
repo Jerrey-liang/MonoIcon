@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -29,13 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.addOutline
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -53,14 +50,15 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.noiseDither
 import top.yukonga.miuix.kmp.blur.blendColors
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.BlurBlendMode
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.noiseDither
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -96,8 +94,33 @@ private fun MainTab.label(strings: AppStrings): String = when (this) {
 
 private enum class Overlay { NONE, LOGS, ABOUT }
 
+// ── Glass bottom bar geometry (single source for position AND content inset) ──
+// The pill is a fixed design size, so the bar's footprint is derived from the
+// same numbers the bar draws with rather than measured at runtime.
+private val GlassBarContentHeight = 56.dp
+private val GlassBarInnerPadding = 4.dp
+private val GlassBarVisualGap = 14.dp
+
+/** Drawn height of the glass pill (content + its own vertical padding). */
+private val GlassBarHeight = GlassBarContentHeight + GlassBarInnerPadding * 2
+
+/**
+ * Bottom spacing the scroll content must reserve so the last item is never
+ * permanently hidden behind the floating bar: the bar itself (which already
+ * floats [GlassBarVisualGap] above the Scaffold content edge) plus breathing
+ * room.
+ *
+ * The Scaffold owns the system navigation inset — this constant must NOT
+ * include it, and the bar must not add `navigationBarsPadding()` either.
+ */
+private val GlassBarContentInset =
+    GlassBarHeight + GlassBarVisualGap + GlassBarInnerPadding
+
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    variant: String,
+    onVariantChange: (String) -> Unit,
+) {
     val context = LocalContext.current
     var language by remember { mutableStateOf(AppLanguage.fromId(ConfigManager.getLanguageFromUi())) }
     val strings = stringsFor(language, systemPrefersChinese(context))
@@ -170,10 +193,17 @@ fun SettingsScreen() {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MiuixTheme.colorScheme.background)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MiuixTheme.colorScheme.background,
+                                    MiuixTheme.colorScheme.surfaceContainer,
+                                ),
+                            ),
+                        )
                         .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                         .verticalScroll(scrollState)
-                        .padding(top = 4.dp, bottom = 120.dp),
+                        .padding(top = 4.dp, bottom = GlassBarContentInset),
                 ) {
                     when (overlay) {
                         Overlay.LOGS -> {
@@ -198,6 +228,8 @@ fun SettingsScreen() {
                             )
 
                             MainTab.ICON_STYLE -> IconStyleScreen(
+                                variant = variant,
+                                onVariantChange = onVariantChange,
                                 onTitleBottomPositioned = { titleBottomPx = it },
                             )
                         }
@@ -224,24 +256,20 @@ fun SettingsScreen() {
 }
 
 /**
- * Liquid-glass bottom navigation — miuix-blur engine, wired exactly like LSPosed
- * Manager's nav bar (`bt3.c` → `ng2.f0`):
+ * Liquid-glass bottom navigation — miuix-blur engine, wired like LSPosed
+ * Manager's nav bar (`bt3.c`):
  *  - the page content is recorded through `Modifier.layerBackdrop`;
  *  - `Modifier.drawBackdrop` blurs it (25.dp, noise 0.0045) and paints **one**
- *    `SrcOver` layer of the theme surface at alpha 0.8 inside the capsule;
- *  - **no rim highlight**: LSPosed's nav bar passes `highlight = null`.
+ *    translucent `SrcOver` layer of a dynamic-colour container role inside the
+ *    capsule — the role, not a hand-mixed tint, is what keeps the glass on the
+ *    same colour system as the page;
+ *  - the specular rim comes from Miuix's own `Highlight.GlassStroke*` preset.
  *
- * Two traps found while matching this against the decompiled manager:
- *  1. miuix's bundled `BloomStroke.GlassStroke*` presets carry `blendMode = 0`
- *     (== `BlendMode.Clear`) and `HighlightDrawingKt` paints the shader over the
- *     whole node rect; the BloomStroke SDF skips only the area further than
- *     `R = max(cornerRadius, innerBlurRadius)` from the edge — for a *capsule*
- *     that band is half the height, i.e. the whole shape. The result was the flat
- *     grey plate we saw (the slab erased, then re-tinted over black).
- *  2. In Material 3 the glass reads as a faint capsule only because `surface`
- *     sits ~4/255 below `background`. This device's Monet palette has them
- *     *identical*, so a literal copy is invisible on an empty page — hence the
- *     20% nudge towards `surfaceContainerHigh` (≈ LSPosed's 250,242,251).
+ * Miuix 0.9.3's `BloomStroke` presets composite with `BlendMode.Plus`. An
+ * earlier build of this bar shipped a hand-drawn 1px white outline because the
+ * presets then in use carried `blendMode = 0` (== `Clear`), which erased the
+ * capsule into a flat grey plate; that workaround is no longer needed and the
+ * preset is used directly.
  */
 @Composable
 private fun GlassNavigationBar(
@@ -254,11 +282,13 @@ private fun GlassNavigationBar(
 ) {
     val colors = MiuixTheme.colorScheme
     val shape = RoundedCornerShape(percent = 50)
-    val glassTint = lerp(colors.surface, colors.surfaceContainerHigh, 0.2f)
+    // LSPosed's bar paints ONE translucent layer of the theme's container role over
+    // the blur (`bt3.c`: `pt.b(0.8f, colorScheme.containerRole)`) — the tint is a
+    // dynamic-colour role, never a hand-tuned mix of two roles.
     val blurColors = BlurColors(
         blendColors = listOf(
             BlendColorEntry(
-                color = glassTint.copy(alpha = 0.8f),
+                color = colors.surfaceContainer.copy(alpha = 0.4f),
                 mode = BlurBlendMode.SrcOver,
             ),
         ),
@@ -266,12 +296,18 @@ private fun GlassNavigationBar(
         contrast = 1f,
         saturation = 1f,
     )
+    // Miuix's own specular edge preset (BloomStroke, blendMode = Plus). The dark
+    // preset has the thinner inner blur the dark surface needs.
+    val highlight = if (isSystemInDarkTheme()) {
+        Highlight.GlassStrokeMiddleDark
+    } else {
+        Highlight.GlassStrokeMiddleLight
+    }
     val barModifier = if (glassReady) {
         modifier
             .fillMaxWidth()
-            // 悬浮感的两条线索（LSPosed 的胶囊都有、miuix 的 drawBackdrop 本身不画）：
-            // 3dp 阴影（同它 Surface 的 Modifier.shadow(elevation = 3.dp, ambient/spot = 黑)，
-            // 但参考图峰值只暗 ~12/255，所以把颜色 alpha 压到 0.25）+ 一圈 1px 亮边。
+            // Floating cue: a 3dp drop shadow. Black is the physically correct
+            // shadow colour (it is not a semantic foreground role).
             .shadow(
                 elevation = 3.dp,
                 shape = shape,
@@ -287,21 +323,11 @@ private fun GlassNavigationBar(
                     noiseDither(0.0045f)
                     blendColors(blurColors)
                 },
+                highlight = { highlight },
             )
-            .drawWithContent {
-                drawContent()
-                // 1px 亮边：参考图边缘实测 (255,250,255)/(255,255,255)，比填充 (250,242,251) 亮 ~4-5。
-                // 这里用 SrcOver 的白 0.8（实测 Plus 叠加在该离屏图层里不生效，见提交说明）。
-                val outline = shape.createOutline(size, layoutDirection, this)
-                drawPath(
-                    path = Path().apply { addOutline(outline) },
-                    color = Color.White.copy(alpha = 0.8f),
-                    style = Stroke(width = 1.dp.toPx()),
-                )
-            }
-            .padding(vertical = 4.dp)
+            .padding(vertical = GlassBarInnerPadding)
     } else {
-        modifier.fillMaxWidth().padding(vertical = 4.dp)
+        modifier.fillMaxWidth().padding(vertical = GlassBarInnerPadding)
     }
 
     Row(

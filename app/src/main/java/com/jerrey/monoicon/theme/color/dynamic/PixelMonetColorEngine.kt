@@ -48,6 +48,23 @@ object PixelMonetColorEngine {
         return if (dark) DARK_FALLBACK else LIGHT_FALLBACK
     }
 
+    /**
+     * The wallpaper seed colour this engine derives the icon palette from, or
+     * [FALLBACK_SOURCE] when no wallpaper palette is readable.
+     *
+     * The settings UI passes this to `ThemeController(keyColor = …)` so the UI
+     * palette and the icon palette are generated from the SAME seed — the
+     * single-source requirement for the Dynamic Color pipeline. Returns the
+     * raw seed (not a scheme role), because re-seeding from an already-derived
+     * role would shift the tone.
+     */
+    fun getSeedColor(): Int {
+        val context = launcherContext ?: return FALLBACK_SOURCE
+        readMiuiWallpaperColors()?.let { return selectSourceColor(it) ?: FALLBACK_SOURCE }
+        readFrameworkWallpaperColors(context)?.let { return selectSourceColor(it) ?: FALLBACK_SOURCE }
+        return FALLBACK_SOURCE
+    }
+
     private fun calculate(source: String, colors: WallpaperColors, dark: Boolean, variantId: String): IconThemeColors {
         logWallpaper(colors, source)
         val sourceColor = selectSourceColor(colors)

@@ -81,7 +81,7 @@ fun OverviewScreen(
                 .padding(horizontal = 12.dp),
             shape = heroShape,
             color = MiuixTheme.colorScheme.primaryContainer,
-            contentColor = Color.Black,
+            contentColor = MiuixTheme.colorScheme.onPrimaryContainer,
         ) {
             Box(modifier = Modifier.clip(heroShape)) {
                 // Oversized circle-check watermark bleeding off the right edge,
@@ -119,7 +119,7 @@ fun OverviewScreen(
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                         ),
-                        color = Color.Black,
+                        color = MiuixTheme.colorScheme.onPrimaryContainer,
                     )
                     Spacer(modifier = Modifier.height(1.dp))
                     Text(
@@ -128,7 +128,7 @@ fun OverviewScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = Color.Black,
+                        color = MiuixTheme.colorScheme.onPrimaryContainer,
                     )
                     Spacer(modifier = Modifier.height(7.dp))
                     Text(
@@ -137,7 +137,7 @@ fun OverviewScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = Color.Black,
+                        color = MiuixTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
