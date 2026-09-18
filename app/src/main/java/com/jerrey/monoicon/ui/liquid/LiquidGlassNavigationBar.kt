@@ -62,10 +62,15 @@ import androidx.compose.ui.Alignment.Companion.CenterHorizontally
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.input.key.Key
@@ -101,7 +106,6 @@ import top.yukonga.miuix.kmp.blur.highlight.LightPosition
 import top.yukonga.miuix.kmp.blur.highlight.LightSource
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.PI
@@ -114,6 +118,25 @@ import kotlin.math.sin
 
 /** Drawn height of the glass pill. */
 val LiquidGlassBarHeight = 64.dp
+
+/**
+ * A plain `SrcOver` rim stroke for the pill.
+ *
+ * Drawn as part of the node's own content, so it participates in the press-scale
+ * `layerBlock` and grows with the pill. Avoids Miuix's `Highlight` here: its
+ * `BloomStroke` composites with `BlendMode.Plus`, which does nothing over a light
+ * backdrop, leaving only the shader's dark coverage visible as a black rim.
+ */
+private fun pillRim(shape: Shape, alpha: Float): Modifier = Modifier.drawWithContent {
+    drawContent()
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val path = Path().apply { addOutline(outline) }
+    drawPath(
+        path = path,
+        color = Color.White.copy(alpha = alpha),
+        style = Stroke(width = 1.dp.toPx()),
+    )
+}
 
 /** Gap between the pill and the bottom of the area the Scaffold handed us. */
 val LiquidGlassBarVisualGap = 12.dp
@@ -140,72 +163,6 @@ private val iosIndicatorSpecular: Highlight = Highlight(
     ),
 )
 
-// Mirrors HighlightStyle.kt's LIGHT_REF — keep in sync.
-private const val LIGHT_REF_X = 0.5f
-private const val LIGHT_REF_Y = 0.7f
-private const val GRAVITY_DIR_THRESHOLD_SQ = 0.01f // |g_xy| > 0.1, ≈ 6° tilt
-
-// 3° quantization step for the gravity direction: finer changes are imperceptible.
-private const val GRAVITY_ANGLE_STEP_RAD = (3.0 * PI / 180.0).toFloat()
-
-/**
- * In-screen-plane gravity direction angle (radians, quantized to 3° steps).
- *
- * Returned as [State] so the read can be deferred to the draw phase: the sensor
- * writes tilt state unthrottled (~50Hz), and a composition-time read would
- * recompose the whole caller scope on every tick. The derivedStateOf equality
- * check then drops draw invalidations to quantization-step crossings.
- */
-@Composable
-private fun rememberQuantizedGravityAngle(): State<Float> {
-    val tiltState = rememberDeviceTilt()
-    return remember(tiltState) {
-        derivedStateOf {
-            val tilt = tiltState.value
-            val gx = tilt.gravityX
-            val gy = tilt.gravityY
-            val gMagSq = gx * gx + gy * gy
-            if (gMagSq > GRAVITY_DIR_THRESHOLD_SQ) {
-                (atan2(gy, gx) / GRAVITY_ANGLE_STEP_RAD).roundToInt() * GRAVITY_ANGLE_STEP_RAD
-            } else {
-                // Near-flat: the in-plane gravity direction is unstable, pin to (0, -1).
-                (-PI / 2).toFloat()
-            }
-        }
-    }
-}
-
-/**
- * [base] with its `dualPeak` primary light rotated to the gravity angle plus
- * [extraDegrees]. Read `.value` only at draw time (see
- * [rememberQuantizedGravityAngle]); the rotated copy is cached, re-allocating
- * only when the angle crosses a quantization step.
- */
-@Composable
-private fun rememberGravityRotatedHighlight(
-    base: Highlight,
-    extraDegrees: Float,
-): State<Highlight> {
-    val gravityAngle = rememberQuantizedGravityAngle()
-    return remember(gravityAngle, base, extraDegrees) {
-        derivedStateOf {
-            val baseStyle = base.style as BloomStroke
-            val basePrimary = baseStyle.primaryLight
-            val rad = gravityAngle.value + (extraDegrees * PI / 180.0).toFloat()
-            base.copy(
-                style = baseStyle.copy(
-                    primaryLight = basePrimary.copy(
-                        position = LightPosition(
-                            x = LIGHT_REF_X + cos(rad),
-                            y = LIGHT_REF_Y + sin(rad),
-                            z = basePrimary.position.z,
-                        ),
-                    ),
-                ),
-            )
-        }
-    }
-}
 
 /**
  * iOS-style liquid-glass navigation bar: a floating glass pill with drag-to-select
@@ -380,9 +337,9 @@ fun LiquidGlassNavigationBar(
         )
     }
 
-    // Read .value only inside highlight lambdas (draw phase), never in composition.
-    val baseHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = -45f)
-    val pillHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = 90f)
+    // The bar's specular is a constant: the indicator no longer uses one, so the
+    // gravity-tilt rotation that existed only to drive its highlight is gone.
+    val baseHighlight = iosIndicatorSpecular
 
     val combinedBackdrop = backdrop?.let { rememberCombinedBackdrop(it, tabsBackdrop) }
 
@@ -482,7 +439,7 @@ fun LiquidGlassNavigationBar(
                                     // what gives the pill an edge when the backdrop is flat.
                                     highlight = {
                                         val press = dampedDrag.pressProgress
-                                        baseHighlight.value.copy(
+                                        baseHighlight.copy(
                                             alpha = restingHighlight.alpha + (0.75f - restingHighlight.alpha) * press,
                                         )
                                     },
@@ -569,17 +526,29 @@ fun LiquidGlassNavigationBar(
                                         refractionHeight = 10.dp.toPx() * progress,
                                         refractionAmount = 14.dp.toPx() * progress,
                                         depthEffect = true,
-                                        chromaticAberration = 0.25f,
+                                        chromaticAberration = 0.12f,
                                     )
                                 },
-                                highlight = { pillHighlight.value.copy(alpha = dampedDrag.pressProgress * 0.45f) },
+                                // No Miuix Highlight here: its BloomStroke paints a white
+                                // stroke with BlendMode.Plus, which is a no-op on a light
+                                // backdrop, so what survives is the shader's own black
+                                // coverage — a black rim on the light theme, revealed once
+                                // the press scale enlarges the layer. A plain SrcOver stroke
+                                // reads the same on dark and correctly on light.
+                                highlight = { null },
                                 layerBlock = {
-                                    // Press scale animates the pill's layer, but scaling a
-                                    // layer whose recording does not extend past its bounds
-                                    // exposes transparent edge pixels as BLACK at the rim.
-                                    // Keep the layer unscaled and let the lens/highlight carry
-                                    // the press feedback.
+                                    scaleX = dampedDrag.scaleX
+                                    scaleY = dampedDrag.scaleY
+                                    val v = dampedDrag.velocity / 10f
+                                    scaleX /= 1f - (v * 0.75f).coerceIn(-0.2f, 0.2f)
+                                    scaleY *= 1f - (v * 0.25f).coerceIn(-0.2f, 0.2f)
                                 },
+                            )
+                            .then(
+                                pillRim(
+                                    shape = pillShape,
+                                    alpha = if (isDark) 0.12f else 0.18f,
+                                ),
                             )
                             .height(56.dp)
                             .width(tabWidthDp),
