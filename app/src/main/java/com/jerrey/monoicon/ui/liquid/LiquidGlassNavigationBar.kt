@@ -265,9 +265,13 @@ fun LiquidGlassNavigationBar(
     // the other way: there the role sits barely above the page, so tinting toward it
     // left the selected pill invisible (measured #24262D on a #15181D page). Dark
     // theme therefore tints toward white instead.
+    // Both themes use the SAME alpha. The fill is the only thing covering the glass
+    // row's own copy of the tab content, so an alpha that differs per theme makes the
+    // two copies visible in whichever theme covers less: an earlier revision used 0.9
+    // in light but 0.15 in dark, and the double image showed up in dark only.
     val containerColor = when {
         !isBlurActive -> surfaceContainer
-        isDark -> Color.White.copy(alpha = 0.15f)
+        isDark -> Color.White.copy(alpha = 0.9f)
         else -> surfaceContainer.copy(alpha = 0.9f)
     }
     // Resting rim light. Without it a flat backdrop leaves the pill with no edge
@@ -408,6 +412,8 @@ fun LiquidGlassNavigationBar(
     }
 
     // Both highlights track device tilt, as in the reference implementation.
+    // The bar surface's specular tracks device tilt. The indicator keeps its own,
+    // as in the Miuix example and KernelSU.
     val baseHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = -45f)
     val pillHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = 90f)
 
@@ -592,6 +598,9 @@ fun LiquidGlassNavigationBar(
                                         chromaticAberration = 0.5f,
                                     )
                                 },
+                                // KernelSU and the Miuix example both keep this specular
+                                // here. It is also the outermost layer, so it covers the
+                                // seam where the glass row's own copy of the tabs sits.
                                 highlight = { pillHighlight.value.copy(alpha = dampedDrag.pressProgress) },
                                 layerBlock = {
                                     scaleX = dampedDrag.scaleX
