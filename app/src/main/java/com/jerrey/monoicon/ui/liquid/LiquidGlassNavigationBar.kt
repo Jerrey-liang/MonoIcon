@@ -569,16 +569,16 @@ fun LiquidGlassNavigationBar(
                                         refractionHeight = 10.dp.toPx() * progress,
                                         refractionAmount = 14.dp.toPx() * progress,
                                         depthEffect = true,
-                                        chromaticAberration = 0.5f,
+                                        chromaticAberration = 0.25f,
                                     )
                                 },
-                                highlight = { pillHighlight.value.copy(alpha = dampedDrag.pressProgress) },
+                                highlight = { pillHighlight.value.copy(alpha = dampedDrag.pressProgress * 0.45f) },
                                 layerBlock = {
-                                    scaleX = dampedDrag.scaleX
-                                    scaleY = dampedDrag.scaleY
-                                    val v = dampedDrag.velocity / 10f
-                                    scaleX /= 1f - (v * 0.75f).coerceIn(-0.2f, 0.2f)
-                                    scaleY *= 1f - (v * 0.25f).coerceIn(-0.2f, 0.2f)
+                                    // Press scale animates the pill's layer, but scaling a
+                                    // layer whose recording does not extend past its bounds
+                                    // exposes transparent edge pixels as BLACK at the rim.
+                                    // Keep the layer unscaled and let the lens/highlight carry
+                                    // the press feedback.
                                 },
                             )
                             .height(56.dp)
