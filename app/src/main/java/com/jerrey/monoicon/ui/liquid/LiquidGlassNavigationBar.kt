@@ -535,14 +535,6 @@ fun LiquidGlassNavigationBar(
                                     scaleX /= 1f - (v * 0.75f).coerceIn(-0.2f, 0.2f)
                                     scaleY *= 1f - (v * 0.25f).coerceIn(-0.2f, 0.2f)
                                 },
-                                onDrawSurface = {
-                                    val progress = dampedDrag.pressProgress
-                                    drawRect(
-                                        color = if (!isDark) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f),
-                                        alpha = 1f - progress,
-                                    )
-                                    drawRect(Color.Black.copy(alpha = 0.03f * progress))
-                                },
                             )
                             .height(56.dp)
                             .width(tabWidthDp),
