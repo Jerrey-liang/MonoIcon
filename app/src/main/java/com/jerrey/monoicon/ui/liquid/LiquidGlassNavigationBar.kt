@@ -231,22 +231,33 @@ fun LiquidGlassNavigationBar(
     val pillShape = remember { CircleShape }
     val accentColor = MiuixTheme.colorScheme.primary
     val tabContentColor = MiuixTheme.colorScheme.onSurface
-    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainer
-    // Low alpha on purpose: over a FLAT backdrop there is nothing for the blur to
-    // pick up, so the tint is the bar's entire appearance. At 0.4 it read as a
-    // solid tonal band — grey in light theme, black in dark theme (the dark
-    // TonalSpot scheme puts `background` and `surfaceContainer` within a few
-    // tones of each other near black). Letting more of the backdrop through keeps
-    // it a translucent layer rather than a plate.
-    val containerColor = if (isBlurActive) surfaceContainer.copy(alpha = 0.3f) else surfaceContainer
+    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainerHighest
+    // The fill's ALPHA is what drives the rendered tone here, and on device the
+    // relationship is steep and non-linear: this role measured #505054 at a=0.3,
+    // #83848A at 0.55, #C3C4CD at 0.85 and #CDCFD8 at 0.9 over a #EEEEF7 page. Low
+    // alphas do NOT read as "more transparent glass" — they read as a dark plate.
+    // So the fill is deliberately near-opaque and the frosted look comes from the
+    // blur/refraction layered underneath it.
+    //
+    // Direction is per-theme. On a light page the container role is darker than the
+    // background, so tinting toward it reads as a recessed bar. The dark scheme goes
+    // the other way: there the role sits barely above the page, so tinting toward it
+    // left the selected pill invisible (measured #24262D on a #15181D page). Dark
+    // theme therefore tints toward white instead.
+    val containerColor = when {
+        !isBlurActive -> surfaceContainer
+        isDark -> Color.White.copy(alpha = 0.15f)
+        else -> surfaceContainer.copy(alpha = 0.9f)
+    }
     // Resting rim light. Without it a flat backdrop leaves the pill with no edge
     // definition whatsoever; the specular edge is what makes glass read as glass
-    // when there is no content behind it to refract. This is the same preset the
-    // press states use, just held at a constant low alpha.
+    // when there is no content behind it to refract. The near-opaque light-theme
+    // plate needs only a hint of edge; the dark theme's lightly-lifted fill leans on
+    // it for definition, so it gets the brighter preset.
     val restingHighlight = if (isDark) {
-        Highlight.GlassStrokeMiddleDark.copy(alpha = 0.5f)
+        Highlight.GlassStrokeMiddleLight.copy(alpha = 0.7f)
     } else {
-        Highlight.GlassStrokeMiddleLight.copy(alpha = 0.6f)
+        Highlight.GlassStrokeMiddleDark.copy(alpha = 0.35f)
     }
     // Very soft top edge so the rim has something to sit against; a glass surface
     // catches a little more light on the side facing the (assumed overhead) light.

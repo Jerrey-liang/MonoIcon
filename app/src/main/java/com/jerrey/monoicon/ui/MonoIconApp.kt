@@ -24,9 +24,10 @@ import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
 @Composable
 fun MonoIconApp() {
     var variant by remember { mutableStateOf(ConfigManager.getVariantIdFromUi()) }
+    val seedColor = PixelMonetColorEngine.getSeedColor()
 
     MonoIconTheme(
-        seedColor = PixelMonetColorEngine.getSeedColor(),
+        seedColor = seedColor,
         paletteStyle = paletteStyleForVariant(variant),
         darkTheme = isSystemInDarkTheme(),
     ) {
