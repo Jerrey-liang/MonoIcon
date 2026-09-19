@@ -154,25 +154,31 @@ fun SettingsScreen(
                 }
             },
         ) { padding ->
+            // The opaque background and the backdrop recording live on this Box, not
+            // on the scrolling Column. A `verticalScroll` child is measured with an
+            // unbounded height, so `fillMaxSize()` on it is a no-op: the Column only
+            // ever painted its own content height. Any viewport area past the content
+            // — a short page, or a scrolled-to-the-bottom long page — was therefore
+            // never drawn, and the glass bar samples that unpainted area as
+            // transparent black, which shows up as a black rim around the pill.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MiuixTheme.colorScheme.background)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                MiuixTheme.colorScheme.background,
+                                MiuixTheme.colorScheme.surfaceContainer,
+                            ),
+                        ),
+                    )
+                    .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                     .padding(padding),
             ) {
-                // ── Page content (blur source for the glass bar) ───────
+                // ── Page content (scrolls over the recorded background) ─
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    MiuixTheme.colorScheme.background,
-                                    MiuixTheme.colorScheme.surfaceContainer,
-                                ),
-                            ),
-                        )
-                        .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                         .verticalScroll(scrollState)
                         .padding(top = 4.dp, bottom = GlassBarContentInset),
                 ) {
