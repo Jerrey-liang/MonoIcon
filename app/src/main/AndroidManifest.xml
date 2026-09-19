@@ -5,6 +5,22 @@
     <!-- Fallback path for the in-app "Restart HyperOS Launcher" button -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
+    <!--
+      Read the wallpaper IMAGE so the theme seed can be quantised the way Material
+      Color Utilities defines it (Celebi quantise + Score ranking). Without it we
+      can only read WallpaperManager's already-reduced primary/secondary/tertiary
+      trio, which yields a different - and typically washed-out - colour: on the
+      reference wallpaper the framework reports #A592D3 while the quantised seed is
+      #706496.
+
+      signature|privileged permission, so it has to be granted explicitly
+      (LSPosed Manager / App Ops / root). Without the grant the engine falls back to
+      the framework colours and the palette stays approximate.
+    -->
+    <uses-permission
+        android:name="android.permission.READ_WALLPAPER_INTERNAL"
+        tools:ignore="ProtectedPermissions" />
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
