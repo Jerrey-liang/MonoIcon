@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.ui.MonoIconApp
 import com.jerrey.monoicon.ui.wrapLocale
 
@@ -35,6 +36,12 @@ class MainActivity : ComponentActivity() {
         // Phase 4.1: bind the module-process SharedPreferences so the UI
         // switch writes the same file the launcher hook process reads.
         ConfigManager.init(applicationContext)
+        // The settings theme derives its seed from this engine, and the engine
+        // returns its hard-coded fallback until it has a Context. It is initialised
+        // by the launcher-side hooks, which never run in this process, so without
+        // this call the UI palette is always the fallback blue and never the
+        // wallpaper's colour.
+        PixelMonetColorEngine.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             MonoIconApp()
