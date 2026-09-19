@@ -61,7 +61,11 @@ fun MonoIconTheme(
     // Deriving is not the same as reading the framework's pre-computed roles, which
     // is what this theme used to do: both are Material 3, but Miuix's implementation
     // (materialkolor) and the framework's (AOSP) disagree. Measured dark-mode
-    // `primaryContainer`: deriving gives #3F384C, the framework role is #4F3D74.
+    // `primaryContainer`: deriving gives #584C72, the framework role is #4F3D74.
+    //
+    // For reference, LSPosed's activation card turned out to use `secondaryContainer`
+    // rather than `primaryContainer`: deriving gives #E9DEF8 light / #3F384C dark,
+    // which match its rendered pixels exactly in both modes.
     val systemSeed = remember { systemAccentSeed(context) }
     val controller = remember(systemSeed, darkTheme) {
         ThemeController(

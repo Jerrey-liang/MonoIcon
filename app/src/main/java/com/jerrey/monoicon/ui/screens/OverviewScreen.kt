@@ -80,8 +80,8 @@ fun OverviewScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp),
             shape = heroShape,
-            color = MiuixTheme.colorScheme.primaryContainer,
-            contentColor = MiuixTheme.colorScheme.onPrimaryContainer,
+            color = MiuixTheme.colorScheme.secondaryContainer,
+            contentColor = MiuixTheme.colorScheme.onSecondaryContainer,
         ) {
             Box(modifier = Modifier.clip(heroShape)) {
                 // Oversized circle-check watermark bleeding off the right edge,
@@ -93,7 +93,7 @@ fun OverviewScreen(
                         .offset(x = 34.dp)
                         .border(
                             width = 6.dp,
-                            color = MiuixTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.22f),
+                            color = MiuixTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.22f),
                             shape = CircleShape,
                         )
                         .padding(26.dp),
@@ -101,7 +101,7 @@ fun OverviewScreen(
                     Icon(
                         imageVector = MiuixIcons.Regular.Ok,
                         contentDescription = null,
-                        tint = MiuixTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.22f),
+                        tint = MiuixTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.22f),
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -119,7 +119,7 @@ fun OverviewScreen(
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                         ),
-                        color = MiuixTheme.colorScheme.onPrimaryContainer,
+                        color = MiuixTheme.colorScheme.onSecondaryContainer,
                     )
                     Spacer(modifier = Modifier.height(1.dp))
                     Text(
@@ -128,7 +128,7 @@ fun OverviewScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = MiuixTheme.colorScheme.onPrimaryContainer,
+                        color = MiuixTheme.colorScheme.onSecondaryContainer,
                     )
                     Spacer(modifier = Modifier.height(7.dp))
                     Text(
@@ -137,7 +137,7 @@ fun OverviewScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = MiuixTheme.colorScheme.onPrimaryContainer,
+                        color = MiuixTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }
