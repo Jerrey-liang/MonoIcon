@@ -50,16 +50,23 @@ fun MonoIconTheme(
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val frameworkColors = remember(darkTheme) { miuixColorsFromFrameworkRoles(context, darkTheme) }
-    if (frameworkColors != null) {
-        MiuixTheme(colors = frameworkColors, content = content)
-        return
-    }
-    // Below API 31 there are no framework dynamic roles; fall back to a seed scheme.
-    val controller = remember(darkTheme) {
+    // Mirrors what LSPosed Manager does, which is what makes the two palettes match.
+    //
+    // LSPosed's preferences on this device read:
+    //   follow_system_accent=true, palette_style=TonalSpot, color_spec=SPEC_2025
+    // and it feeds those into its own `ThemeController`, i.e. it takes the system
+    // seed (`R.color.system_accent1_500`, #806DA8 here) and RE-DERIVES the scheme
+    // with `colorsFromSeed(seed, Spec2025, TonalSpot, dark)`.
+    //
+    // Deriving is not the same as reading the framework's pre-computed roles, which
+    // is what this theme used to do: both are Material 3, but Miuix's implementation
+    // (materialkolor) and the framework's (AOSP) disagree. Measured dark-mode
+    // `primaryContainer`: deriving gives #3F384C, the framework role is #4F3D74.
+    val systemSeed = remember { systemAccentSeed(context) }
+    val controller = remember(systemSeed, darkTheme) {
         ThemeController(
             colorSchemeMode = if (darkTheme) ColorSchemeMode.MonetDark else ColorSchemeMode.MonetLight,
-            keyColor = null,
+            keyColor = systemSeed?.let { Color(it) },
             colorSpec = ThemeColorSpec.Spec2025,
             paletteStyle = ThemePaletteStyle.TonalSpot,
         )
@@ -68,14 +75,33 @@ fun MonoIconTheme(
 }
 
 /**
+ * The seed the system's Monet palette is built from.
+ *
+ * `R.color.system_accent1_500` is the framework's own seed for accent1, and it is
+ * what Miuix's `readSystemPaletteInfo` falls back to when
+ * `theme_customization_overlay_packages` carries no `system_palette` field — which
+ * is the case on this device.
+ *
+ * @return the seed ARGB, or null when the platform has no dynamic colours.
+ */
+private fun systemAccentSeed(context: android.content.Context): Int? {
+    if (android.os.Build.VERSION.SDK_INT < 31) return null
+    return runCatching {
+        val id = context.resources.getIdentifier("system_accent1_500", "color", "android")
+        if (id == 0) null else context.resources.getColor(id, context.theme)
+    }.getOrNull()
+}
+
+/**
  * The framework's Material 3 dynamic colours, mapped into Miuix's [Colors].
  *
- * The role resources (`android.R.color.system_primary_container_light`, …) are
- * populated at runtime by SystemUI's dynamic-colour RRO, so reading them yields
- * the exact tones the system and any Material 3 theme-overlay app uses.
+ * Retained for reference: reading the roles directly yields the tones the system
+ * itself uses, but it is NOT what a Miuix app on this device renders, because Miuix
+ * re-derives the scheme from the seed instead. See [MonoIconTheme].
  *
  * @return null when the platform has no dynamic colours, or when reading fails.
  */
+@Suppress("unused")
 private fun miuixColorsFromFrameworkRoles(
     context: android.content.Context,
     dark: Boolean,
