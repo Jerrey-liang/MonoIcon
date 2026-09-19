@@ -252,27 +252,28 @@ fun LiquidGlassNavigationBar(
     val pillShape = remember { CircleShape }
     val accentColor = MiuixTheme.colorScheme.primary
     val tabContentColor = MiuixTheme.colorScheme.onSurface
-    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainerHighest
-    // The fill's ALPHA is what drives the rendered tone here, and on device the
-    // relationship is steep and non-linear: this role measured #505054 at a=0.3,
-    // #83848A at 0.55, #C3C4CD at 0.85 and #CDCFD8 at 0.9 over a #EEEEF7 page. Low
-    // alphas do NOT read as "more transparent glass" — they read as a dark plate.
-    // So the fill is deliberately near-opaque and the frosted look comes from the
-    // blur/refraction layered underneath it.
-    //
-    // Direction is per-theme. On a light page the container role is darker than the
-    // background, so tinting toward it reads as a recessed bar. The dark scheme goes
-    // the other way: there the role sits barely above the page, so tinting toward it
-    // left the selected pill invisible (measured #24262D on a #15181D page). Dark
-    // theme therefore tints toward white instead.
-    // Both themes use the SAME alpha. The fill is the only thing covering the glass
-    // row's own copy of the tab content, so an alpha that differs per theme makes the
-    // two copies visible in whichever theme covers less: an earlier revision used 0.9
-    // in light but 0.15 in dark, and the double image showed up in dark only.
+    /**
+     * The glass fill is the PAGE's own colour, not a container role.
+     *
+     * A container role is deliberately a different tone from the background, so
+     * filling with it made the bar read as a grey band on a page with nothing
+     * behind it (measured `#CACCD6` on a `#FAF9FE` page). Deriving the fill from
+     * `background` means what little the tint adds is the page's own hue, and the
+     * definition comes from the rim light and drop shadow instead.
+     *
+     * Alpha stays HIGH for the same reason the role matters: on this device the
+     * rendered tone rises with the fill's alpha (this role measured #505054 at 0.3,
+     * #83848A at 0.55, #C3C4CD at 0.85, #CDCFD8 at 0.9), so a low alpha does not
+     * read as "more transparent", it reads as a dark plate. Near-opaque keeps the
+     * bar on the page's own tone; the definition comes from the rim light and the
+     * drop shadow rather than from the fill.
+     */
     val containerColor = when {
-        !isBlurActive -> surfaceContainer
-        isDark -> Color.White.copy(alpha = 0.9f)
-        else -> surfaceContainer.copy(alpha = 0.9f)
+        !isBlurActive -> MiuixTheme.colorScheme.surfaceContainerHighest
+        // The page's own surface tone in both themes, so the bar reads as the page
+        // rather than as a band of a different colour. (An opaque WHITE in dark theme
+        // measured #FFFFFF on a #0D0E12 page.)
+        else -> MiuixTheme.colorScheme.surface.copy(alpha = 1f)
     }
     // Resting rim light. Without it a flat backdrop leaves the pill with no edge
     // definition whatsoever; the specular edge is what makes glass read as glass
@@ -617,6 +618,8 @@ fun LiquidGlassNavigationBar(
                                     scaleX /= 1f - (v * 0.75f).coerceIn(-0.2f, 0.2f)
                                     scaleY *= 1f - (v * 0.25f).coerceIn(-0.2f, 0.2f)
                                 },
+                                // The example's veil: a flat 0.1 alpha layer over the pill
+                                // at rest, fading out as the press scale takes over.
                                 onDrawSurface = {
                                     val progress = dampedDrag.pressProgress
                                     drawRect(

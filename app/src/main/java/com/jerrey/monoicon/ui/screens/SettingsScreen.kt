@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -157,35 +156,21 @@ fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MiuixTheme.colorScheme.background,
-                                MiuixTheme.colorScheme.surfaceContainer,
-                            ),
-                        ),
-                    )
                     .padding(padding),
             ) {
                 // ── Page content (blur source for the glass bar) ───────
-                // The gradient must sit on the SAME node as the recorder: Miuix's
-                // `layerBackdrop` records only its own node's drawing, so a gradient
-                // painted by an ancestor is simply not in the sampled layer — which is
-                // what left the bar sampling transparent black (the black rim).
+                // The background must sit on the SAME node as the recorder: Miuix's
+                // `layerBackdrop` records only its own node's drawing, so anything an
+                // ancestor paints is not in the sampled layer — which is what left the
+                // bar sampling transparent black (the black rim).
                 //
-                // It is applied BEFORE `verticalScroll`, so the node the recorder sees
-                // is measured with the viewport's bounded height and the gradient fills
-                // the screen; `verticalScroll` still lets the content overflow.
+                // It is a FLAT fill, not the gradient this used to be. The bar floats at
+                // the bottom of the viewport, so a vertical gradient meant it always
+                // sampled the gradient's last stop (`surfaceContainer`) rather than the
+                // page's own colour — which is why an empty page tinted the glass grey.
                 Column(
                     modifier = Modifier
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    MiuixTheme.colorScheme.background,
-                                    MiuixTheme.colorScheme.surfaceContainer,
-                                ),
-                            ),
-                        )
+                        .background(MiuixTheme.colorScheme.background)
                         .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                         .verticalScroll(scrollState)
                         .padding(top = 4.dp, bottom = GlassBarContentInset),
