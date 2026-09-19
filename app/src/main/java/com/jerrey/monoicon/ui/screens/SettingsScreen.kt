@@ -154,13 +154,6 @@ fun SettingsScreen(
                 }
             },
         ) { padding ->
-            // The opaque background and the backdrop recording live on this Box, not
-            // on the scrolling Column. A `verticalScroll` child is measured with an
-            // unbounded height, so `fillMaxSize()` on it is a no-op: the Column only
-            // ever painted its own content height. Any viewport area past the content
-            // — a short page, or a scrolled-to-the-bottom long page — was therefore
-            // never drawn, and the glass bar samples that unpainted area as
-            // transparent black, which shows up as a black rim around the pill.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -172,13 +165,28 @@ fun SettingsScreen(
                             ),
                         ),
                     )
-                    .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                     .padding(padding),
             ) {
-                // ── Page content (scrolls over the recorded background) ─
+                // ── Page content (blur source for the glass bar) ───────
+                // The gradient must sit on the SAME node as the recorder: Miuix's
+                // `layerBackdrop` records only its own node's drawing, so a gradient
+                // painted by an ancestor is simply not in the sampled layer — which is
+                // what left the bar sampling transparent black (the black rim).
+                //
+                // It is applied BEFORE `verticalScroll`, so the node the recorder sees
+                // is measured with the viewport's bounded height and the gradient fills
+                // the screen; `verticalScroll` still lets the content overflow.
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MiuixTheme.colorScheme.background,
+                                    MiuixTheme.colorScheme.surfaceContainer,
+                                ),
+                            ),
+                        )
+                        .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
                         .verticalScroll(scrollState)
                         .padding(top = 4.dp, bottom = GlassBarContentInset),
                 ) {

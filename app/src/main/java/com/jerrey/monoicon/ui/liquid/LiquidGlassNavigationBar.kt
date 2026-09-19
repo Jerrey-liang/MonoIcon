@@ -414,8 +414,9 @@ fun LiquidGlassNavigationBar(
     // Both highlights track device tilt, as in the reference implementation.
     // The bar surface's specular tracks device tilt. The indicator keeps its own,
     // as in the Miuix example and KernelSU.
+    // The bar surface's specular tracks device tilt. The indicator has none (see the
+    // note at its `highlight`), so only this rotation is needed.
     val baseHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = -45f)
-    val pillHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = 90f)
 
     val combinedBackdrop = backdrop?.let { rememberCombinedBackdrop(it, tabsBackdrop) }
 
@@ -598,10 +599,17 @@ fun LiquidGlassNavigationBar(
                                         chromaticAberration = 0.5f,
                                     )
                                 },
-                                // KernelSU and the Miuix example both keep this specular
-                                // here. It is also the outermost layer, so it covers the
-                                // seam where the glass row's own copy of the tabs sits.
-                                highlight = { pillHighlight.value.copy(alpha = dampedDrag.pressProgress) },
+                                // No specular on the indicator. Verified on device: with any
+                                // non-null highlight here the pill gets solid black bands top
+                                // and bottom with a rainbow fringe while pressed, and `null`
+                                // removes them entirely. It is not intensity — scaling the
+                                // alpha to 0.25x did not reduce it (14.6k -> 14.8k near-black
+                                // pixels) — so it is the `BloomStroke` shader itself, which
+                                // `drawHighlight` applies through a native Paint with the
+                                // shader's own blend mode. The bar SURFACE keeps its highlight
+                                // (measured clean); only the indicator's is dropped, and the
+                                // inner shadow below carries the pill's edge instead.
+                                highlight = { null },
                                 layerBlock = {
                                     scaleX = dampedDrag.scaleX
                                     scaleY = dampedDrag.scaleY
