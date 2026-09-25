@@ -1,10 +1,9 @@
 // Copyright 2026, compose-miuix-ui contributors
 // SPDX-License-Identifier: Apache-2.0
 //
-// Ported from the Miuix example's `component/animation/DampedDragAnimation.kt`
-// (https://github.com/compose-miuix-ui/miuix), itself adapted from
-// Kyant0/AndroidLiquidGlass (Apache 2.0). Example-side infrastructure, not part
-// of any published Miuix artifact, so it is vendored here.
+// Mirrored from KernelSU's component/miuix/animation/DampedDragAnimation.kt and
+// component/miuix/modifier/DragGestureInspector.kt at 08a3b087e49227c8a6731c5f1114998b5e25255b.
+// Originally adapted from Kyant0/AndroidLiquidGlass (Apache 2.0).
 //
 // Compose-internal helpers the original used (`fastFirstOrNull`) were replaced
 // with their public equivalents; the animation specs are unchanged.
@@ -17,7 +16,6 @@ import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
@@ -27,12 +25,13 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -119,7 +118,7 @@ internal class DampedDragAnimation(
     fun release() {
         releaseJob?.cancel()
         releaseJob = animationScope.launch {
-            withFrameMillis { }
+            awaitFrame()
             if (value != targetValue) {
                 val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
                 snapshotFlow { valueAnimation.value }.first { abs(it - valueAnimation.targetValue) < threshold }
@@ -132,7 +131,7 @@ internal class DampedDragAnimation(
 
     fun updateValue(value: Float) {
         val targetValue = value.coerceIn(valueRange)
-        animationScope.launch {
+        animationScope.launch(start = CoroutineStart.UNDISPATCHED) {
             valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() }
         }
     }
@@ -168,13 +167,15 @@ internal suspend fun PointerInputScope.inspectDragGestures(
     onDrag: (change: PointerInputChange, dragAmount: Offset) -> Unit,
 ) {
     awaitEachGesture {
-        val initialDown = awaitFirstDown(false, PointerEventPass.Initial)
-        val down = awaitFirstDown(false)
+        val down = awaitFirstDown(
+            requireUnconsumed = false,
+            pass = PointerEventPass.Initial,
+        )
         onDragStart(down)
-        onDrag(initialDown, Offset.Zero)
+        onDrag(down, Offset.Zero)
         val upEvent = drag(
-            pointerId = initialDown.id,
-            onDrag = { onDrag(it, it.positionChange()) },
+            pointerId = down.id,
+            onDrag = { onDrag(it, it.positionChangeIgnoreConsumed()) },
         )
         if (upEvent == null) {
             onDragCancel()
@@ -193,7 +194,6 @@ private suspend inline fun AwaitPointerEventScope.drag(
     var pointer = pointerId
     while (true) {
         val change = awaitDragOrUp(pointer) ?: return null
-        if (change.isConsumed) return null
         if (change.changedToUpIgnoreConsumed()) return change
         onDrag(change)
         pointer = change.id
@@ -205,9 +205,12 @@ private suspend inline fun AwaitPointerEventScope.awaitDragOrUp(
 ): PointerInputChange? {
     var pointer = pointerId
     while (true) {
-        val event = awaitPointerEvent()
+        val event = awaitPointerEvent(PointerEventPass.Initial)
         val dragEvent = event.changes.firstOrNull { it.id == pointer } ?: return null
         if (dragEvent.changedToUpIgnoreConsumed()) {
+            // Compose delivers cancellation as a consumed up event, even in Initial pass.
+            // Keep observing consumed movement, but never commit that synthetic release.
+            if (dragEvent.isConsumed) return null
             val otherDown = event.changes.firstOrNull { it.pressed }
             if (otherDown == null) {
                 return dragEvent

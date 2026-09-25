@@ -1,10 +1,15 @@
 package com.jerrey.monoicon.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -20,15 +25,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.AppStrings
 import com.jerrey.monoicon.ui.LocalStrings
-import com.jerrey.monoicon.ui.liquid.LiquidGlassBarHeight
-import com.jerrey.monoicon.ui.liquid.LiquidGlassBarVisualGap
 import com.jerrey.monoicon.ui.liquid.LiquidGlassNavigationBar
-import top.yukonga.miuix.kmp.blur.layerBackdrop
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
 import top.yukonga.miuix.kmp.basic.Icon
@@ -36,6 +39,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -44,15 +48,6 @@ import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * Settings host (Phase 13).
- *
- * Three Miuix tabs — 概览 / 图标样式 / 模块设置 — whose content scrolls behind a
- * floating **liquid-glass** bottom navigation bar (see
- * [LiquidGlassNavigationBar]: recorded backdrop + blur + vibrancy + lens
- * refraction, with drag-to-select tabs). The overview tab opens the runtime-log
- * and about pages as secondary screens, which hide the bar.
- */
 /** Bottom navigation tabs, in bar order (概览 / 图标样式 / 模块设置). */
 private enum class MainTab(val icon: ImageVector) {
     OVERVIEW(MiuixIcons.Regular.Home),
@@ -69,42 +64,27 @@ private fun MainTab.label(strings: AppStrings): String = when (this) {
 
 private enum class Overlay { NONE, LOGS, ABOUT }
 
-// ── Glass bottom bar footprint (single source for the content inset) ──────────
-// The pill is a fixed design size, so its footprint is derived from the same
-// numbers the bar draws with rather than measured at runtime.
-private val GlassBarBreathingRoom = 4.dp
-
-/**
- * Bottom spacing the scroll content must reserve so the last item is never
- * permanently hidden behind the floating bar: the drawn pill height plus the
- * visual gap the bar floats above the Scaffold's content edge, plus breathing
- * room.
- *
- * The Scaffold owns the system navigation inset — this constant must NOT
- * include it, and the bar must not add `navigationBarsPadding()` either.
- */
-private val GlassBarContentInset =
-    LiquidGlassBarHeight + LiquidGlassBarVisualGap + GlassBarBreathingRoom
-
 @Composable
 fun SettingsScreen(
     variant: String,
     onVariantChange: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val layoutDirection = LocalLayoutDirection.current
     var language by remember { mutableStateOf(AppLanguage.fromId(ConfigManager.getLanguageFromUi())) }
     val strings = stringsFor(language, systemPrefersChinese(context))
 
     CompositionLocalProvider(LocalStrings provides strings) {
         var tab by remember { mutableStateOf(MainTab.OVERVIEW) }
         var overlay by remember { mutableStateOf(Overlay.NONE) }
-        val backdrop = rememberLayerBackdrop()
-        // 玻璃（含 source 侧整屏图层录制）延迟挂载：每进程首次 AGSL 编译 + 首帧图层录制开销很大
-        var glassReady by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(150)
-            glassReady = true
+        // KernelSU's page source; the bottomBar consumer is outside its subtree.
+        val backgroundColor = MiuixTheme.colorScheme.surface
+        val backdrop = rememberLayerBackdrop {
+            drawRect(backgroundColor)
+            drawContent()
         }
+        val barBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            .let { inset -> if (inset != 0.dp) 8.dp + inset else 28.dp }
 
         BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
 
@@ -132,6 +112,7 @@ fun SettingsScreen(
         }
 
         Scaffold(
+            containerColor = backgroundColor,
             topBar = {
                 // Main tabs carry their own large left-aligned title (Liquid
                 // Glass large-title pattern); secondary pages need the bar for
@@ -152,28 +133,39 @@ fun SettingsScreen(
                     )
                 }
             },
+            // Never move this consumer inside layerBackdrop(backdrop): recording
+            // its own RenderNode would create a recursive drawing graph.
+            bottomBar = {
+                if (overlay == Overlay.NONE) {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                        LiquidGlassNavigationBar(
+                            items = MainTab.entries.map { NavigationItem(icon = it.icon, label = it.label(strings)) },
+                            selectedIndex = tab.ordinal,
+                            onItemClick = { tab = MainTab.entries[it] },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(start = 28.dp, end = 28.dp, bottom = barBottomPadding),
+                        )
+                    }
+                }
+            },
         ) { padding ->
+            // The source extends behind the bar. Reserve its measured height only
+            // at the end of the scrolling content, never outside the recorder.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(
+                        start = padding.calculateStartPadding(layoutDirection),
+                        top = padding.calculateTopPadding(),
+                        end = padding.calculateEndPadding(layoutDirection),
+                    )
+                    .layerBackdrop(backdrop),
             ) {
-                // ── Page content (blur source for the glass bar) ───────
-                // The background must sit on the SAME node as the recorder: Miuix's
-                // `layerBackdrop` records only its own node's drawing, so anything an
-                // ancestor paints is not in the sampled layer — which is what left the
-                // bar sampling transparent black (the black rim).
-                //
-                // It is a FLAT fill, not the gradient this used to be. The bar floats at
-                // the bottom of the viewport, so a vertical gradient meant it always
-                // sampled the gradient's last stop (`surfaceContainer`) rather than the
-                // page's own colour — which is why an empty page tinted the glass grey.
                 Column(
                     modifier = Modifier
-                        .background(MiuixTheme.colorScheme.background)
-                        .then(if (glassReady) Modifier.layerBackdrop(backdrop) else Modifier)
+                        .fillMaxSize()
                         .verticalScroll(scrollState)
-                        .padding(top = 4.dp, bottom = GlassBarContentInset),
+                        .padding(top = 4.dp, bottom = padding.calculateBottomPadding()),
                 ) {
                     when (overlay) {
                         Overlay.LOGS -> {
@@ -204,18 +196,6 @@ fun SettingsScreen(
                             )
                         }
                     }
-                }
-
-                // ── Liquid-glass bottom navigation ─────────────────────
-                if (overlay == Overlay.NONE) {
-                    LiquidGlassNavigationBar(
-                        items = MainTab.entries.map { NavigationItem(icon = it.icon, label = it.label(strings)) },
-                        selectedIndex = tab.ordinal,
-                        onItemClick = { tab = MainTab.entries[it] },
-                        backdrop = backdrop,
-                        isBlurActive = glassReady,
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
                 }
             }
         }
