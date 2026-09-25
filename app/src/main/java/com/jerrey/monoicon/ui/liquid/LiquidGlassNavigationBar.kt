@@ -136,10 +136,10 @@ private fun rememberQuantizedGravityAngle(): State<Float> {
 @Composable
 private fun rememberGravityRotatedHighlight(
     base: Highlight,
+    angle: State<Float>,
     extraDegrees: Float = 0f,
 ): State<Highlight> {
     val baseStyle = base.style as BloomStroke
-    val angle = rememberQuantizedGravityAngle()
     return remember(angle, base, extraDegrees) {
         derivedStateOf {
             val basePrimary = baseStyle.primaryLight
@@ -337,8 +337,10 @@ fun LiquidGlassNavigationBar(
         )
     }
 
-    val baseHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = -45f)
-    val pillHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = 90f)
+    // Both lights use the same sensor subscription and quantized gravity sample.
+    val gravityAngle = rememberQuantizedGravityAngle()
+    val baseHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, gravityAngle, extraDegrees = -45f)
+    val pillHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, gravityAngle, extraDegrees = 90f)
 
     val combinedBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
 

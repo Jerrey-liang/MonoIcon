@@ -1,6 +1,9 @@
 package com.jerrey.monoicon
 
 import android.content.res.Configuration
+import androidx.activity.BackEventCompat
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedDispatcher
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
@@ -19,16 +22,21 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.AppStrings
@@ -93,6 +101,213 @@ class SettingsScreenComposeTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("MonoIcon").assertIsDisplayed()
     }
+
+    @Test
+    fun pageTransitionsFollowTabOrderInLtr() {
+        exercisePageTransitionDirections(LayoutDirection.Ltr)
+    }
+
+    @Test
+    fun pageTransitionsMirrorTabOrderInRtl() {
+        exercisePageTransitionDirections(LayoutDirection.Rtl)
+    }
+
+    @Test
+    fun rapidTabChangesKeepOnlyTheLastRequestedPage() {
+        val strings = currentStrings()
+
+        composeRule.setContent { MonoIconApp() }
+        assertNavigation(strings, selectedIndex = 0)
+
+        composeRule.mainClock.autoAdvance = false
+        try {
+            // Interrupt each transition before it finishes, including reversals.
+            listOf(strings.iconStyle, strings.moduleSettings, strings.overview, strings.iconStyle)
+                .forEach { label ->
+                    tab(label).performClick()
+                    composeRule.mainClock.advanceTimeBy(64)
+                    composeRule.waitForIdle()
+                }
+            composeRule.mainClock.advanceTimeBy(1_000)
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+        }
+
+        assertNavigation(strings, selectedIndex = 1)
+    }
+
+    @Test
+    fun secondaryPagesReturnToOverviewThroughTopBarAndSystemBack() {
+        val strings = currentStrings()
+
+        composeRule.setContent { MonoIconApp() }
+        assertNavigation(strings, selectedIndex = 0)
+
+        listOf(strings.logs to strings.logsRefresh, strings.about to strings.aboutBody)
+            .forEach { (entry, marker) ->
+                composeRule.onNodeWithText(entry).performScrollTo().performClick()
+                composeRule.onNodeWithText(marker).assertIsDisplayed()
+                composeRule.onAllNodes(isTab).assertCountEquals(0)
+
+                composeRule.onNodeWithContentDescription(strings.back).performClick()
+                assertNavigation(strings, selectedIndex = 0)
+                composeRule.onNodeWithText(marker).assertDoesNotExist()
+
+                composeRule.onNodeWithText(entry).performScrollTo().performClick()
+                composeRule.onNodeWithText(marker).assertIsDisplayed()
+                pressBack()
+                assertNavigation(strings, selectedIndex = 0)
+                composeRule.onNodeWithText(marker).assertDoesNotExist()
+            }
+    }
+
+    @Test
+    fun predictiveBackCanCancelThenCommitWithoutChangingItsDestination() {
+        val strings = currentStrings()
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                MonoIconApp()
+            }
+        }
+        assertNavigation(strings, selectedIndex = 0)
+        val overviewX = pageX("MonoIcon")
+        composeRule.onNodeWithText(strings.about).performScrollTo().performClick()
+        composeRule.onNodeWithText(strings.aboutBody).assertIsDisplayed()
+        val aboutX = pageX(strings.aboutBody)
+
+        lateinit var backDispatcher: OnBackPressedDispatcher
+        composeRule.runOnUiThread {
+            val activity = ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(Stage.RESUMED)
+                .filterIsInstance<ComponentActivity>()
+                .single()
+            backDispatcher = activity.onBackPressedDispatcher
+        }
+
+        fun event(progress: Float) = BackEventCompat(
+            touchX = 0f,
+            touchY = 0f,
+            progress = progress,
+            swipeEdge = BackEventCompat.EDGE_LEFT,
+        )
+
+        fun progressTo(progress: Float) {
+            composeRule.runOnUiThread { backDispatcher.dispatchOnBackProgressed(event(progress)) }
+            // Seeking introduces the destination into composition before its
+            // animated coordinates can be measured; allow those frames to run.
+            composeRule.mainClock.advanceTimeBy(64)
+            composeRule.waitForIdle()
+        }
+
+        composeRule.mainClock.autoAdvance = false
+        try {
+            composeRule.runOnUiThread { backDispatcher.dispatchOnBackStarted(event(0f)) }
+            progressTo(0.2f)
+            val firstAboutX = pageX(strings.aboutBody)
+            val firstOverviewX = pageX("MonoIcon")
+
+            progressTo(0.45f)
+            composeRule.onNodeWithText(strings.aboutBody).assertExists()
+            composeRule.onNodeWithText("MonoIcon").assertExists()
+            assertTrue("Back moves the current About page right", pageX(strings.aboutBody) > aboutX + 1f)
+            assertTrue("Back reveals Overview from the left", pageX("MonoIcon") < overviewX - 1f)
+            assertTrue("About follows increasing back progress", pageX(strings.aboutBody) > firstAboutX + 1f)
+            assertTrue("Overview follows increasing back progress", pageX("MonoIcon") > firstOverviewX + 1f)
+            // The preview must not commit navigation or expose the primary bar.
+            composeRule.onAllNodes(isTab).assertCountEquals(0)
+
+            composeRule.runOnUiThread { backDispatcher.dispatchOnBackCancelled() }
+            composeRule.mainClock.advanceTimeBy(1_000)
+            composeRule.waitForIdle()
+            composeRule.onNodeWithText(strings.aboutBody).assertIsDisplayed()
+            composeRule.onNodeWithText("MonoIcon").assertDoesNotExist()
+            composeRule.onAllNodes(isTab).assertCountEquals(0)
+            assertEquals("Cancelling restores About's position", aboutX, pageX(strings.aboutBody), 1f)
+
+            // A fresh gesture must still work after cancellation and commit to
+            // the same Overview destination as the toolbar/system back paths.
+            composeRule.runOnUiThread { backDispatcher.dispatchOnBackStarted(event(0f)) }
+            progressTo(0.45f)
+            composeRule.runOnUiThread { backDispatcher.onBackPressed() }
+            composeRule.mainClock.advanceTimeBy(1_000)
+            assertNavigation(strings, selectedIndex = 0)
+            composeRule.onNodeWithText(strings.aboutBody).assertDoesNotExist()
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+        }
+    }
+
+    /**
+     * Check live page geometry with the animation clock paused. Both outgoing
+     * and incoming content must move on successive frames; merely changing the
+     * selected tab or crossfading stationary pages cannot satisfy this test.
+     */
+    private fun exercisePageTransitionDirections(direction: LayoutDirection) {
+        val strings = currentStrings()
+        val labels = listOf(strings.overview, strings.iconStyle, strings.moduleSettings)
+        val markers = listOf("MonoIcon", strings.circleIcons, strings.masterSwitch)
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                MonoIconApp()
+            }
+        }
+
+        // Measure each page's own settled position, avoiding assumptions about
+        // gutters, translated text widths or RTL alignment.
+        val settledX = markers.indices.map { index ->
+            tab(labels[index]).performClick()
+            composeRule.waitForIdle()
+            pageX(markers[index])
+        }
+        tab(strings.overview).performClick()
+        assertNavigation(strings, selectedIndex = 0)
+
+        composeRule.mainClock.autoAdvance = false
+        try {
+            listOf(0 to 1, 1 to 2, 2 to 1, 1 to 0).forEach { (from, to) ->
+                val forwardSign = if (to > from) 1f else -1f
+                val directionSign = if (direction == LayoutDirection.Ltr) 1f else -1f
+                val enteringSide = forwardSign * directionSign
+
+                tab(labels[to]).performClick()
+                composeRule.mainClock.advanceTimeBy(64)
+                composeRule.waitForIdle()
+                val outgoingX = pageX(markers[from])
+                val incomingX = pageX(markers[to])
+                assertTrue(
+                    "Outgoing page $from must slide opposite to entry for $direction",
+                    (outgoingX - settledX[from]) * enteringSide < -1f,
+                )
+                assertTrue(
+                    "Incoming page $to must enter from the navigation side for $direction",
+                    (incomingX - settledX[to]) * enteringSide > 1f,
+                )
+
+                composeRule.mainClock.advanceTimeBy(48)
+                composeRule.waitForIdle()
+                assertTrue(
+                    "Outgoing page $from must continue moving for $direction",
+                    (pageX(markers[from]) - outgoingX) * enteringSide < -1f,
+                )
+                assertTrue(
+                    "Incoming page $to must continue moving for $direction",
+                    (pageX(markers[to]) - incomingX) * enteringSide < -1f,
+                )
+
+                composeRule.mainClock.advanceTimeBy(1_000)
+                assertNavigation(strings, selectedIndex = to)
+            }
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+        }
+    }
+
+    // Unclipped coordinates still describe a page while it crosses the viewport
+    // edge; clipped bounds can collapse to zero partway through a valid slide.
+    private fun pageX(marker: String): Float =
+        composeRule.onNodeWithText(marker).fetchSemanticsNode().positionInRoot.x
 
     @Test
     fun liquidBarLightLtrMaintainsNavigationAcrossTouchAndKeyboard() {

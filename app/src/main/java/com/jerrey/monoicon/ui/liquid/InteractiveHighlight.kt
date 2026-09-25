@@ -38,6 +38,7 @@ internal class InteractiveHighlight(
     val offset: Offset get() = positionAnimation.value - startPosition
 
     private val spotShader = RuntimeShader(SPOT_SHADER)
+    private val spotBrush = ShaderBrush(spotShader)
 
     val modifier: Modifier = Modifier.drawWithContent {
         val progress = pressProgressAnimation.value
@@ -57,7 +58,7 @@ internal class InteractiveHighlight(
             spotShader.setFloatUniform("radius", radius)
             spotShader.setFloatUniform("position", center.x, center.y)
             drawRect(
-                brush = ShaderBrush(spotShader),
+                brush = spotBrush,
                 blendMode = BlendMode.Plus,
             )
         }

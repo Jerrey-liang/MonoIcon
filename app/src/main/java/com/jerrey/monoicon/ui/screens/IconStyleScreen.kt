@@ -2,8 +2,6 @@ package com.jerrey.monoicon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -57,135 +55,136 @@ fun IconStyleScreen(
     var restarting by remember { mutableStateOf(false) }
     var restartHint by remember { mutableStateOf(false) }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // Same large-title behaviour as the secondary pages: the host keeps its top bar
-        // title hidden until this title has scrolled out of sight.
-        if (onTitleBottomPositioned != null) {
-            CollapsibleLargeTitle(text = strings.iconStyle, onBottomPositioned = onTitleBottomPositioned)
-        } else {
-            LargeScreenTitle(text = strings.iconStyle)
-        }
-
-        Card(modifier = Modifier.padding(horizontal = 16.dp)) {
-            BasicComponent(
-                title = strings.circleIcons,
-                summary = strings.circleIconsSummary,
-                endActions = {
-                    Switch(
-                        checked = circleIconsEnabled,
-                        onCheckedChange = { value ->
-                            circleIconsEnabled = value
-                            restartHint = true
-                            ConfigManager.setCircleIconsEnabled(value)
-                            ModuleLogs.append("Settings", "circleIcons=$value")
-                        },
-                    )
-                },
-            )
-            BasicComponent(
-                title = strings.lawnicons,
-                summary = strings.lawniconsSummary,
-                endActions = {
-                    Switch(
-                        checked = lawniconsEnabled,
-                        onCheckedChange = { value ->
-                            lawniconsEnabled = value
-                            ConfigManager.setLawniconsEnabled(value)
-                            ModuleLogs.append("Settings", "lawnicons=$value")
-                        },
-                    )
-                },
-            )
-            BasicComponent(
-                title = strings.notificationIcons,
-                summary = strings.notificationIconsSummary,
-                endActions = {
-                    Switch(
-                        checked = notificationIconsEnabled,
-                        onCheckedChange = { value ->
-                            notificationIconsEnabled = value
-                            restartHint = true
-                            ConfigManager.setNotificationIconsEnabled(value)
-                            ModuleLogs.append("Settings", "notificationIcons=$value")
-                        },
-                    )
-                },
-            )
-        }
-
-        SmallTitle(text = strings.colorVariant)
-        Card(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text(
-                text = strings.colorVariantSummary,
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
-            )
-            Material2025ColorEngine.VariantId.entries.forEach { entry ->
+    PageContent(
+        title = strings.iconStyle,
+        modifier = modifier,
+        onTitleBottomPositioned = onTitleBottomPositioned,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(PageSpacing.betweenCards)) {
+            Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
                 BasicComponent(
-                    title = entry.label,
-                    summary = if (entry.id == "tonal_spot") strings.variantDefaultHint else null,
+                    title = strings.circleIcons,
+                    summary = strings.circleIconsSummary,
                     endActions = {
-                        Checkbox(
-                            state = ToggleableState(variant == entry.id),
-                            onClick = {
-                                onVariantChange(entry.id)
+                        Switch(
+                            checked = circleIconsEnabled,
+                            onCheckedChange = { value ->
+                                circleIconsEnabled = value
                                 restartHint = true
-                                ConfigManager.setVariantId(entry.id)
-                                ModuleLogs.append("Settings", "variant=${entry.id}")
+                                ConfigManager.setCircleIconsEnabled(value)
+                                ModuleLogs.append("Settings", "circleIcons=$value")
                             },
                         )
                     },
-                    onClick = {
-                        onVariantChange(entry.id)
-                        restartHint = true
-                        ConfigManager.setVariantId(entry.id)
-                        ModuleLogs.append("Settings", "variant=${entry.id}")
+                )
+                BasicComponent(
+                    title = strings.lawnicons,
+                    summary = strings.lawniconsSummary,
+                    endActions = {
+                        Switch(
+                            checked = lawniconsEnabled,
+                            onCheckedChange = { value ->
+                                lawniconsEnabled = value
+                                ConfigManager.setLawniconsEnabled(value)
+                                ModuleLogs.append("Settings", "lawnicons=$value")
+                            },
+                        )
+                    },
+                )
+                BasicComponent(
+                    title = strings.notificationIcons,
+                    summary = strings.notificationIconsSummary,
+                    endActions = {
+                        Switch(
+                            checked = notificationIconsEnabled,
+                            onCheckedChange = { value ->
+                                notificationIconsEnabled = value
+                                restartHint = true
+                                ConfigManager.setNotificationIconsEnabled(value)
+                                ModuleLogs.append("Settings", "notificationIcons=$value")
+                            },
+                        )
                     },
                 )
             }
-        }
 
-        SmallTitle(text = strings.scopeRestart)
-        Card(modifier = Modifier.padding(horizontal = 16.dp)) {
-            BasicComponent(
-                title = strings.scopeRestart,
-                summary = strings.scopeRestartSummary,
-                endActions = {
-                    Button(
-                        onClick = {
-                            if (restarting) return@Button
-                            restarting = true
-                            scope.launch {
-                                val targets = XposedState.snapshot().scope
-                                    .ifEmpty { XposedState.REQUIRED_SCOPE }
-                                val ok = withContext(Dispatchers.IO) {
-                                    restartScopedApps(context, targets)
-                                }
-                                android.widget.Toast.makeText(
-                                    context,
-                                    if (ok) strings.restartDone else strings.restartFailed,
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                                restarting = false
-                            }
+            SmallTitle(text = strings.colorVariant)
+            Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
+                Text(
+                    text = strings.colorVariantSummary,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(
+                        start = PageSpacing.cardStart,
+                        top = 12.dp,
+                        bottom = 4.dp,
+                    ),
+                )
+                Material2025ColorEngine.VariantId.entries.forEach { entry ->
+                    BasicComponent(
+                        title = entry.label,
+                        summary = if (entry.id == "tonal_spot") strings.variantDefaultHint else null,
+                        endActions = {
+                            Checkbox(
+                                state = ToggleableState(variant == entry.id),
+                                onClick = {
+                                    onVariantChange(entry.id)
+                                    restartHint = true
+                                    ConfigManager.setVariantId(entry.id)
+                                    ModuleLogs.append("Settings", "variant=${entry.id}")
+                                },
+                            )
                         },
-                        enabled = !restarting,
-                    ) {
-                        Text(text = if (restarting) strings.restarting else strings.restart)
-                    }
-                },
-            )
-        }
+                        onClick = {
+                            onVariantChange(entry.id)
+                            restartHint = true
+                            ConfigManager.setVariantId(entry.id)
+                            ModuleLogs.append("Settings", "variant=${entry.id}")
+                        },
+                    )
+                }
+            }
 
-        if (restartHint) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = strings.restartHint,
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
+            SmallTitle(text = strings.scopeRestart)
+            Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
+                BasicComponent(
+                    title = strings.scopeRestart,
+                    summary = strings.scopeRestartSummary,
+                    endActions = {
+                        Button(
+                            onClick = {
+                                if (restarting) return@Button
+                                restarting = true
+                                scope.launch {
+                                    val targets = XposedState.snapshot().scope
+                                        .ifEmpty { XposedState.REQUIRED_SCOPE }
+                                    val ok = withContext(Dispatchers.IO) {
+                                        restartScopedApps(context, targets)
+                                    }
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        if (ok) strings.restartDone else strings.restartFailed,
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                    restarting = false
+                                }
+                            },
+                            enabled = !restarting,
+                        ) {
+                            Text(text = if (restarting) strings.restarting else strings.restart)
+                        }
+                    },
+                )
+            }
+
+            if (restartHint) {
+                Text(
+                    text = strings.restartHint,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = PageSpacing.gutter),
+                )
+            }
         }
     }
 }

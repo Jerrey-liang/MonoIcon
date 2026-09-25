@@ -80,6 +80,7 @@ class ColoredMonochromeDrawable(
     /** Cached circle clip for the current bounds (null = no clipping). */
     @Volatile private var clipPath: Path? = null
     @Volatile private var clipBounds: Rect? = null
+    @Volatile private var contentBounds: Rect? = null
 
     init {
         composite = buildComposite(color, plateColor)
@@ -117,8 +118,11 @@ class ColoredMonochromeDrawable(
      * around it stays **transparent** (wallpaper shows through) exactly like a
      * Pixel icon. [IconShape.SQUIRCLE] keeps the previous full-bleed behavior.
      */
-    private fun contentBoundsFor(target: Rect): Rect =
-        if (sourceShape == IconShape.CIRCLE) CircleIconShape.insetBounds(target) else target
+    private fun contentBoundsFor(target: Rect): Rect {
+        if (sourceShape != IconShape.CIRCLE) return target
+        if (clipBounds == target) contentBounds?.let { return it }
+        return CircleIconShape.insetBounds(target).also { contentBounds = it }
+    }
 
     /**
      * Circle clip for the circle shape (applied to the already inset

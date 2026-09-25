@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import com.jerrey.monoicon.BuildConfig
+import com.jerrey.monoicon.cache.MonochromeCache
 import com.jerrey.monoicon.logging.logd
 import java.io.InputStream
 import java.util.zip.ZipFile
@@ -211,7 +212,29 @@ object LawniconsAssetSource {
     fun lookupMask(identity: String?, size: Int): Bitmap? {
         if (unavailable) return null
         val loaded = bundle ?: return null
-        return lookupMask(identity, size, loaded.index(), loaded.aliases()) { loaded.open(it) }
+        return lookupMask(identity, size, loaded, MonochromeCache.shared)
+    }
+
+    /**
+     * Bundle PNGs are immutable and independent of app resources, shape and
+     * colours. Look up their rasterized masks before opening the APK or decoding
+     * a PNG; the strategy's content fingerprint otherwise runs only afterwards.
+     * Reuse the existing byte budget and clearAll lifecycle, and share aliases
+     * that resolve to the same asset. Returned masks must be treated as read-only.
+     */
+    internal fun lookupMask(
+        identity: String?,
+        size: Int,
+        loaded: LawniconsBundle,
+        cache: MonochromeCache,
+    ): Bitmap? {
+        if (size <= 0) return null
+        val asset = resolveAsset(identity, loaded.index(), loaded.aliases()) ?: return null
+        val cacheKey = "lawnicons|${loaded.version()}|$asset|$size"
+        cache.get(cacheKey)?.takeUnless { it.isRecycled }?.let { return it }
+        val mask = decodeMask(asset, size) { loaded.open(it) } ?: return null
+        cache.put(cacheKey, mask)
+        return mask
     }
 
     /**
@@ -226,6 +249,14 @@ object LawniconsAssetSource {
     ): Bitmap? {
         if (size <= 0) return null
         val asset = resolveAsset(identity, index, aliases) ?: return null
+        return decodeMask(asset, size, reader)
+    }
+
+    private fun decodeMask(
+        asset: String,
+        size: Int,
+        reader: (String) -> InputStream?,
+    ): Bitmap? {
         var source: Bitmap? = null
         return try {
             val input = reader(asset) ?: return null

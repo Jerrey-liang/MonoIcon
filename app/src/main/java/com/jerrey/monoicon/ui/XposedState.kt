@@ -1,6 +1,7 @@
 package com.jerrey.monoicon.ui
 
 import android.content.Context
+import android.content.pm.PackageInfo
 import android.content.res.Configuration
 import android.os.LocaleList
 import com.jerrey.monoicon.config.ConfigManager
@@ -51,8 +52,7 @@ data class XposedState(
         val REQUIRED_SCOPE = listOf("com.miui.home", "com.android.systemui")
 
         /** Reads the current status from the bound framework service. */
-        fun snapshot(): XposedState {
-            val service: XposedService? = ConfigManager.xposedService()
+        fun snapshot(service: XposedService? = ConfigManager.xposedService()): XposedState {
             if (service == null) return UNAVAILABLE
             return try {
                 XposedState(
@@ -66,6 +66,45 @@ data class XposedState(
             } catch (_: Throwable) {
                 UNAVAILABLE
             }
+        }
+    }
+}
+
+/**
+ * One application MonoIcon is scoped to, with the data the overview page shows.
+ *
+ * [versionName] comes from the installed package's [PackageInfo] — it is never a
+ * constant in this module. `null` means the package is not installed (or the
+ * query failed), which the UI renders as [VERSION_UNAVAILABLE].
+ */
+data class ScopeApp(
+    val packageName: String,
+    val versionName: String?,
+) {
+    /** `Version 16`, or [VERSION_UNAVAILABLE] when the package cannot be queried. */
+    fun versionLabel(prefix: String): String =
+        versionName?.takeIf { it.isNotBlank() }?.let { "$prefix $it" } ?: VERSION_UNAVAILABLE
+
+    companion object {
+        const val VERSION_UNAVAILABLE = "—"
+
+        /**
+         * Resolves the real version of every package in [packages] through the
+         * PackageManager of [context]. Blocking — call from a background thread.
+         */
+        fun load(context: Context, packages: List<String>): List<ScopeApp> = packages.map { pkg ->
+            ScopeApp(packageName = pkg, versionName = installedVersion(context, pkg))
+        }
+
+        /** `versionName` of the installed [pkg], or null when unavailable. */
+        private fun installedVersion(context: Context, pkg: String): String? = try {
+            val info: PackageInfo = context.packageManager.getPackageInfo(pkg, 0)
+            // Prefer the human-readable version, falling back to the monotonically
+            // increasing versionCode when an app ships no versionName.
+            info.versionName?.takeIf { it.isNotBlank() }
+                ?: info.longVersionCode.takeIf { it > 0 }?.toString()
+        } catch (_: Throwable) {
+            null
         }
     }
 }

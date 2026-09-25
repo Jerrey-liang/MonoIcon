@@ -250,6 +250,45 @@ class CircleIconShapeInstrumentedTest {
         )
     }
 
+    @Test
+    fun reusedDrawableGeometryMatchesFreshRenderingAfterBoundsChanges() {
+        val mask = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.WHITE)
+        }
+        val positions = listOf(
+            Rect(0, 0, size, size),
+            Rect(0, 0, size, size),
+            Rect(24, 40, 240, 296),
+            Rect(72, 32, 328, 192),
+            Rect(0, 0, size, size),
+        )
+        try {
+            IconShape.entries.forEach { shape ->
+                // A transparent plate keeps this geometry regression independent
+                // of live wallpaper/dynamic-colour changes in the test process.
+                val reused = ColoredMonochromeDrawable(mask, GLYPH, 0, shape)
+                positions.forEach { bounds ->
+                    val actual = renderAt(reused, bounds)
+                    val expected = renderAt(ColoredMonochromeDrawable(mask, GLYPH, 0, shape), bounds)
+                    try {
+                        assertTrue("$shape bounds=$bounds", actual.sameAs(expected))
+                    } finally {
+                        actual.recycle()
+                        expected.recycle()
+                    }
+                }
+            }
+        } finally {
+            mask.recycle()
+        }
+    }
+
+    private fun renderAt(drawable: ColoredMonochromeDrawable, bounds: Rect): Bitmap =
+        Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
+            drawable.bounds = bounds
+            drawable.draw(Canvas(bitmap))
+        }
+
     /** Renders the drawable at [size]² with a 1/3-sized glyph in the middle. */
     private fun render(shape: IconShape): Bitmap {
         val mask = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)

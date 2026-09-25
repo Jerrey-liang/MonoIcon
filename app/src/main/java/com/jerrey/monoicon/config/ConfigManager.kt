@@ -9,8 +9,12 @@ import com.jerrey.monoicon.theme.render.IconShape
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Runtime configuration bridge between the settings UI and the hook runtime
@@ -56,8 +60,12 @@ object ConfigManager {
 
     // ── UI process side (module's own process) ────────────────────────
 
-    @Volatile
-    private var remoteService: XposedService? = null
+    private val mutableServiceState = MutableStateFlow<XposedService?>(null)
+
+    /** The current service, updated by framework bind/death events without polling. */
+    val serviceState: StateFlow<XposedService?> = mutableServiceState.asStateFlow()
+
+    private val remoteService: XposedService? get() = mutableServiceState.value
     private var fallbackPrefs: SharedPreferences? = null
 
     /** Guards the one-shot UI-side initialization (MainActivity may be recreated). */
@@ -81,13 +89,12 @@ object ConfigManager {
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             XposedServiceHelper.registerListener(object : XposedServiceHelper.OnServiceListener {
                 override fun onServiceBind(service: XposedService) {
-                    remoteService = service
+                    mutableServiceState.value = service
                     android.util.Log.i(TAG, "XposedService bound")
                 }
 
                 override fun onServiceDied(service: XposedService) {
-                    if (remoteService === service) {
-                        remoteService = null
+                    if (mutableServiceState.compareAndSet(service, null)) {
                         android.util.Log.i(TAG, "XposedService died")
                     }
                 }
@@ -193,13 +200,11 @@ object ConfigManager {
 
     private var remotePrefsProvider: (() -> SharedPreferences?)? = null
     private val cachedEnabled = AtomicBoolean(true)
-    @Volatile
-    private var lastRefreshMs = 0L
+    private val lastRefreshMs = AtomicLong(0L)
 
     // ── Lawnicons bundle toggle (Phase 8) ──────────────────────────────
     private val cachedLawniconsEnabled = AtomicBoolean(true)
-    @Volatile
-    private var lastLawniconsRefreshMs = 0L
+    private val lastLawniconsRefreshMs = AtomicLong(0L)
     @Volatile
     private var lastLawniconsValue = true
 
@@ -207,8 +212,7 @@ object ConfigManager {
     // Default OFF: the shape feature changes the desktop look globally, so it
     // stays opt-in and the code is a no-op until the user enables it.
     private val cachedCircleIconsEnabled = AtomicBoolean(false)
-    @Volatile
-    private var lastCircleRefreshMs = 0L
+    private val lastCircleRefreshMs = AtomicLong(0L)
     @Volatile
     private var lastCircleValue = false
 
@@ -216,8 +220,7 @@ object ConfigManager {
     // Default ON: notification app icons follow the desktop look; the switch
     // exists as an escape hatch because SystemUI is a critical process.
     private val cachedNotificationIconsEnabled = AtomicBoolean(true)
-    @Volatile
-    private var lastNotificationIconsRefreshMs = 0L
+    private val lastNotificationIconsRefreshMs = AtomicLong(0L)
     @Volatile
     private var lastNotificationIconsValue = true
 
@@ -229,16 +232,17 @@ object ConfigManager {
         try {
             remotePrefsProvider = { getRemotePrefs(api) }
             cachedEnabled.set(readRemote())
-            lastRefreshMs = SystemClock.elapsedRealtime()
+            val now = SystemClock.elapsedRealtime()
+            lastRefreshMs.set(now)
             cachedLawniconsEnabled.set(readRemoteLawnicons())
             lastLawniconsValue = cachedLawniconsEnabled.get()
-            lastLawniconsRefreshMs = lastRefreshMs
+            lastLawniconsRefreshMs.set(now)
             cachedCircleIconsEnabled.set(readRemoteCircleIcons())
             lastCircleValue = cachedCircleIconsEnabled.get()
-            lastCircleRefreshMs = lastRefreshMs
+            lastCircleRefreshMs.set(now)
             cachedNotificationIconsEnabled.set(readRemoteNotificationIcons())
             lastNotificationIconsValue = cachedNotificationIconsEnabled.get()
-            lastNotificationIconsRefreshMs = lastRefreshMs
+            lastNotificationIconsRefreshMs.set(now)
             android.util.Log.i(
                 TAG,
                 "hook-side init, enabled=${cachedEnabled.get()} lawnicons=${cachedLawniconsEnabled.get()} " +
@@ -254,12 +258,17 @@ object ConfigManager {
      * once per [REFRESH_INTERVAL_MS]. Pure memory read on the fast path.
      */
     fun isEnabled(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastRefreshMs >= REFRESH_INTERVAL_MS) {
-            lastRefreshMs = now
+        if (claimRefresh(lastRefreshMs)) {
             cachedEnabled.set(readRemote())
         }
         return cachedEnabled.get()
+    }
+
+    /** Only one hook thread refreshes a given flag in each existing time window. */
+    private fun claimRefresh(lastRefresh: AtomicLong): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        val previous = lastRefresh.get()
+        return now - previous >= REFRESH_INTERVAL_MS && lastRefresh.compareAndSet(previous, now)
     }
 
     private fun getRemotePrefs(api: XposedInterface): SharedPreferences? = try {
@@ -378,9 +387,7 @@ object ConfigManager {
      * once — otherwise the change would only take effect for new icons.
      */
     fun isLawniconsEnabled(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastLawniconsRefreshMs >= REFRESH_INTERVAL_MS) {
-            lastLawniconsRefreshMs = now
+        if (claimRefresh(lastLawniconsRefreshMs)) {
             val value = readRemoteLawnicons()
             if (value != lastLawniconsValue) {
                 lastLawniconsValue = value
@@ -452,9 +459,7 @@ object ConfigManager {
      * them — the settings UI therefore shows the restart hint.
      */
     fun isCircleIconsEnabled(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastCircleRefreshMs >= REFRESH_INTERVAL_MS) {
-            lastCircleRefreshMs = now
+        if (claimRefresh(lastCircleRefreshMs)) {
             val value = readRemoteCircleIcons()
             if (value != lastCircleValue) {
                 lastCircleValue = value
@@ -529,9 +534,7 @@ object ConfigManager {
      * settings UI shows the restart hint.
      */
     fun isNotificationIconsEnabled(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastNotificationIconsRefreshMs >= REFRESH_INTERVAL_MS) {
-            lastNotificationIconsRefreshMs = now
+        if (claimRefresh(lastNotificationIconsRefreshMs)) {
             val value = readRemoteNotificationIcons()
             if (value != lastNotificationIconsValue) {
                 lastNotificationIconsValue = value

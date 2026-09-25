@@ -24,7 +24,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
     val strings = LocalStrings.current
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Card(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = strings.aboutBody,

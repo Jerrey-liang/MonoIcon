@@ -108,6 +108,7 @@ private class InnerShadowNode(
         drawContent()
 
         val shadow = shadow() ?: return
+        if (shadow.alpha <= 0f && shadow.blendMode == BlendMode.SrcOver) return
         val layer = shadowLayer ?: return
 
         val radius = shadow.radius.toPx()
