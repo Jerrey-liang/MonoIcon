@@ -26,6 +26,12 @@ app/build/
 app/.cxx/
 .kotlin/
 
+# 签名密钥与凭据（绝不入库）
+*.jks
+*.keystore
+/keystore.properties
+*.idsig
+
 # IDE 自动生成
 /.idea/vcs.xml
 /.idea/*.xml
