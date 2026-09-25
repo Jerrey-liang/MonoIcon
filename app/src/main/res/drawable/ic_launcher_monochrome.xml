@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MonoIcon monochrome layer (API 33+ themed icons).
+
+  Deliberately a separate, self-contained glyph instead of reusing the colourful
+  foreground: a themed-icon build tints this layer with a SINGLE colour, so the
+  foreground's ring would render as one flat blob (its transparent hole fills
+  with the background). Here the square is solid and carries the themed dot as a
+  punched-out hole instead, so the silhouette still reads as "app-icon frame with
+  a themed icon inside" once it is flattened.
+
+  Both subpaths share one evenOdd path, which is what makes the hole transparent.
+  Geometry matches the foreground: square 58x58 spanning x/y 25..83, outer corner
+  radius 18, dot radius 14, all inside the 66x66dp safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M43,25 L65,25 A18,18 0 0 1 83,43 L83,65 A18,18 0 0 1 65,83 L43,83 A18,18 0 0 1 25,65 L25,43 A18,18 0 0 1 43,25 Z M54,54 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 Z" />
+</vector>
