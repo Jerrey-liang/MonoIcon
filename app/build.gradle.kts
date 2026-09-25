@@ -18,8 +18,8 @@ android {
         // AGSL runtime-shader path (API 33+) and we no longer ship a fallback.
         minSdk = 35
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.5.1"
+        versionCode = 1
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
