@@ -1,6 +1,7 @@
 package com.jerrey.monoicon.hook
 
 import com.jerrey.monoicon.BuildConfig
+import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherActivityInfo
 import android.content.Context
 import android.graphics.Bitmap
@@ -68,6 +69,9 @@ class IconThemeHook : XposedModule() {
 
     private val stats = HookStats(TAG)
 
+    @Volatile
+    private var isLauncherMainProcess = false
+
     // Phase 3.11: Pixel-style icon color extraction（独立管线，不影响 mask 生成）
     private val colorExtractor = PixelStyleColorExtractor()
 
@@ -116,7 +120,12 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
 
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
+        isLauncherMainProcess = !param.isSystemServer && param.processName == "com.miui.home"
         android.util.Log.i(TAG, "onModuleLoaded: process=${param.processName} systemServer=${param.isSystemServer}")
+    }
+
+    override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
+        HyperOs4NativeHooks.onPackageReady(this, param, isLauncherMainProcess)
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -125,6 +134,12 @@ class IconThemeHook : XposedModule() {
         // folders / recents) and SystemUI (notification app icons). Each gets its own
         // hook set; neither installs the other's hooks.
         if (pkg != "com.miui.home" && pkg != "com.android.systemui") return
+
+        // The no-DEX launcher is handled by onPackageReady; its Java icon classes
+        // do not exist. Preserve the legacy and SystemUI hook paths below.
+        if (pkg == "com.miui.home" &&
+            param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0
+        ) return
 
         // Phase 4.1: load configuration before installing hooks — a disabled
         // module installs nothing and leaves the host process untouched.

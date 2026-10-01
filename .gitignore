@@ -14,11 +14,7 @@
 .cxx
 local.properties
 # MonoIcon 附加忽略
-/res_apk_decoded/
-/res_agent_output/
-/res_lsposed_log/
-/res_original_apk_pkg/
-/outer_res/
+/external_resources/
 *.log
 *.zip
 *.apk

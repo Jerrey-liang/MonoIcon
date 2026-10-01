@@ -6,6 +6,7 @@ plugins {
 
 android {
     namespace = "com.jerrey.monoicon"
+    ndkVersion = "28.2.13676358"
     compileSdk {
         version = release(37) {
             minorApiLevel = 2
@@ -22,6 +23,12 @@ android {
         versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_static"
+            }
+        }
     }
 
     buildTypes {
@@ -48,6 +55,16 @@ android {
         // (debug builds → logd enabled for verification; release → off)
         buildConfig = true
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    // Keep all default ABIs: the HyperOS 4 implementation is arm64-only, while
+    // the native source provides inert JNI entry points for legacy devices.
 
     // LSPosed META-INF/xposed files are placed in src/main/resources/
     // and automatically packaged into the APK by AGP.
