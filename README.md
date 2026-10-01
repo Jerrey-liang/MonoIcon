@@ -4,6 +4,10 @@
 
 无需图标包、无需 MTZ 主题：模块在桌面进程内接管图标加载，复用 AOSP 的单色遮罩与配色管线重新合成图标，因此图标形状与颜色跟随系统主题，换壁纸即换色。
 
+> **兼容性说明：尚不支持 HyperOS 4**
+>
+> MonoIcon 目前面向 HyperOS 3 及更早版本。HyperOS 4 的桌面与旧版差异较大，MonoIcon **尚未完全支持**，在 HyperOS 4 上图标主题化可能不生效或表现异常。HyperOS 4 的支持仍在开发中，请等待后续版本。
+
 ## 功能
 
 - **单色主题图标** — 在 `com.miui.home` 内接管桌面图标、文件夹预览与最近任务的图标管线，把彩色图标重绘为单色主题图标
@@ -20,7 +24,7 @@
 - Android 15（API 35）或更高版本
 - LSPosed，libxposed API 101+（`minApiVersion=101`，`targetApiVersion=102`）
 - 作用域：`com.miui.home`、`com.android.systemui`
-- root 可选：仅「重启作用域」与读取运行日志需要；不授予时图标主题化照常工作
+- root 可选：仅「重启作用域」需要；不授予时图标主题化与日志功能照常工作
 
 构建：
 
@@ -64,6 +68,10 @@ An LSPosed module that redraws HyperOS third-party app icons as **monochrome Mat
 
 No icon pack and no MTZ theme required: the module takes over icon loading inside the launcher process and recomposes each icon through the AOSP monochrome mask and colour pipeline, so icon shape and colour follow the system theme and change with the wallpaper.
 
+> **Compatibility: HyperOS 4 is not supported yet**
+>
+> MonoIcon currently targets HyperOS 3 and earlier. HyperOS 4 changes the launcher substantially, and MonoIcon does **not** fully support it yet — icon theming may not take effect, or may behave incorrectly, on HyperOS 4. Support is still in development; please wait for a later release.
+
 ## Features
 
 - **Monochrome themed icons** — takes over the icon pipeline for desktop icons, folder previews and recents inside `com.miui.home`, redrawing coloured icons as monochrome themed icons
@@ -80,7 +88,7 @@ Runtime:
 - Android 15 (API 35) or newer
 - LSPosed with libxposed API 101+ (`minApiVersion=101`, `targetApiVersion=102`)
 - Scope: `com.miui.home`, `com.android.systemui`
-- Root is optional: only the scope restart and reading runtime logs need it; icon theming works without it
+- Root is optional: only the scope restart needs it; icon theming and the logs page work without it
 
 Build:
 

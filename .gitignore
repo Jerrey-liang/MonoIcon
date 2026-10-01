@@ -27,6 +27,8 @@ app/.cxx/
 *.keystore
 /keystore.properties
 *.idsig
+# 凭据导出文件：*.jks / keystore.properties 之外，密码以明文写在这里
+MonoIcon-release-signing.txt
 
 # IDE 自动生成
 /.idea/vcs.xml

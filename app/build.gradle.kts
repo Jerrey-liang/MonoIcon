@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     // kotlin-android is NOT needed with AGP 9.x — AGP has built-in Kotlin support
     alias(libs.plugins.kotlin.compose)
 }
+
+// Release signing material lives outside version control. Read it when present
+// and skip the signing config otherwise, so a checkout without the keystore can
+// still be built (it then produces an unsigned release APK as before).
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
     namespace = "com.jerrey.monoicon"
@@ -19,14 +32,25 @@ android {
         // AGSL runtime-shader path (API 33+) and we no longer ship a fallback.
         minSdk = 35
         targetSdk = 36
-        versionCode = 1
-        versionName = "2.0.0"
+        versionCode = 2
+        versionName = "2.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {
             cmake {
                 arguments += "-DANDROID_STL=c++_static"
+            }
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
             }
         }
     }
@@ -38,6 +62,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "keepRules/rules.keep"
             )
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isMinifyEnabled = false

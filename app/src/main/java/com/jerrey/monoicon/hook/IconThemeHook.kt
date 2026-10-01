@@ -41,7 +41,7 @@ private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
 private const val TAG_MASK = "MonoIcon.Mask"
 private const val TAG_FOLDER = "MonoIcon.FolderLifecycle"
-private const val MODULE_VERSION = "2.0.0"
+private const val MODULE_VERSION = "2.0.1"
 
 /** Boot timestamp for relative timing logs (ms since boot approx). */
 private val bootTimeNs: Long = System.nanoTime()
