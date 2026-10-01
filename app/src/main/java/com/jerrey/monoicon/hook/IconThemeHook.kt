@@ -891,16 +891,19 @@ class IconThemeHook : XposedModule() {
                             identity, info.user, context.resources.displayMetrics.densityDpi,
                             context.resources.configuration.hashCode(),
                         )
-                        val app = info.applicationInfo
-                        val stamp = "${app.sourceDir}|${app.icon}|${app.splitSourceDirs?.contentHashCode()}"
-                        LauncherIconRenderer.capture(request, stamp) {
+                        // The expensive half — getIcon(0) plus the early colour
+                        // render inside extractEarlyIconColor — runs once per
+                        // component. The drawable is re-published to
+                        // IconDrawableCache on every call because that cache is
+                        // an LRU and may have evicted the identity meanwhile.
+                        val isolated = LauncherIconRenderer.capture(request) {
                             val raw = info.getIcon(0) ?: return@capture null
-                            val isolated = raw.constantState?.newDrawable()?.mutate() ?: return@capture null
-                            IconDrawableCache.put(identity, isolated)
-                            extractEarlyIconColor(info, isolated, "RawAPK")
-                            isolated
+                            val copy = raw.constantState?.newDrawable()?.mutate()
+                                ?: return@capture null
+                            extractEarlyIconColor(info, copy, "RawAPK")
+                            copy
                         }
-                        LauncherIconRenderer.prewarm(request)
+                        if (isolated != null) IconDrawableCache.put(identity, isolated)
                     } catch (t: Throwable) {
                         logd(TAG) { "[RawIconProvider] preparation failed: ${t.message}" }
                     }

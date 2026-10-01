@@ -35,17 +35,61 @@ object IdentityResolver {
 
     data class LauncherIdentity(val component: String, val user: UserHandle)
 
+    // ── Launcher bind accessors (Hook 5 hot path) ─────────────────────
+    //
+    // ShortcutIcon.setIconDrawable runs for every icon on every bind. The
+    // [methodOf] cache removes the reflective getMethod call, but each lookup
+    // still builds a "Class#method" key and probes the map — three times per
+    // bind, on the thread that animates the app drawer. Resolving the whole
+    // accessor set once per target class leaves that path with a single read.
+
+    /** Per-target-class accessor plan, resolved on the first successful bind. */
+    private val launcherAccessorCache =
+        ConcurrentHashMap<Class<*>, LauncherAccessors>()
+
+    private class LauncherAccessors(
+        val shortcutInfo: java.lang.reflect.Method,
+        val componentName: java.lang.reflect.Method,
+        val user: java.lang.reflect.Method,
+    )
+
     /** HyperOS 3 ItemInfo exposes getUser(); never guess a profile on failure. */
     fun resolveLauncher(target: Any?): LauncherIdentity? {
         if (target == null) return null
+        val targetClass = target.javaClass
         return try {
-            val info = methodOf(target.javaClass, "getShortcutInfo")?.invoke(target) ?: return null
-            val component = methodOf(info.javaClass, "getComponentName")?.invoke(info) as? ComponentName
+            val accessors = launcherAccessorCache[targetClass]
+                ?: resolveLauncherAccessors(target, targetClass)
                 ?: return null
-            val user = methodOf(info.javaClass, "getUser")?.invoke(info) as? UserHandle ?: return null
+            val info = accessors.shortcutInfo.invoke(target) ?: return null
+            val component = accessors.componentName.invoke(info) as? ComponentName
+                ?: return null
+            val user = accessors.user.invoke(info) as? UserHandle ?: return null
             LauncherIdentity("${component.packageName}/${component.className}", user)
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    /**
+     * Slow path: the ShortcutInfo class is only discoverable from a live
+     * instance, so the plan is built on the first bind that reaches one.
+     *
+     * Failures are deliberately not recorded — a target that is not yet bound
+     * may resolve on a later call, and repeating the lookup costs no more than
+     * the pre-cache behavior did.
+     */
+    private fun resolveLauncherAccessors(target: Any, targetClass: Class<*>): LauncherAccessors? {
+        val shortcutInfo = methodOf(targetClass, "getShortcutInfo") ?: return null
+        val info = try {
+            shortcutInfo.invoke(target)
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        val componentName = methodOf(info.javaClass, "getComponentName") ?: return null
+        val user = methodOf(info.javaClass, "getUser") ?: return null
+        return LauncherAccessors(shortcutInfo, componentName, user).also {
+            launcherAccessorCache[targetClass] = it
         }
     }
 
