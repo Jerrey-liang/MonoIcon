@@ -74,6 +74,7 @@ class ColoredMonochromeDrawable(
 
     @Volatile private var currentColor: Int = color
     @Volatile private var currentPlateColor: Int = plateColor
+    @Volatile private var paletteObserved = false
     private var alphaValue: Int = 255
     private var composite: AdaptiveIconDrawable
 
@@ -140,7 +141,10 @@ class ColoredMonochromeDrawable(
 
     private fun refreshDynamicColors() {
         if (sourceColor == 0 || sourcePlateColor == 0) return
-        val colors = try { PixelMonetColorEngine.getIconColors() } catch (_: Throwable) { return }
+        if (!paletteObserved) paletteObserved = LauncherPaletteSnapshot.observe(this)
+        val colors = try {
+            LauncherPaletteSnapshot.currentOrNull() ?: PixelMonetColorEngine.getIconColors()
+        } catch (_: Throwable) { return }
         if (colors.foreground == currentColor && colors.background == currentPlateColor) return
         synchronized(this) {
             if (colors.foreground == currentColor && colors.background == currentPlateColor) return

@@ -39,8 +39,10 @@ class HookStats(
         val ms = statsMap.computeIfAbsent(methodName) { MethodStats() }
         val newCount = ms.count.incrementAndGet()
         ms.totalTimeNanos.addAndGet(elapsedNanos)
-        ms.maxTimeNanos.updateAndGet { maxOf(it, elapsedNanos) }
-        ms.minTimeNanos.updateAndGet { minOf(it, elapsedNanos) }
+        // Avoid two capturing LongUnaryOperator allocations per icon and skip
+        // atomic writes when this sample does not change the extrema.
+        updateMaximum(ms.maxTimeNanos, elapsedNanos)
+        updateMinimum(ms.minTimeNanos, elapsedNanos)
 
         // Print summary every [printInterval] calls
         if (newCount % printInterval == 0L) {
@@ -49,6 +51,22 @@ class HookStats(
     }
 
     // ── Internal ──────────────────────────────────────────────────
+
+    private fun updateMaximum(counter: AtomicLong, value: Long) {
+        var previous = counter.get()
+        while (value > previous) {
+            if (counter.compareAndSet(previous, value)) return
+            previous = counter.get()
+        }
+    }
+
+    private fun updateMinimum(counter: AtomicLong, value: Long) {
+        var previous = counter.get()
+        while (value < previous) {
+            if (counter.compareAndSet(previous, value)) return
+            previous = counter.get()
+        }
+    }
 
     private fun printSummary(methodName: String, ms: MethodStats) {
         val count = ms.count.get()

@@ -1,6 +1,8 @@
 package com.jerrey.monoicon.identity
 
 import android.graphics.drawable.Drawable
+import android.content.ComponentName
+import android.os.UserHandle
 import com.jerrey.monoicon.logging.loge
 import java.util.concurrent.ConcurrentHashMap
 
@@ -30,6 +32,22 @@ object IdentityResolver {
 
     /** HyperOS LayerAdaptiveIconDrawable full class name. */
     private const val LAYER_ADAPTIVE_CLASS = "com.miui.home.common.drawable.LayerAdaptiveIconDrawable"
+
+    data class LauncherIdentity(val component: String, val user: UserHandle)
+
+    /** HyperOS 3 ItemInfo exposes getUser(); never guess a profile on failure. */
+    fun resolveLauncher(target: Any?): LauncherIdentity? {
+        if (target == null) return null
+        return try {
+            val info = methodOf(target.javaClass, "getShortcutInfo")?.invoke(target) ?: return null
+            val component = methodOf(info.javaClass, "getComponentName")?.invoke(info) as? ComponentName
+                ?: return null
+            val user = methodOf(info.javaClass, "getUser")?.invoke(info) as? UserHandle ?: return null
+            LauncherIdentity("${component.packageName}/${component.className}", user)
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     // ── Timing bridge (was viewIdentityMap in IconThemeHook) ──────────
     //

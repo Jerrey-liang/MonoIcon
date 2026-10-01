@@ -2,6 +2,7 @@ package com.jerrey.monoicon.hook
 
 import com.jerrey.monoicon.BuildConfig
 import android.content.pm.LauncherActivityInfo
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.AdaptiveIconDrawable
@@ -10,6 +11,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
+import android.os.Looper
 import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.color.IconColorExtractor
@@ -25,6 +27,9 @@ import com.jerrey.monoicon.theme.ThemeManager
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.theme.render.ColoredMonochromeDrawable
 import com.jerrey.monoicon.theme.render.ThemedIconBuilder
+import com.jerrey.monoicon.theme.render.LauncherIconRenderer
+import com.jerrey.monoicon.theme.render.LauncherIconRequest
+import com.jerrey.monoicon.theme.render.LauncherPaletteSnapshot
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedModule
@@ -248,14 +253,15 @@ class IconThemeHook : XposedModule() {
                 }
 
                 val result = if (replacementPair != null) {
-                    val b = chain.getArg(1) as? Bitmap
-                    chain.proceed(arrayOf<Any>(replacementPair.first, b ?: replacementPair.second))
+                    // HyperOS 3 ShortcutIcon ignores its Bitmap parameter. Keep
+                    // it unchanged; never expose the renderer's shared mask.
+                    chain.proceed(arrayOf(replacementPair.first, chain.getArg(1)))
                 } else {
                     chain.proceed()
                 }
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
                 // Phase 2.7: 降噪 — 仅记录替换与否，完整描述交给 HookStats 统计
-                logd(TAG, "[setIconDrawable] replaced=${replacementPair != null} cost=${elapsed}ms")
+                logd(TAG) { "[setIconDrawable] replaced=${replacementPair != null} cost=${elapsed}ms" }
                 stats.record("setIconDrawable", elapsed)
                 result
             }
@@ -318,14 +324,20 @@ class IconThemeHook : XposedModule() {
         } catch (_: Throwable) {
             null
         } ?: return
+        initializeLauncherResources(context)
+    }
+
+    private fun initializeLauncherResources(context: Context) {
         synchronized(packageReceiverLock) {
             if (packageReceiverRegistered) return
             try {
-                PackageChangeReceiver.register(context)
-                // Phase 6.2: lazy Monet engine init (same first-View pattern)
-                PixelMonetColorEngine.init(context)
-                // Phase 8: lazy Lawnicons bundle init (module APK assets)
-                com.jerrey.monoicon.theme.mask.LawniconsAssetSource.init(context)
+                val appContext = context.applicationContext
+                PackageChangeReceiver.register(appContext)
+                LauncherPaletteSnapshot.initialize(
+                    appContext,
+                    runCatching { getRemotePreferences("monoicon_config") }.getOrNull(),
+                )
+                com.jerrey.monoicon.theme.mask.LawniconsAssetSource.init(appContext)
                 packageReceiverRegistered = true
             } catch (_: Throwable) {
                 // isolation — registration must never crash the launcher
@@ -850,8 +862,11 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
 
     private fun installGetActivityIcon(cl: ClassLoader) {
-        val method = cl.loadClass("com.miui.home.icon.IconProvider")
-            .getDeclaredMethod("getActivityIcon", LauncherActivityInfo::class.java)
+        val providerClass = cl.loadClass("com.miui.home.icon.IconProvider")
+        val method = providerClass.getDeclaredMethod("getActivityIcon", LauncherActivityInfo::class.java)
+        val contextField = runCatching {
+            providerClass.getDeclaredField("mContext").apply { isAccessible = true }
+        }.getOrNull()
         deoptimize(method)
 
         hook(method)
@@ -863,6 +878,34 @@ class IconThemeHook : XposedModule() {
                 if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
 
                 val info = chain.getArg(0) as? LauncherActivityInfo
+                val context = runCatching { contextField?.get(chain.thisObject) as? Context }.getOrNull()
+                // IconCache.cacheLocked / ShortcutInfo.getIconDrawable assert
+                // a worker thread in HyperOS 3. Finish preparation before their
+                // existing async result is posted back to the UI thread.
+                if (info != null && context != null && Looper.myLooper() != Looper.getMainLooper()) {
+                    try {
+                        initializeLauncherResources(context)
+                        val component = info.componentName
+                        val identity = "${component.packageName}/${component.className}"
+                        val request = LauncherIconRequest(
+                            identity, info.user, context.resources.displayMetrics.densityDpi,
+                            context.resources.configuration.hashCode(),
+                        )
+                        val app = info.applicationInfo
+                        val stamp = "${app.sourceDir}|${app.icon}|${app.splitSourceDirs?.contentHashCode()}"
+                        LauncherIconRenderer.capture(request, stamp) {
+                            val raw = info.getIcon(0) ?: return@capture null
+                            val isolated = raw.constantState?.newDrawable()?.mutate() ?: return@capture null
+                            IconDrawableCache.put(identity, isolated)
+                            extractEarlyIconColor(info, isolated, "RawAPK")
+                            isolated
+                        }
+                        LauncherIconRenderer.prewarm(request)
+                    } catch (t: Throwable) {
+                        logd(TAG) { "[RawIconProvider] preparation failed: ${t.message}" }
+                    }
+                    return@intercept chain.proceed()
+                }
                 // 在 HyperOS 处理之前，从 APK 直接获取原始彩色图标
                 // launcherActivityInfo.getIcon(0) 返回未经 theme 修改的 AdaptiveIconDrawable
                 if (info != null) {
@@ -1071,7 +1114,18 @@ class IconThemeHook : XposedModule() {
             return null
         }
 
-        val identity = IdentityResolver.resolve(chain.thisObject)
+        val launcherIdentity = IdentityResolver.resolveLauncher(chain.thisObject)
+        val identity = launcherIdentity?.component ?: IdentityResolver.resolve(chain.thisObject)
+        val view = chain.thisObject as? android.view.View
+        if (launcherIdentity != null && view != null) {
+            val request = LauncherIconRequest(
+                identity, launcherIdentity.user, view.resources.displayMetrics.densityDpi,
+                view.resources.configuration.hashCode(),
+            )
+            LauncherIconRenderer.build(request, d)?.let { themed ->
+                return Pair(themed.drawable, themed.mask)
+            }
+        }
 
         // Phase 3.16: Mask quality diagnostics — log drawable structure before conversion
         diagMaskInput(d, identity)

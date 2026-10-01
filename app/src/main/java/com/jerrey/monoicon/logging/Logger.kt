@@ -38,6 +38,7 @@ interface Logger {
  */
 object LogcatLogger : Logger {
 
+    @Volatile
     private var debugEnabled: Boolean = false
 
     /** Configure whether debug-level messages are printed. */
@@ -79,6 +80,11 @@ object LogcatLogger : Logger {
 
 /** Log a debug message using the default [LogcatLogger]. */
 fun logd(tag: String, message: String) = LogcatLogger.d(tag, message)
+
+/** Build hot-path debug messages only when logging is enabled. */
+inline fun logd(tag: String, message: () -> String) {
+    if (LogcatLogger.isDebugEnabled) LogcatLogger.d(tag, message())
+}
 
 /** Log an informational message using the default [LogcatLogger]. */
 fun logi(tag: String, message: String) = LogcatLogger.i(tag, message)

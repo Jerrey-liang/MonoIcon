@@ -4,6 +4,8 @@ import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.identity.IdentityResolver
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
+import com.jerrey.monoicon.theme.render.LauncherIconRenderer
+import com.jerrey.monoicon.theme.render.LauncherPaletteSnapshot
 
 /**
  * Cache lifecycle management (Phase 4.0-A).
@@ -46,6 +48,7 @@ object CacheManager {
      */
     fun invalidatePackage(packageName: String) {
         if (packageName.isBlank()) return
+        LauncherIconRenderer.invalidatePackage(packageName)
         val prefix = packageName + "/"
         IconDrawableCache.removeByPrefix(prefix)
         IconColorCache.removeByPrefix(prefix)
@@ -54,6 +57,7 @@ object CacheManager {
 
     /** Drops all cached content across every cache. */
     fun clearAll() {
+        LauncherIconRenderer.clear()
         IconDrawableCache.clear()
         IconColorCache.clear()
         MonochromeCache.shared.clear()
@@ -69,6 +73,7 @@ object CacheManager {
      */
     fun invalidateDynamicColor() {
         PixelMonetColorEngine.invalidate()
+        LauncherPaletteSnapshot.refresh()
     }
 
     /** Current cache occupancy. */

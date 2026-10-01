@@ -149,7 +149,20 @@ class MonochromeCache(
      * all `com.pkg/`-prefixed identities (also removes bare-`pkg` keys).
      */
     fun removeByPrefix(prefix: String) {
-        val stale = cache.snapshot().keys.filter { it.startsWith(prefix) }
+        val packageName = prefix.removeSuffix("/")
+        val stale = cache.snapshot().keys.filter { key ->
+            // Namespaced masks are theme|context|identity|size@fingerprint|src.
+            // Lawnicons' immutable asset entries have no package identity.
+            val first = key.indexOf('|')
+            val second = if (first >= 0) key.indexOf('|', first + 1) else -1
+            val third = if (second >= 0) key.indexOf('|', second + 1) else -1
+            val identity = if (third >= 0 && !key.startsWith("lawnicons|")) {
+                key.substring(second + 1, third)
+            } else {
+                key.substringBefore('|')
+            }
+            identity == packageName || identity.startsWith(prefix)
+        }
         stale.forEach { cache.remove(it) }
         if (stale.isNotEmpty()) {
             logd(TAG, "Cache removeByPrefix: $prefix removed=${stale.size}")

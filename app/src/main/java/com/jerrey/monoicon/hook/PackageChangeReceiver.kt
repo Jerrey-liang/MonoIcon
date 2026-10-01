@@ -50,7 +50,7 @@ object PackageChangeReceiver {
                     handle(intent)
                 }
             }
-            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            context.applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
             registered = true
             android.util.Log.i(TAG, "Package change receiver registered")
         } catch (t: Throwable) {
