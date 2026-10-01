@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.ui.LocalStrings
-import com.jerrey.monoicon.ui.ModuleLogs
+import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.ui.XposedState
 import com.jerrey.monoicon.ui.restartScopedApps
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +30,8 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+private const val TAG = "MonoIcon.Settings"
 
 /**
  * Icon style tab (Phase 13): everything that changes how icons are drawn —
@@ -72,7 +74,7 @@ fun IconStyleScreen(
                                 circleIconsEnabled = value
                                 restartHint = true
                                 ConfigManager.setCircleIconsEnabled(value)
-                                ModuleLogs.append("Settings", "circleIcons=$value")
+                                logi(TAG, "circleIcons=$value")
                             },
                         )
                     },
@@ -86,7 +88,7 @@ fun IconStyleScreen(
                             onCheckedChange = { value ->
                                 lawniconsEnabled = value
                                 ConfigManager.setLawniconsEnabled(value)
-                                ModuleLogs.append("Settings", "lawnicons=$value")
+                                logi(TAG, "lawnicons=$value")
                             },
                         )
                     },
@@ -101,7 +103,7 @@ fun IconStyleScreen(
                                 notificationIconsEnabled = value
                                 restartHint = true
                                 ConfigManager.setNotificationIconsEnabled(value)
-                                ModuleLogs.append("Settings", "notificationIcons=$value")
+                                logi(TAG, "notificationIcons=$value")
                             },
                         )
                     },
@@ -131,7 +133,7 @@ fun IconStyleScreen(
                                     onVariantChange(entry.id)
                                     restartHint = true
                                     ConfigManager.setVariantId(entry.id)
-                                    ModuleLogs.append("Settings", "variant=${entry.id}")
+                                    logi(TAG, "variant=${entry.id}")
                                 },
                             )
                         },
@@ -139,7 +141,7 @@ fun IconStyleScreen(
                             onVariantChange(entry.id)
                             restartHint = true
                             ConfigManager.setVariantId(entry.id)
-                            ModuleLogs.append("Settings", "variant=${entry.id}")
+                            logi(TAG, "variant=${entry.id}")
                         },
                     )
                 }

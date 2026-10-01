@@ -5,8 +5,13 @@ import android.content.pm.PackageInfo
 import android.content.res.Configuration
 import android.os.LocaleList
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.logging.loge
+import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.logging.logw
 import io.github.libxposed.service.XposedService
 import java.util.Locale
+
+private const val TAG = "MonoIcon.Scope"
 
 /**
  * LSPosed/framework status snapshot for the overview card (Phase 13).
@@ -120,18 +125,18 @@ fun requestScope(packages: List<String>): Boolean {
             packages,
             object : XposedService.OnScopeEventListener {
                 override fun onScopeRequestApproved(scope: List<String>) {
-                    ModuleLogs.append("Scope", "approved: ${scope.joinToString()}")
+                    logi(TAG, "scope approved: ${scope.joinToString()}")
                 }
 
                 override fun onScopeRequestFailed(message: String) {
-                    ModuleLogs.append("Scope", "request failed: $message")
+                    logw(TAG, "scope request failed: $message")
                 }
             },
         )
-        ModuleLogs.append("Scope", "requested: ${packages.joinToString()}")
+        logi(TAG, "scope requested: ${packages.joinToString()}")
         true
     } catch (t: Throwable) {
-        ModuleLogs.append("Scope", "request error: ${t.message}")
+        loge(TAG, "scope request error", t)
         false
     }
 }

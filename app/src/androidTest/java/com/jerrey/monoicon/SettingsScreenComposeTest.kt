@@ -143,7 +143,7 @@ class SettingsScreenComposeTest {
         composeRule.setContent { MonoIconApp() }
         assertNavigation(strings, selectedIndex = 0)
 
-        listOf(strings.logs to strings.logsRefresh, strings.about to strings.aboutBody)
+        listOf(strings.logs to strings.logsExport, strings.about to strings.aboutBody)
             .forEach { (entry, marker) ->
                 composeRule.onNodeWithText(entry).performScrollTo().performClick()
                 composeRule.onNodeWithText(marker).assertIsDisplayed()

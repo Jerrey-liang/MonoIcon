@@ -2,7 +2,12 @@ package com.jerrey.monoicon.ui
 
 import android.content.Context
 import android.content.Intent
+import com.jerrey.monoicon.logging.loge
+import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.logging.logw
 import java.util.concurrent.TimeUnit
+
+private const val TAG = "MonoIcon.ScopeRestart"
 
 /**
  * Restarts every app in the module's Xposed scope (Phase 6.5, used by the icon-style
@@ -31,15 +36,15 @@ fun restartScopedApps(context: Context, packages: List<String>): Boolean {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
             val finished = process.waitFor(10, TimeUnit.SECONDS)
             if (finished && process.exitValue() == 0) {
-                ModuleLogs.append("ScopeRestart", "restarted ${scope.joinToString()} via: ${cmd.take(40)}…")
+                logi(TAG, "restarted ${scope.joinToString()} via: ${cmd.take(40)}…")
                 bringLauncherBack(context, scope)
                 return true
             }
         } catch (t: Throwable) {
-            ModuleLogs.append("ScopeRestart", "attempt failed: ${t.message}")
+            loge(TAG, "restart attempt failed: ${cmd.take(40)}…", t)
         }
     }
-    ModuleLogs.append("ScopeRestart", "killall unavailable for ${scope.joinToString()}")
+    logw(TAG, "killall unavailable for ${scope.joinToString()}")
     return bringLauncherBack(context, scope)
 }
 
@@ -55,10 +60,10 @@ private fun bringLauncherBack(context: Context, scope: List<String>): Boolean {
                 .addCategory(Intent.CATEGORY_HOME)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
-        ModuleLogs.append("ScopeRestart", "HOME intent sent")
+        logi(TAG, "HOME intent sent")
         true
     } catch (t: Throwable) {
-        ModuleLogs.append("ScopeRestart", "HOME intent failed: ${t.message}")
+        loge(TAG, "HOME intent failed", t)
         false
     }
 }

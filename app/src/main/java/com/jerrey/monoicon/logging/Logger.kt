@@ -27,7 +27,12 @@ interface Logger {
 }
 
 /**
- * Default [Logger] implementation that delegates to [android.util.Log].
+ * Default [Logger] implementation.
+ *
+ * Every record is forwarded to [LogStore] so it reaches the in-app log page,
+ * and also written to logcat, which stays useful while debugging through adb.
+ * Logcat is a debugging convenience here, not the storage: the in-app page
+ * reads [LogStore] and never logcat, so it needs no permission.
  *
  * Debug logging is controlled by the [isDebugEnabled] flag rather than
  * BuildConfig, because the logging package must not depend on the
@@ -50,13 +55,22 @@ object LogcatLogger : Logger {
         get() = debugEnabled
 
     override fun d(tag: String, message: String) {
-        if (isDebugEnabled) {
-            Log.d(tag, message)
-        }
+        // Two separate conditions, deliberately:
+        //  - Logcat output follows the debug switch, exactly as before.
+        //  - Storing the entry additionally requires a process that opened the
+        //    store. In the launcher these are the per-icon diagnostics (cache
+        //    hits, mask tiers) emitted thousands of times per scroll; routing
+        //    them through the store's lock would tax the very path they exist
+        //    to measure, and they could never be shown in the settings UI
+        //    anyway.
+        if (!isDebugEnabled) return
+        Log.d(tag, message)
+        if (LogStore.isInstalled) LogStore.record(LogStore.LEVEL_DEBUG, tag, message)
     }
 
     override fun i(tag: String, message: String) {
         Log.i(tag, message)
+        if (LogStore.isInstalled) LogStore.record(LogStore.LEVEL_INFO, tag, message)
     }
 
     override fun w(tag: String, message: String, throwable: Throwable?) {
@@ -65,6 +79,7 @@ object LogcatLogger : Logger {
         } else {
             Log.w(tag, message)
         }
+        if (LogStore.isInstalled) LogStore.record(LogStore.LEVEL_WARN, tag, message, throwable)
     }
 
     override fun e(tag: String, message: String, throwable: Throwable?) {
@@ -73,6 +88,7 @@ object LogcatLogger : Logger {
         } else {
             Log.e(tag, message)
         }
+        if (LogStore.isInstalled) LogStore.record(LogStore.LEVEL_ERROR, tag, message, throwable)
     }
 }
 

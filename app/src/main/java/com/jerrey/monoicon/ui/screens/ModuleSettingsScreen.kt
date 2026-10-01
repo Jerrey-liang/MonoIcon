@@ -12,9 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
-import com.jerrey.monoicon.ui.ModuleLogs
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Checkbox
@@ -22,6 +22,8 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+private const val TAG = "MonoIcon.Settings"
 
 /**
  * Module settings tab (Phase 13): master switch and UI language.
@@ -61,7 +63,7 @@ fun ModuleSettingsScreen(
                                 enabled = value
                                 restartHint = true
                                 ConfigManager.setEnabled(value)
-                                ModuleLogs.append("Settings", "master switch=$value")
+                                logi(TAG, "master switch=$value")
                             },
                         )
                     },
@@ -85,14 +87,14 @@ fun ModuleSettingsScreen(
                                 onClick = {
                                     onLanguageChange(option)
                                     ConfigManager.setLanguage(option.id)
-                                    ModuleLogs.append("Settings", "language=${option.id}")
+                                    logi(TAG, "language=${option.id}")
                                 },
                             )
                         },
                         onClick = {
                             onLanguageChange(option)
                             ConfigManager.setLanguage(option.id)
-                            ModuleLogs.append("Settings", "language=${option.id}")
+                            logi(TAG, "language=${option.id}")
                         },
                     )
                 }

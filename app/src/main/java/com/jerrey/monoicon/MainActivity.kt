@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.ui.MonoIconApp
 import com.jerrey.monoicon.ui.wrapLocale
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        logi(TAG, "MainActivity onCreate (recreated=${savedInstanceState != null})")
         // Phase 4.1: bind the module-process SharedPreferences so the UI
         // switch writes the same file the launcher hook process reads.
         ConfigManager.init(applicationContext)
@@ -46,5 +48,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             MonoIconApp()
         }
+    }
+
+    override fun onDestroy() {
+        logi(TAG, "MainActivity onDestroy (finishing=$isFinishing)")
+        super.onDestroy()
+    }
+
+    private companion object {
+        const val TAG = "MonoIcon.App"
     }
 }
