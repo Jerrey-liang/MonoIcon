@@ -40,7 +40,12 @@ enum Status : jint {
 
 // Reuse P3's transaction for a scalar palette override. No Dart function
 // pointers, foreign frames, heap writes or object/GC bridge.
-// Evidence: external_resources/HyperOS4/report/CUSTOM_PALETTE_INJECTION.md.
+// Evidence: external_resources/HyperOS4/report/CUSTOM_PALETTE_INJECTION.md and
+// external_resources/HyperOS4/analysis/port6144/ (6144 hook-point port).
+// All addresses below belong to the launcher build on the test device:
+//   RELEASE-8.01.02.6144-260818-08251107-R
+//   libapp.so GNU build id 4f1bdaedd19666f2b22817f1fabc965f
+//   libapp_launcher.so Android note r27d/13750724 (no GNU build id)
 struct Patch {
     uintptr_t vaddr;
     uint32_t original;
@@ -48,26 +53,31 @@ struct Patch {
     uintptr_t function;
     size_t functionSize;
 };
-constexpr std::array<Patch, 8> kPatches{{
-    {0x1a9b538, 0x36200261, 0x14000013, 0x1a9b43c, 516},
-    {0x19df288, 0x9a910204, 0xaa1003e4, 0x19df1ec, 624},
+constexpr std::array<Patch, 9> kPatches{{
+    {0x1a04944, 0x36200261, 0x14000013, 0x1a04848, 516},
+    {0x194adc4, 0x9a910204, 0xaa1003e4, 0x194ad28, 624},
     // Settings' background value: replace only the integer unboxing. Keep the
     // original normalization, Dart integer allocation, Rx setter and renderer.
-    {0x19df2e8, 0x93417c61, 0x00000000, 0x19df1ec, 624},
-    {0x19df2ec, 0x36000043, 0x00000000, 0x19df1ec, 624},
-    {0x19df2f0, 0xf8407061, 0xd503201f, 0x19df1ec, 624},
+    {0x194ae24, 0x93417c61, 0x00000000, 0x194ad28, 624},
+    {0x194ae28, 0x36000043, 0x00000000, 0x194ad28, 624},
+    {0x194ae2c, 0xf8407061, 0xd503201f, 0x194ad28, 624},
     // Existing ColorFilter mode conversion: a scalar-only veneer selects the
     // exact pooled foreground filter. See FOREGROUND_INJECTION.md.
-    {0x90f650, 0xf85d83a2, 0x00000000, 0x90f588, 256},
+    {0x8cefb8, 0xf85d83a2, 0x00000000, 0x8ceef0, 256},
     // A notified settings reload must refresh existing icons even when its
     // forced background/enable values compare equal to the previous values.
-    {0x19deb78, 0x540002e0, 0xd503201f, 0x19deacc, 356},
+    {0x194a79c, 0x540002e0, 0xd503201f, 0x194a6f0, 356},
     // A refreshed widget must reload its existing image state even when its
     // monochrome/size arguments compare equal after late palette installation.
-    {0x135305c, 0x54000040, 0xd503201f, 0x1352f24, 344},
+    {0x12c8f4c, 0x54000040, 0xd503201f, 0x12c8e14, 344},
+    // Per-icon monochrome decision: system apps lack a monochrome icon layer,
+    // so _hasMonochromeLayer returns false and they keep the coloured icon.
+    // Replace the layer query with the Dart boolean true (add x0, x22, #0x20)
+    // so every icon takes the launcher's own monochrome rendering path.
+    {0xe2abdc, 0x97fa1ff6, 0x910082c0, 0xe2ab68, 132},
 }};
 constexpr std::array<Patch, 1> kObserverPatches{{
-    {0x64abe4, 0x17ffff3d, 0x00000000, 0x64a1a4, 2788},
+    {0x5aefec, 0x17ffff3d, 0x00000000, 0x5ae5b0, 2784},
 }};
 using PatchSet = std::array<Patch, kPatches.size()>;
 
@@ -84,8 +94,10 @@ std::array<uint32_t, 9> foregroundCode(uint32_t foreground, uint32_t continuatio
     // X0/X3/NZCV are overwritten by the original continuation before any read.
     // Keep X1, X15/X29/X30 and every other register. No call, allocation, stack
     // change or Dart heap write; X2 remains the original unboxed ARGB argument.
+    // The pool pair loads the 6144 canonical foreground ColorFilter slot
+    // (x27 + 0x859f8); see analysis/port6144/elf_facts_6144.json.
     return {{
-        0xf85d83a2, 0xf85f03a3, 0x91429f60, 0xf9457c00,
+        0xf85d83a2, 0xf85f03a3, 0x91421760, 0xf944fc00,
         0xeb00007f, 0x54000061,
         0x52800002u | ((foreground & 0xffffu) << 5),
         0x72a00002u | ((foreground >> 16) << 5),
@@ -94,13 +106,13 @@ std::array<uint32_t, 9> foregroundCode(uint32_t foreground, uint32_t continuatio
 }
 constexpr std::array<uint8_t, 32> kBuildNote{{
     4, 0, 0, 0, 16, 0, 0, 0, 3, 0, 0, 0, 'G', 'N', 'U', 0,
-    0x4f, 0x1b, 0xda, 0xed, 0xa6, 0xb1, 0xf9, 0x8d,
-    0xde, 0x7d, 0x3e, 0xbc, 0x23, 0x16, 0x3c, 0xd1,
+    0x4f, 0x1b, 0xda, 0xed, 0xd1, 0x96, 0x66, 0xf2,
+    0xb2, 0x28, 0x17, 0xf1, 0xfa, 0xbc, 0x96, 0x5f,
 }};
 constexpr uintptr_t kNoteVaddr = 0x1c8;
-constexpr uintptr_t kTextVaddr = 0x850000;
-constexpr uintptr_t kTextSize = 0x130ccf0;
-constexpr size_t kElfSize = 29387672;
+constexpr uintptr_t kTextVaddr = 0x810000;
+constexpr uintptr_t kTextSize = 0x12a9b80;
+constexpr size_t kElfSize = 28700808;
 namespace observer = monoicon::hyperos4::observer;
 struct Segment {
     uint64_t offset, address, fileSize, memorySize;
@@ -108,15 +120,15 @@ struct Segment {
     uint64_t alignment;
 };
 constexpr Segment kAppSegments[] = {
-    {0, 0, 0x84c3f2, 0x84c3f2, PF_R, 0x10000},
+    {0, 0, 0x805f12, 0x805f12, PF_R, 0x10000},
     {kTextVaddr, kTextVaddr, kTextSize, kTextSize, PF_R | PF_X, 0x10000},
-    {0x1b60000, 0x1b60000, 0x90, 0x90, PF_R | PF_W, 0x10000},
+    {0x1ac0000, 0x1ac0000, 0x90, 0x90, PF_R | PF_W, 0x10000},
 };
 constexpr Segment kLauncherSegments[] = {
-    {0, 0, 0x4e8d20, 0x4e8d20, PF_R, 0x4000},
-    {0x4e8d40, 0x4ecd40, 0x914a20, 0x914a20, PF_R | PF_X, 0x4000},
-    {0xdfd760, 0xe05760, 0x1085f0, 0x1088a0, PF_R | PF_W, 0x4000},
-    {0xf05d80, 0xf11d80, 0x104e8, 0x15fa0, PF_R | PF_W, 0x4000},
+    {0, 0, 0x4be4e8, 0x4be4e8, PF_R, 0x4000},
+    {0x4be500, 0x4c2500, 0x8a36b0, 0x8a36b0, PF_R | PF_X, 0x4000},
+    {0xd61bc0, 0xd69bc0, 0xfc4d8, 0xfd440, PF_R | PF_W, 0x4000},
+    {0xe5e100, 0xe6a100, 0xffc0, 0x15a20, PF_R | PF_W, 0x4000},
 };
 // libapp_launcher has no GNU build ID. Its Android note is only a layout
 // guard: identity additionally requires every original observer-function byte.
@@ -142,7 +154,7 @@ constexpr ImageSpec kAppImage{
     kPatches.data(), kPatches.size(), nullptr,
 };
 constexpr ImageSpec kLauncherImage{
-    "libapp_launcher.so", "lib/arm64-v8a/libapp_launcher.so", 16213368, 0x270, 0x290,
+    "libapp_launcher.so", "lib/arm64-v8a/libapp_launcher.so", 15505576, 0x270, 0x290,
     kLauncherNote.data(), kLauncherNote.size(), kLauncherSegments, 4,
     kObserverPatches.data(), kObserverPatches.size(), observer::kOriginalFunction.data(),
 };

@@ -7,15 +7,17 @@
 
 // Exact-build observer completion instrumentation. This emits AArch64 instructions
 // only; it does not declare, call or manufacture a Dart/Rust/platform ABI.
-// Evidence: analysis/verify_observer_completion.py and
-// report/SETTINGS_REPLAY_STATIC_EVIDENCE.md under external_resources/HyperOS4.
+// Targets the 6144 launcher build RELEASE-8.01.02.6144-260818-08251107-R
+// (libapp_launcher.so Android note r27d/13750724; the libapp.so GNU build id is
+// 4f1bdaedd19666f2b22817f1fabc965f). Evidence: analysis/port6144/ under
+// external_resources/HyperOS4.
 namespace monoicon::hyperos4::observer {
 
-constexpr uintptr_t kPatchVaddr = 0x64abe4;
+constexpr uintptr_t kPatchVaddr = 0x5aefec;
 constexpr uint32_t kOriginalBranch = 0x17ffff3d;
-constexpr uintptr_t kContinuationVaddr = 0x64a8d8;
-constexpr uintptr_t kFunctionVaddr = 0x64a1a4;
-constexpr size_t kFunctionSize = 2788;
+constexpr uintptr_t kContinuationVaddr = 0x5aece0;
+constexpr uintptr_t kFunctionVaddr = 0x5ae5b0;
+constexpr size_t kFunctionSize = 2784;
 constexpr size_t kVeneerSize = 64;
 inline constexpr std::array<uint8_t, kFunctionSize> kOriginalFunction{{
 #include "hyperos4_observer_original.inc"

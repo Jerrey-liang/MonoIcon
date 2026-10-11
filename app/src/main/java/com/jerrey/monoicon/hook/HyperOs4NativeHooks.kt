@@ -35,8 +35,8 @@ import java.util.zip.ZipFile
 internal object HyperOs4NativeHooks {
     private const val TAG = "MonoIcon.HyperOS4"
     private const val PACKAGE = "com.miui.home"
-    private const val VERSION_CODE = 801027726L
-    private const val VERSION_NAME = "RELEASE-8.01.02.7726-260904-09231125-R"
+    private const val VERSION_CODE = 801026144L
+    private const val VERSION_NAME = "RELEASE-8.01.02.6144-260818-08251107-R"
     private const val LEGACY_ICON_CLASS = "com.miui.home.launcher.ShortcutIcon"
     private const val HOOK_NAME = "HyperOs4Palette"
     private const val STATUS_WAITING = 0

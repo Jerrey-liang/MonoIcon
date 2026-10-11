@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.ui.MonoIconApp
@@ -48,6 +49,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             MonoIconApp()
         }
+        // HyperOS 4: the dex-less launcher reads its palette from its own files
+        // dir and repaints on a settings notification; publish both here.
+        HyperOs4PalettePublisher.publish(applicationContext)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        HyperOs4PalettePublisher.publish(applicationContext)
     }
 
     override fun onDestroy() {

@@ -3,8 +3,10 @@ MONOICON_HYOS_1.0 {
         native_init;
         monoicon_hyos_status;
         monoicon_hyos_hook;
+        monoicon_hyos_palette;
         monoicon_hyos_hook_backend_init;
         monoicon_hyos_install_canary_hook;
+        monoicon_hyos_palette_install;
         monoicon_hyos_dump_hook_status;
         monoicon_hyos_observe_libapp_visible;
         monoicon_hyos_observe_libapp_handle;

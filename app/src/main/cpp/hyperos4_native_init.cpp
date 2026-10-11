@@ -324,6 +324,11 @@ extern "C" uint32_t monoicon_hyos_observe_libapp_visible();
 extern "C" uint32_t monoicon_hyos_observe_libapp_handle();
 extern "C" uint32_t monoicon_hyos_observe_libapp_hook();
 extern "C" void monoicon_hyos_observe_finalize();
+// Lives in hyperos4_palette_install.cpp. The palette transaction validates the
+// mapped 6144 images against embedded snapshots and installs the eight scalar
+// substitutions plus the foreground veneer. Self-guarded: it installs once per
+// process and refuses to touch the HYOS spawner's shared pages.
+extern "C" uint32_t monoicon_hyos_palette_install();
 
 void HandleLauncherLibrary(void* handle) {
     __atomic_fetch_add(&monoicon_hyos_status.launcher_library_seen, 1u,
@@ -350,6 +355,10 @@ void HandleLauncherLibrary(void* handle) {
         Logf(ANDROID_LOG_WARN, "could not resolve %s: %s", kLauncherEntrySymbol,
              dlerror());
     }
+    // The palette transaction self-guards and only acts in the launcher child;
+    // calling it here covers child processes whose first matching load is the
+    // launcher image rather than the Dart snapshot.
+    monoicon_hyos_palette_install();
     NextSequence();
     WriteStatusFile("launcher-library");
 }
@@ -370,6 +379,9 @@ void HandleDartLibrary(void* handle) {
     monoicon_hyos_install_canary_hook();
     // Derived deltas are filled in after the hook attempt, when t_dart_base exists.
     monoicon_hyos_observe_finalize();
+    // The production palette transaction. It only acts in the launcher child
+    // (private COW pages) and validates the 6144 image before any write.
+    monoicon_hyos_palette_install();
     NextSequence();
     WriteStatusFile("dart-library");
 }

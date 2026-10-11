@@ -34,6 +34,7 @@ if("${ANDROID_ABI}" STREQUAL "arm64-v8a")
     add_library(monoicon_hyperos4_native_init SHARED
         hyperos4_native_init.cpp
         hyperos4_hook_backend.cpp
+        hyperos4_palette_install.cpp
     )
 
     target_compile_features(monoicon_hyperos4_native_init PRIVATE cxx_std_17)
