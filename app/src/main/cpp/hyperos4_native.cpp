@@ -2,6 +2,8 @@
 
 #if defined(__aarch64__)
 #include "hyperos4_thread_pause.h"
+#include "hyperos4_code_page.h"
+#include "hyperos4_observer_code.h"
 #include <android/log.h>
 #include <elf.h>
 #include <fcntl.h>
@@ -33,6 +35,7 @@ enum Status : jint {
     kIdentityMismatch = -3, kMapsUnavailable = -4, kTimedOut = -5,
     kProtectionDenied = -6, kCodeMismatch = -7, kWorkerFailed = -8,
     kRecoveryFailed = -9, kThreadPauseUnavailable = -10, kPaletteInUse = -11,
+    kCodePageUnavailable = -12,
 };
 
 // Reuse P3's transaction for a scalar palette override. No Dart function
@@ -45,7 +48,7 @@ struct Patch {
     uintptr_t function;
     size_t functionSize;
 };
-constexpr std::array<Patch, 5> kPatches{{
+constexpr std::array<Patch, 8> kPatches{{
     {0x1a9b538, 0x36200261, 0x14000013, 0x1a9b43c, 516},
     {0x19df288, 0x9a910204, 0xaa1003e4, 0x19df1ec, 624},
     // Settings' background value: replace only the integer unboxing. Keep the
@@ -53,15 +56,41 @@ constexpr std::array<Patch, 5> kPatches{{
     {0x19df2e8, 0x93417c61, 0x00000000, 0x19df1ec, 624},
     {0x19df2ec, 0x36000043, 0x00000000, 0x19df1ec, 624},
     {0x19df2f0, 0xf8407061, 0xd503201f, 0x19df1ec, 624},
+    // Existing ColorFilter mode conversion: a scalar-only veneer selects the
+    // exact pooled foreground filter. See FOREGROUND_INJECTION.md.
+    {0x90f650, 0xf85d83a2, 0x00000000, 0x90f588, 256},
+    // A notified settings reload must refresh existing icons even when its
+    // forced background/enable values compare equal to the previous values.
+    {0x19deb78, 0x540002e0, 0xd503201f, 0x19deacc, 356},
+    // A refreshed widget must reload its existing image state even when its
+    // monochrome/size arguments compare equal after late palette installation.
+    {0x135305c, 0x54000040, 0xd503201f, 0x1352f24, 344},
+}};
+constexpr std::array<Patch, 1> kObserverPatches{{
+    {0x64abe4, 0x17ffff3d, 0x00000000, 0x64a1a4, 2788},
 }};
 using PatchSet = std::array<Patch, kPatches.size()>;
 
-PatchSet makePatches(uint32_t background) {
+PatchSet makePatches(uint32_t background, uint32_t foregroundBranch) {
     auto patches = kPatches;
     // W writes zero-extend the exact packed ARGB value into unboxed x1.
     patches[2].replacement = 0x52800001u | ((background & 0xffffu) << 5); // movz w1
     patches[3].replacement = 0x72a00001u | ((background >> 16) << 5);     // movk w1, lsl #16
+    patches[5].replacement = foregroundBranch;
     return patches;
+}
+
+std::array<uint32_t, 9> foregroundCode(uint32_t foreground, uint32_t continuation) {
+    // X0/X3/NZCV are overwritten by the original continuation before any read.
+    // Keep X1, X15/X29/X30 and every other register. No call, allocation, stack
+    // change or Dart heap write; X2 remains the original unboxed ARGB argument.
+    return {{
+        0xf85d83a2, 0xf85f03a3, 0x91429f60, 0xf9457c00,
+        0xeb00007f, 0x54000061,
+        0x52800002u | ((foreground & 0xffffu) << 5),
+        0x72a00002u | ((foreground >> 16) << 5),
+        continuation,
+    }};
 }
 constexpr std::array<uint8_t, 32> kBuildNote{{
     4, 0, 0, 0, 16, 0, 0, 0, 3, 0, 0, 0, 'G', 'N', 'U', 0,
@@ -72,8 +101,57 @@ constexpr uintptr_t kNoteVaddr = 0x1c8;
 constexpr uintptr_t kTextVaddr = 0x850000;
 constexpr uintptr_t kTextSize = 0x130ccf0;
 constexpr size_t kElfSize = 29387672;
+namespace observer = monoicon::hyperos4::observer;
+struct Segment {
+    uint64_t offset, address, fileSize, memorySize;
+    uint32_t flags;
+    uint64_t alignment;
+};
+constexpr Segment kAppSegments[] = {
+    {0, 0, 0x84c3f2, 0x84c3f2, PF_R, 0x10000},
+    {kTextVaddr, kTextVaddr, kTextSize, kTextSize, PF_R | PF_X, 0x10000},
+    {0x1b60000, 0x1b60000, 0x90, 0x90, PF_R | PF_W, 0x10000},
+};
+constexpr Segment kLauncherSegments[] = {
+    {0, 0, 0x4e8d20, 0x4e8d20, PF_R, 0x4000},
+    {0x4e8d40, 0x4ecd40, 0x914a20, 0x914a20, PF_R | PF_X, 0x4000},
+    {0xdfd760, 0xe05760, 0x1085f0, 0x1088a0, PF_R | PF_W, 0x4000},
+    {0xf05d80, 0xf11d80, 0x104e8, 0x15fa0, PF_R | PF_W, 0x4000},
+};
+// libapp_launcher has no GNU build ID. Its Android note is only a layout
+// guard: identity additionally requires every original observer-function byte.
+constexpr std::array<uint8_t, 32> kLauncherNote{{
+    0x08,0,0,0, 0x84,0,0,0, 0x01,0,0,0, 'A','n','d','r',
+    'o','i','d',0, 0x23,0,0,0, 'r','2','7','d',0,0,0,0,
+}};
+struct ImageSpec {
+    const char* library;
+    const char* entry;
+    size_t fileSize, noteOffset, headerSize;
+    const uint8_t* note;
+    size_t noteSize;
+    const Segment* segments;
+    size_t segmentCount;
+    const Patch* patches;
+    size_t patchCount;
+    const uint8_t* originalFunction;
+};
+constexpr ImageSpec kAppImage{
+    "libapp.so", kEntry, kElfSize, kNoteVaddr, 0x1e8,
+    kBuildNote.data(), kBuildNote.size(), kAppSegments, 3,
+    kPatches.data(), kPatches.size(), nullptr,
+};
+constexpr ImageSpec kLauncherImage{
+    "libapp_launcher.so", "lib/arm64-v8a/libapp_launcher.so", 16213368, 0x270, 0x290,
+    kLauncherNote.data(), kLauncherNote.size(), kLauncherSegments, 4,
+    kObserverPatches.data(), kObserverPatches.size(), observer::kOriginalFunction.data(),
+};
+constexpr size_t kTransactionPatchCount = kPatches.size() + kObserverPatches.size();
 std::atomic<jint> gStatus{kWaiting};
 std::atomic<bool> gStarted{false};
+// Both generated LDAXR/STLXR and JNI's __atomic_load_n operate on this exact
+// aligned scalar. No std::atomic object-representation cast is needed.
+alignas(4) uint32_t gObserverGeneration = 0;
 
 struct File {
     int fd = -1;
@@ -103,7 +181,8 @@ uint32_t u32(const uint8_t* p) { return u16(p) | (uint32_t(u16(p + 2)) << 16); }
 // Resolve the stored entry through the central directory, never a signature scan
 // through arbitrary APK contents. ZIP64/compressed entries are deliberately not
 // mapped candidates; an extracted nativeLibraryDir copy can still be supported.
-bool apkEntryOffset(int fd, uint64_t fileSize, uint64_t& entryOffset) {
+bool apkEntryOffset(int fd, uint64_t fileSize, const ImageSpec& spec, uint64_t& entryOffset) {
+    const size_t entryNameSize = strlen(spec.entry);
     if (fileSize < 22) return false;
     std::vector<uint8_t> tail(std::min<uint64_t>(fileSize, 65535 + 22));
     if (!readAt(fd, fileSize - tail.size(), tail.data(), tail.size())) return false;
@@ -134,19 +213,19 @@ bool apkEntryOffset(int fd, uint64_t fileSize, uint64_t& entryOffset) {
         const size_t nameSize = u16(c + 28);
         const size_t recordSize = 46 + nameSize + u16(c + 30) + u16(c + 32);
         if (recordSize > directory.size() - pos) return false;
-        if (nameSize == sizeof(kEntry) - 1 && memcmp(c + 46, kEntry, nameSize) == 0) {
+        if (nameSize == entryNameSize && memcmp(c + 46, spec.entry, nameSize) == 0) {
             if (found || u16(c + 10) != 0 || (u16(c + 8) & 1) != 0 ||
-                u16(c + 34) != 0 || u32(c + 20) != kElfSize || u32(c + 24) != kElfSize) return false;
+                u16(c + 34) != 0 || u32(c + 20) != spec.fileSize || u32(c + 24) != spec.fileSize) return false;
             std::array<uint8_t, 30> local{};
             const uint64_t localOffset = u32(c + 42);
             if (localOffset >= cdOffset || !readAt(fd, localOffset, local.data(), local.size()) ||
                 u32(local.data()) != 0x04034b50 || u16(local.data() + 8) != 0 ||
                 u16(local.data() + 6) != u16(c + 8) || u16(local.data() + 26) != nameSize) return false;
-            std::array<char, sizeof(kEntry) - 1> name{};
+            std::vector<char> name(entryNameSize);
             if (!readAt(fd, localOffset + 30, name.data(), name.size()) ||
-                memcmp(name.data(), kEntry, name.size()) != 0) return false;
+                memcmp(name.data(), spec.entry, name.size()) != 0) return false;
             entryOffset = localOffset + 30 + nameSize + u16(local.data() + 28);
-            if (entryOffset > cdOffset || kElfSize > cdOffset - entryOffset) return false;
+            if (entryOffset > cdOffset || spec.fileSize > cdOffset - entryOffset) return false;
             found = true;
         }
         pos += recordSize;
@@ -155,15 +234,29 @@ bool apkEntryOffset(int fd, uint64_t fileSize, uint64_t& entryOffset) {
 }
 
 struct Backing {
+    const ImageSpec* spec{};
     std::string path;
     dev_t device{};
     ino_t inode{};
     uint64_t offset{};
-    std::array<uint8_t, 0x1e8> header{};
-    std::array<std::vector<uint8_t>, kPatches.size()> functions;
+    std::vector<uint8_t> header;
+    std::vector<std::vector<uint8_t>> functions;
 };
 
+bool fileOffset(const ImageSpec& spec, uintptr_t address, size_t size, uint64_t& offset) {
+    for (size_t i = 0; i < spec.segmentCount; ++i) {
+        const auto& segment = spec.segments[i];
+        if (address < segment.address || address - segment.address > segment.fileSize ||
+            size > segment.fileSize - (address - segment.address)) continue;
+        offset = segment.offset + address - segment.address;
+        return true;
+    }
+    return false;
+}
+
 bool validateElf(int fd, Backing& b) {
+    const auto& spec = *b.spec;
+    b.header.resize(spec.headerSize);
     if (!readAt(fd, b.offset, b.header.data(), b.header.size())) return false;
     Elf64_Ehdr e{};
     memcpy(&e, b.header.data(), sizeof(e));
@@ -171,51 +264,54 @@ bool validateElf(int fd, Backing& b) {
         e.e_ident[EI_DATA] != ELFDATA2LSB || e.e_ident[EI_VERSION] != EV_CURRENT ||
         e.e_machine != EM_AARCH64 || e.e_type != ET_DYN || e.e_version != EV_CURRENT ||
         e.e_entry != 0 || e.e_ehsize != sizeof(e) || e.e_phentsize != sizeof(Elf64_Phdr) ||
-        e.e_phnum == 0 || e.e_phnum > 16 || e.e_phoff > kNoteVaddr ||
-        e.e_phnum * sizeof(Elf64_Phdr) > kNoteVaddr - e.e_phoff ||
-        memcmp(b.header.data() + kNoteVaddr, kBuildNote.data(), kBuildNote.size()) != 0) return false;
-    struct Segment { uint64_t address, size; uint32_t flags; };
-    constexpr Segment expected[] = {
-        {0, 0x84c3f2, PF_R}, {kTextVaddr, kTextSize, PF_R | PF_X},
-        {0x1b60000, 0x90, PF_R | PF_W},
-    };
+        e.e_phnum == 0 || e.e_phnum > 16 || e.e_phoff > spec.noteOffset ||
+        e.e_phnum * sizeof(Elf64_Phdr) > spec.noteOffset - e.e_phoff ||
+        memcmp(b.header.data() + spec.noteOffset, spec.note, spec.noteSize) != 0) return false;
     size_t loadCount = 0;
     for (size_t i = 0; i < e.e_phnum; ++i) {
         Elf64_Phdr p{};
         memcpy(&p, b.header.data() + e.e_phoff + i * sizeof(p), sizeof(p));
         if (p.p_type != PT_LOAD) continue;
-        if (loadCount >= 3) return false;
-        const auto& s = expected[loadCount++];
-        if (p.p_vaddr != s.address || p.p_offset != s.address || p.p_filesz != s.size ||
-            p.p_memsz != s.size || p.p_flags != s.flags || p.p_align != 0x10000) return false;
+        if (loadCount >= spec.segmentCount) return false;
+        const auto& s = spec.segments[loadCount++];
+        if (p.p_vaddr != s.address || p.p_offset != s.offset || p.p_filesz != s.fileSize ||
+            p.p_memsz != s.memorySize || p.p_flags != s.flags || p.p_align != s.alignment) return false;
     }
-    if (loadCount != 3) return false;
-    for (size_t i = 0; i < kPatches.size(); ++i) {
-        const auto& p = kPatches[i];
+    if (loadCount != spec.segmentCount) return false;
+    b.functions.resize(spec.patchCount);
+    for (size_t i = 0; i < spec.patchCount; ++i) {
+        const auto& p = spec.patches[i];
         auto& code = b.functions[i];
         code.resize(p.functionSize);
-        if (!readAt(fd, b.offset + p.function, code.data(), code.size()) ||
+        uint64_t offset;
+        if (!fileOffset(spec, p.function, code.size(), offset) ||
+            !readAt(fd, b.offset + offset, code.data(), code.size()) ||
             u32(code.data() + p.vaddr - p.function) != p.original) return false;
+        if (spec.originalFunction != nullptr &&
+            memcmp(code.data(), spec.originalFunction, code.size()) != 0) return false;
     }
+    if (&spec != &kAppImage) return true;
     const auto& settings = b.functions[1];
     const size_t at = kPatches[1].vaddr - kPatches[1].function;
     return u32(settings.data() + at - 8) == 0x910082d0 &&
            u32(settings.data() + at - 4) == 0x9100c2d1;
 }
 
-bool addBacking(const std::string& path, bool apk, size_t pageSize, std::vector<Backing>& backings) {
+bool addBacking(const std::string& path, bool apk, const ImageSpec& spec,
+                size_t pageSize, std::vector<Backing>& backings) {
     char resolved[PATH_MAX];
     if (path.empty() || realpath(path.c_str(), resolved) == nullptr) return false;
     File file(open(resolved, O_RDONLY | O_CLOEXEC));
     struct stat st{};
     if (file.fd < 0 || fstat(file.fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) return false;
     Backing b;
+    b.spec = &spec;
     b.path = resolved;
     b.device = st.st_dev;
     b.inode = st.st_ino;
     if (apk) {
-        if (!apkEntryOffset(file.fd, st.st_size, b.offset) || b.offset % pageSize != 0) return false;
-    } else if (st.st_size != kElfSize) {
+        if (!apkEntryOffset(file.fd, st.st_size, spec, b.offset) || b.offset % pageSize != 0) return false;
+    } else if (st.st_size != static_cast<off_t>(spec.fileSize)) {
         return false;
     }
     if (!validateElf(file.fd, b)) return false;
@@ -265,6 +361,66 @@ bool readMaps(std::vector<Mapping>& maps) {
     return ferror(input.get()) == 0;
 }
 
+void* prepareForeground(const std::vector<Mapping>& maps, uintptr_t bias,
+                        size_t pageSize, uint32_t foreground, uint32_t& branch) {
+    const uintptr_t from = bias + kPatches[5].vaddr;
+    constexpr size_t codeSize = 9 * sizeof(uint32_t);
+    constexpr uintptr_t reach = 0x07ff0000;
+    const uintptr_t lower = from > reach ? from - reach : pageSize;
+    const uintptr_t upper = from < UINTPTR_MAX - reach ? from + reach : UINTPTR_MAX - pageSize;
+    uintptr_t previous = lower;
+    // Reuse the discovery snapshot only to choose hints. mmap and branch range
+    // checks validate the actual page; no MAP_FIXED or executable image cave.
+    for (size_t i = 0; i <= maps.size(); ++i) {
+        const uintptr_t gapEnd = i < maps.size() ? std::min(maps[i].start, upper) : upper;
+        const uintptr_t start = (previous + pageSize - 1) & ~(pageSize - 1);
+        if (start < gapEnd && pageSize <= gapEnd - start) {
+            void* page = hyperos4::codePageHint(start, from, pageSize, codeSize);
+            if (page != nullptr) {
+                const uintptr_t address = reinterpret_cast<uintptr_t>(page);
+                uint32_t continuation;
+                const bool reachable = hyperos4::branchInstruction(from, address, branch) &&
+                    hyperos4::branchInstruction(address + codeSize - 4, from + 4, continuation);
+                const auto code = foregroundCode(foreground, reachable ? continuation : 0);
+                if (reachable && hyperos4::sealCodePage(page, pageSize, code.data(), sizeof(code))) return page;
+                munmap(page, pageSize);
+            }
+        }
+        if (i == maps.size() || maps[i].end >= upper) break;
+        previous = std::max(previous, maps[i].end);
+    }
+    return nullptr;
+}
+
+void* prepareObserver(const std::vector<Mapping>& maps, uintptr_t bias,
+                      size_t pageSize, uint32_t& branch) {
+    const uintptr_t from = bias + observer::kPatchVaddr;
+    constexpr uintptr_t reach = 0x07ff0000;
+    const uintptr_t lower = from > reach ? from - reach : pageSize;
+    const uintptr_t upper = from < UINTPTR_MAX - reach ? from + reach : UINTPTR_MAX - pageSize;
+    uintptr_t previous = lower;
+    for (size_t i = 0; i <= maps.size(); ++i) {
+        const uintptr_t gapEnd = i < maps.size() ? std::min(maps[i].start, upper) : upper;
+        const uintptr_t start = (previous + pageSize - 1) & ~(pageSize - 1);
+        if (start < gapEnd && pageSize <= gapEnd - start) {
+            // The final executable instruction is at +52; +56 holds a literal.
+            void* page = hyperos4::codePageHint(start, from, pageSize, 56);
+            if (page != nullptr) {
+                const uintptr_t address = reinterpret_cast<uintptr_t>(page);
+                std::array<uint8_t, observer::kVeneerSize> code{};
+                if (observer::encodeBranch(from, address, branch) &&
+                    observer::emitVeneer(code.data(), code.size(), address,
+                                         bias + observer::kContinuationVaddr, &gObserverGeneration) &&
+                    hyperos4::sealCodePage(page, pageSize, code.data(), code.size())) return page;
+                munmap(page, pageSize);
+            }
+        }
+        if (i == maps.size() || maps[i].end >= upper) break;
+        previous = std::max(previous, maps[i].end);
+    }
+    return nullptr;
+}
+
 bool sameBacking(const Mapping& m, const Backing& b) {
     return m.privateMapping && m.path == b.path && m.inode == b.inode &&
            m.deviceMajor == major(b.device) && m.deviceMinor == minor(b.device);
@@ -273,14 +429,17 @@ bool sameBacking(const Mapping& m, const Backing& b) {
 bool mappedRange(const std::vector<Mapping>& maps, const Backing& b, uintptr_t bias,
                  uintptr_t vaddr, size_t size, int protection) {
     if (bias > UINTPTR_MAX - vaddr || size > UINTPTR_MAX - (bias + vaddr)) return false;
+    uint64_t expectedOffset;
+    if (!fileOffset(*b.spec, vaddr, size, expectedOffset)) return false;
     uintptr_t current = bias + vaddr;
+    const uintptr_t first = current;
     const uintptr_t end = current + size;
     for (const auto& m : maps) {
         if (m.end <= current) continue;
         if (m.start > current) return false;
         if (!sameBacking(m, b) || m.protection != protection || m.offset < b.offset ||
             m.offset - b.offset > UINTPTR_MAX - (current - m.start) ||
-            m.offset - b.offset + current - m.start != current - bias) return false;
+            m.offset - b.offset + current - m.start != expectedOffset + current - first) return false;
         current = std::min(m.end, end);
         if (current == end) return true;
     }
@@ -289,7 +448,8 @@ bool mappedRange(const std::vector<Mapping>& maps, const Backing& b, uintptr_t b
 
 bool mappedImage(const std::vector<Mapping>& maps, const Backing& b, uintptr_t bias, size_t pageSize) {
     if (!mappedRange(maps, b, bias, 0, b.header.size(), PROT_READ)) return false;
-    for (const auto& p : kPatches) {
+    for (size_t i = 0; i < b.spec->patchCount; ++i) {
+        const auto& p = b.spec->patches[i];
         if (!mappedRange(maps, b, bias, p.function, p.functionSize, PROT_READ | PROT_EXEC) ||
             !mappedRange(maps, b, bias, p.vaddr & ~(pageSize - 1), pageSize, PROT_READ | PROT_EXEC)) return false;
     }
@@ -328,13 +488,17 @@ bool frozenImage(const Backing& b, uintptr_t bias, size_t pageSize, char* buffer
     }
     syscall(SYS_close, fd);
     if (!complete) return false;
-    struct Range { uintptr_t current, end; int protection; };
-    Range ranges[1 + kPatches.size() * 2]{{bias, bias + b.header.size(), PROT_READ}};
-    for (size_t i = 0; i < kPatches.size(); ++i) {
-        const auto& patch = kPatches[i];
-        ranges[1 + i * 2] = {bias + patch.function, bias + patch.function + patch.functionSize, PROT_READ | PROT_EXEC};
+    struct Range { uintptr_t current, end; int protection; uint64_t fileOffset; };
+    Range ranges[1 + kPatches.size() * 2]{{bias, bias + b.header.size(), PROT_READ, 0}};
+    for (size_t i = 0; i < b.spec->patchCount; ++i) {
+        const auto& patch = b.spec->patches[i];
+        uint64_t functionOffset, pageOffset;
+        if (!fileOffset(*b.spec, patch.function, patch.functionSize, functionOffset) ||
+            !fileOffset(*b.spec, patch.vaddr & ~(pageSize - 1), pageSize, pageOffset)) return false;
+        ranges[1 + i * 2] = {bias + patch.function, bias + patch.function + patch.functionSize,
+                            PROT_READ | PROT_EXEC, functionOffset};
         const uintptr_t page = (bias + patch.vaddr) & ~(pageSize - 1);
-        ranges[2 + i * 2] = {page, page + pageSize, PROT_READ | PROT_EXEC};
+        ranges[2 + i * 2] = {page, page + pageSize, PROT_READ | PROT_EXEC, pageOffset};
     }
     const char* line = buffer;
     const char* end = buffer + used;
@@ -360,8 +524,10 @@ bool frozenImage(const Backing& b, uintptr_t bias, size_t pageSize, char* buffer
                 inode != b.inode || deviceMajor != major(b.device) || deviceMinor != minor(b.device) ||
                 static_cast<size_t>(next - p) != b.path.size() || memcmp(p, b.path.data(), b.path.size()) != 0 ||
                 offset < b.offset || offset - b.offset > UINT64_MAX - (range.current - start) ||
-                offset - b.offset + range.current - start != range.current - bias) return false;
-            range.current = std::min<uintptr_t>(stop, range.end);
+                offset - b.offset + range.current - start != range.fileOffset) return false;
+            const uintptr_t nextCurrent = std::min<uintptr_t>(stop, range.end);
+            range.fileOffset += nextCurrent - range.current;
+            range.current = nextCurrent;
         }
         line = next + 1;
     }
@@ -372,8 +538,14 @@ bool frozenImage(const Backing& b, uintptr_t bias, size_t pageSize, char* buffer
 bool matchesMemory(int mem, uintptr_t address, const uint8_t* expected, size_t size) {
     // pread fails on an unmapped range instead of dereferencing a stale scan.
     std::array<uint8_t, 1024> bytes{};
-    return size <= bytes.size() && readAt(mem, address, bytes.data(), size) &&
-           memcmp(bytes.data(), expected, size) == 0;
+    while (size != 0) {
+        const size_t count = std::min(size, bytes.size());
+        if (!readAt(mem, address, bytes.data(), count) || memcmp(bytes.data(), expected, count) != 0) return false;
+        address += count;
+        expected += count;
+        size -= count;
+    }
+    return true;
 }
 
 bool protect(uintptr_t page, size_t pageSize, int mode) {
@@ -390,32 +562,61 @@ void writeInstruction(uintptr_t address, uint32_t instruction) {
     __builtin___clear_cache(first, first + sizeof(instruction));
 }
 
-jint install(const Backing& b, uintptr_t bias, size_t pageSize, int mem, const PatchSet& patches) {
+struct SelectedImage {
+    const Backing* backing{};
+    uintptr_t bias{};
+};
+using SelectedImages = std::array<SelectedImage, 2>;
+
+jint install(const SelectedImages& images, size_t pageSize, int mem,
+             const PatchSet& appPatches, uint32_t observerBranch) {
     std::vector<Mapping> maps;
-    if (!readMaps(maps) || !mappedImage(maps, b, bias, pageSize)) return kMapsUnavailable;
+    if (!readMaps(maps)) return kMapsUnavailable;
+    for (const auto& image : images) {
+        if (image.backing == nullptr || !mappedImage(maps, *image.backing, image.bias, pageSize)) return kMapsUnavailable;
+    }
+    struct RuntimePatch { uintptr_t address; uint32_t original, replacement; };
+    std::array<RuntimePatch, kTransactionPatchCount> patches{};
+    for (size_t i = 0; i < appPatches.size(); ++i) {
+        const auto& patch = appPatches[i];
+        patches[i] = {images[0].bias + patch.vaddr, patch.original, patch.replacement};
+    }
+    patches[appPatches.size()] = {images[1].bias + kObserverPatches[0].vaddr,
+                                  kObserverPatches[0].original, observerBranch};
     std::vector<char> frozenMaps(2 * 1024 * 1024);
+    // Both images use this one rendezvous. Do not reacquire/reuse ThreadPause
+    // slots in separate per-image transactions.
     hyperos4::ThreadPause pause;
     if (!pause.acquire()) return kThreadPauseUnavailable;
     // A peer must not resume midway through the MOVZ/MOVK sequence with an
     // old partial value. Reject active settings code; never edit saved registers.
-    if (!pause.excludes(bias + kPatches[2].function,
-                        bias + kPatches[2].function + kPatches[2].functionSize)) {
+    if (!pause.excludes(images[0].bias + kPatches[2].function,
+                        images[0].bias + kPatches[2].function + kPatches[2].functionSize)) {
         return pause.finish() ? kPaletteInUse : kRecoveryFailed;
     }
     // From here through restoration/rollback: no allocation, log calls or libc
     // operations that can wait on locks held by the parked peers. Re-read the
     // complete functions after parking, before the first protection change.
-    if (!frozenImage(b, bias, pageSize, frozenMaps.data(), frozenMaps.size())) return kMapsUnavailable;
-    if (!matchesMemory(mem, bias, b.header.data(), b.header.size())) return kIdentityMismatch;
-    for (size_t i = 0; i < kPatches.size(); ++i) {
-        if (!matchesMemory(mem, bias + kPatches[i].function, b.functions[i].data(),
-                           b.functions[i].size())) return kCodeMismatch;
+    for (const auto& image : images) {
+        const auto& b = *image.backing;
+        if (!frozenImage(b, image.bias, pageSize, frozenMaps.data(), frozenMaps.size())) {
+            return pause.finish() ? kMapsUnavailable : kRecoveryFailed;
+        }
+        if (!matchesMemory(mem, image.bias, b.header.data(), b.header.size())) {
+            return pause.finish() ? kIdentityMismatch : kRecoveryFailed;
+        }
+        for (size_t i = 0; i < b.spec->patchCount; ++i) {
+            if (!matchesMemory(mem, image.bias + b.spec->patches[i].function,
+                               b.functions[i].data(), b.functions[i].size())) {
+                return pause.finish() ? kCodeMismatch : kRecoveryFailed;
+            }
+        }
     }
-    std::array<uintptr_t, kPatches.size()> pages{};
-    std::array<bool, kPatches.size()> writable{};
+    std::array<uintptr_t, kTransactionPatchCount> pages{};
+    std::array<bool, kTransactionPatchCount> writable{};
     size_t pageCount = 0;
     for (const auto& p : patches) {
-        const uintptr_t page = (bias + p.vaddr) & ~(pageSize - 1);
+        const uintptr_t page = p.address & ~(pageSize - 1);
         bool present = false;
         for (size_t i = 0; i < pageCount; ++i) present |= pages[i] == page;
         if (!present) pages[pageCount++] = page;
@@ -429,7 +630,7 @@ jint install(const Backing& b, uintptr_t bias, size_t pageSize, int mem, const P
         }
         writable[i] = true;
     }
-    for (const auto& p : patches) writeInstruction(bias + p.vaddr, p.replacement);
+    for (const auto& p : patches) writeInstruction(p.address, p.replacement);
     bool restored = true;
     for (size_t i = 0; i < pageCount; ++i) {
         writable[i] = !protect(pages[i], pageSize, PROT_READ | PROT_EXEC);
@@ -438,7 +639,7 @@ jint install(const Backing& b, uintptr_t bias, size_t pageSize, int mem, const P
     bool verified = restored;
     for (const auto& p : patches) {
         uint32_t actual = 0;
-        verified &= readAt(mem, bias + p.vaddr, &actual, sizeof(actual)) && actual == p.replacement;
+        verified &= readAt(mem, p.address, &actual, sizeof(actual)) && actual == p.replacement;
     }
     // Every successful mprotect restored RX. With all peers parked there is no
     // concurrent unmap/protection change; do not allocate to reparse maps here.
@@ -451,57 +652,87 @@ jint install(const Backing& b, uintptr_t bias, size_t pageSize, int mem, const P
     for (size_t i = 0; i < pageCount; ++i) {
         if (!writable[i]) writable[i] = protect(pages[i], pageSize, PROT_READ | PROT_WRITE | PROT_EXEC);
         for (const auto& p : patches) {
-            if (((bias + p.vaddr) & ~(pageSize - 1)) != pages[i]) continue;
-            if (writable[i]) writeInstruction(bias + p.vaddr, p.original);
+            if ((p.address & ~(pageSize - 1)) != pages[i]) continue;
+            if (writable[i]) writeInstruction(p.address, p.original);
             else recovered = false;
         }
         recovered &= protect(pages[i], pageSize, PROT_READ | PROT_EXEC);
     }
     for (const auto& p : patches) {
         uint32_t actual = 0;
-        recovered &= readAt(mem, bias + p.vaddr, &actual, sizeof(actual)) && actual == p.original;
+        recovered &= readAt(mem, p.address, &actual, sizeof(actual)) && actual == p.original;
     }
     return pause.finish() && recovered ? kProtectionDenied : kRecoveryFailed;
 }
 
-jint run(const std::string& nativeDir, const std::string& apkPath, uint32_t background) {
-    const auto patches = makePatches(background);
+jint run(const std::string& nativeDir, const std::string& apkPath, uint32_t background, uint32_t foreground) {
     const long size = sysconf(_SC_PAGESIZE);
     if (size <= 0 || size > 65536 || (size & (size - 1)) != 0) return kUnsupported;
     const size_t pageSize = size;
     std::vector<Backing> backings;
-    if (!nativeDir.empty()) addBacking(nativeDir + "/libapp.so", false, pageSize, backings);
-    addBacking(apkPath, true, pageSize, backings);
-    if (backings.empty()) return kIdentityMismatch;
+    for (const auto* spec : {&kAppImage, &kLauncherImage}) {
+        bool found = false;
+        if (!nativeDir.empty()) found |= addBacking(nativeDir + "/" + spec->library, false, *spec, pageSize, backings);
+        found |= addBacking(apkPath, true, *spec, pageSize, backings);
+        if (!found) return kIdentityMismatch;
+    }
     File mem(open("/proc/self/mem", O_RDONLY | O_CLOEXEC));
     if (mem.fd < 0) return kMapsUnavailable;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     do {
         std::vector<Mapping> maps;
         if (!readMaps(maps)) return kMapsUnavailable;
-        const Backing* selected = nullptr;
-        uintptr_t selectedBias = 0;
+        SelectedImages selected{};
         for (const auto& b : backings) {
             for (const auto& m : maps) {
                 if (!sameBacking(m, b) || m.protection != (PROT_READ | PROT_EXEC) ||
                     m.offset < b.offset) continue;
                 const uint64_t relative = m.offset - b.offset;
-                if (relative < kTextVaddr || relative >= kTextVaddr + kTextSize || relative > m.start) continue;
-                // Validated PT_LOAD has p_offset == p_vaddr. APK mapping offsets
-                // include the ZIP data offset, which must be removed first.
-                const uintptr_t bias = m.start - relative;
-                if (bias % pageSize != 0 || !mappedImage(maps, b, bias, pageSize)) continue;
-                if (selected != nullptr && (selected != &b || selectedBias != bias)) return kIdentityMismatch;
-                selected = &b;
-                selectedBias = bias;
+                for (size_t i = 0; i < b.spec->segmentCount; ++i) {
+                    const auto& segment = b.spec->segments[i];
+                    if ((segment.flags & PF_X) == 0) continue;
+                    const uint64_t first = segment.offset & ~(pageSize - 1);
+                    const uint64_t end = (segment.offset + segment.fileSize + pageSize - 1) & ~(pageSize - 1);
+                    if (relative < first || relative >= end) continue;
+                    // Translate a file-backed mapping through its PT_LOAD.
+                    // libapp_launcher RX vaddr is file offset + 0x4000.
+                    const uint64_t address = relative < segment.offset ?
+                        segment.address - (segment.offset - relative) :
+                        segment.address + (relative - segment.offset);
+                    if (address > m.start) continue;
+                    const uintptr_t bias = m.start - address;
+                    if (bias % pageSize != 0 || !mappedImage(maps, b, bias, pageSize)) continue;
+                    auto& image = selected[b.spec == &kAppImage ? 0 : 1];
+                    if (image.backing != nullptr && (image.backing != &b || image.bias != bias)) return kIdentityMismatch;
+                    image = {&b, bias};
+                }
             }
         }
-        if (selected != nullptr) {
-            const jint result = install(*selected, selectedBias, pageSize, mem.fd, patches);
+        if (selected[0].backing != nullptr && selected[1].backing != nullptr) {
+            uint32_t foregroundBranch = 0, observerBranch = 0;
+            void* foregroundPage = prepareForeground(maps, selected[0].bias, pageSize, foreground, foregroundBranch);
+            if (foregroundPage == nullptr) return kCodePageUnavailable;
+            // The first allocation changes available gaps. Refresh only this
+            // discovery snapshot before choosing the second non-replacing hint.
+            std::vector<Mapping> observerMaps;
+            if (!readMaps(observerMaps)) {
+                munmap(foregroundPage, pageSize);
+                return kMapsUnavailable;
+            }
+            void* observerPage = prepareObserver(observerMaps, selected[1].bias, pageSize, observerBranch);
+            if (observerPage == nullptr) {
+                // Neither source branch has been published yet.
+                munmap(foregroundPage, pageSize);
+                return kCodePageUnavailable;
+            }
+            const auto patches = makePatches(background, foregroundBranch);
+            // Once branch publication is attempted, keep both RX pages for the
+            // process lifetime, including incomplete rollback/peer release.
+            const jint result = install(selected, pageSize, mem.fd, patches, observerBranch);
             if (result == kInstalled) {
                 __android_log_print(ANDROID_LOG_INFO, kTag,
-                    "Custom background ARGB=%08x and P3 installed at load_bias=%p; rendering RUNTIME UNVERIFIED",
-                    background, reinterpret_cast<void*>(selectedBias));
+                    "Custom ARGB background=%08x foreground=%08x and P3 installed at load_bias=%p; rendering RUNTIME UNVERIFIED",
+                    background, foreground, reinterpret_cast<void*>(selected[0].bias));
             }
             return result;
         }
@@ -538,7 +769,7 @@ bool javaString(JNIEnv* env, jstring input, std::string& output) {
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_jerrey_monoicon_hook_HyperOs4NativeHooks_nativeConfigure(
-        JNIEnv* env, jobject, jstring nativeDir, jstring apkPath, jint background) {
+        JNIEnv* env, jobject, jstring nativeDir, jstring apkPath, jint background, jint foreground) {
 #if defined(__aarch64__)
     if (!launcherProcess()) return kUnsupported;
     try {
@@ -546,9 +777,9 @@ Java_com_jerrey_monoicon_hook_HyperOs4NativeHooks_nativeConfigure(
         if (!javaString(env, nativeDir, directory) || !javaString(env, apkPath, apk) ||
             apk.empty() || apk.front() != '/' || (!directory.empty() && directory.front() != '/')) return kInvalidInput;
         if (gStarted.exchange(true)) return gStatus.load();
-        std::thread([directory, apk, background] {
+        std::thread([directory, apk, background, foreground] {
             jint result;
-            try { result = run(directory, apk, static_cast<uint32_t>(background)); }
+            try { result = run(directory, apk, static_cast<uint32_t>(background), static_cast<uint32_t>(foreground)); }
             catch (...) { result = kWorkerFailed; }
             gStatus.store(result);
             if (result != kInstalled) {
@@ -562,7 +793,7 @@ Java_com_jerrey_monoicon_hook_HyperOs4NativeHooks_nativeConfigure(
         return kWorkerFailed;
     }
 #else
-    (void)env; (void)nativeDir; (void)apkPath; (void)background;
+    (void)env; (void)nativeDir; (void)apkPath; (void)background; (void)foreground;
     return -1; // Other ABIs retain the legacy Java module; no native patching.
 #endif
 }
@@ -571,6 +802,15 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_jerrey_monoicon_hook_HyperOs4NativeHooks_nativeStatus(JNIEnv*, jobject) {
 #if defined(__aarch64__)
     return gStatus.load();
+#else
+    return -1;
+#endif
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_jerrey_monoicon_hook_HyperOs4NativeHooks_nativeReplayGeneration(JNIEnv*, jobject) {
+#if defined(__aarch64__)
+    return static_cast<jlong>(__atomic_load_n(&gObserverGeneration, __ATOMIC_ACQUIRE));
 #else
     return -1;
 #endif

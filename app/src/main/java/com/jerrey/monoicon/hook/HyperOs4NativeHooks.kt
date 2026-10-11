@@ -8,8 +8,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import androidx.annotation.Keep
+import com.jerrey.monoicon.BuildConfig
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import io.github.libxposed.api.XposedInterface
@@ -23,8 +25,8 @@ import java.util.zip.ZipFile
  *
  * Its APK has no DEX, so API 101's onPackageReady is used instead of relying on
  * onPackageLoaded. Native code supplies MonoIcon's computed background ARGB at
- * the controller's settings read. The existing widget tints cached images. Foreground,
- * masks, renderer and image cache remain launcher-owned. No Bitmap or Java/Dart
+ * the controller's settings read and foreground ARGB at the existing mode filter
+ * conversion. Masks, renderer and image cache remain launcher-owned. No Bitmap or Java/Dart
  * object bridge is created.
  * Preferences, wallpaper palette and light/dark mode are sampled once at startup;
  * applying changes requires a launcher restart so cached icons use one palette.
@@ -39,10 +41,11 @@ internal object HyperOs4NativeHooks {
     private const val HOOK_NAME = "HyperOs4Palette"
     private const val STATUS_WAITING = 0
     private const val STATUS_INSTALLED = 1
-    // Native scans for 30 s after validating disk metadata. Leave a margin for
-    // that preparation, and sample once more at our observation deadline.
+    // Native owns the 30 s discovery timeout after metadata validation. A slow
+    // preparation must not make Java abandon a subsequently successful install.
     private const val WAIT_LIMIT_MS = 35_000L
     private const val POLL_INTERVAL_MS = 100L
+    private const val REPLAY_INTERVAL_MS = 250L
     private val dexEntry = Regex("classes(?:[0-9]+)?\\.dex")
 
     private val bootstrapRegistered = AtomicBoolean(false)
@@ -111,20 +114,68 @@ internal object HyperOs4NativeHooks {
             PackageManager.PackageInfoFlags.of(0),
         )
         val info = packageInfo.applicationInfo ?: return
-        if (packageInfo.packageName != PACKAGE || packageInfo.longVersionCode != VERSION_CODE ||
-            packageInfo.versionName != VERSION_NAME || info.sourceDir != apkPath ||
+
+        // Package/shape gates first: they identify the launcher generation and
+        // hold for every build of it.
+        if (packageInfo.packageName != PACKAGE || info.sourceDir != apkPath ||
             info.processName != PACKAGE || info.flags and ApplicationInfo.FLAG_HAS_CODE != 0 ||
             !info.splitSourceDirs.isNullOrEmpty()
         ) return
 
-        // A matching version string must never divert an APK that still has the Java pipeline.
-        val hasLegacyPipeline = try {
+        // Runtime trace diagnostics run before the exact-build gate, so a launcher
+        // build the production patch table does not support can still report which
+        // Dart icon functions actually execute. The native tracer refuses any
+        // libapp.so whose GNU build ID it was not generated for, so this is a
+        // no-op on an unrelated build. Debug builds only.
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                TAG,
+                "device launcher versionCode=${packageInfo.longVersionCode} " +
+                    "versionName=${packageInfo.versionName} " +
+                    "supported=$VERSION_CODE/$VERSION_NAME " +
+                    "matches=${packageInfo.longVersionCode == VERSION_CODE && packageInfo.versionName == VERSION_NAME}",
+            )
+            HyperOs4TraceProbe.install(apkPath, "preflight before exact-build gate")
+        }
+
+        // Capability gate: does this launcher still have a Java icon pipeline?
+        //
+        // HyperOS 4's launcher is not an ART process — hyos_spawner forks
+        // com.miui.home without a Java runtime, so no class loading happens and
+        // this whole object can never run inside it. The Kotlin bootstrap and the
+        // JNI patch library therefore apply only to an ART launcher (older HyperOS
+        // and the Java pipeline). The HyperOS 4 launcher is covered by the
+        // LSPosed native_init payload in hyperos4_native_init.cpp, which is
+        // loaded into the HYOS spawner process family and does not need Java.
+        val hasJavaIconPipeline = try {
             classLoader.loadClass(LEGACY_ICON_CLASS)
             true
         } catch (_: ClassNotFoundException) {
             false
         }
-        if (hasLegacyPipeline) return
+        if (!hasJavaIconPipeline) {
+            Log.i(
+                TAG,
+                "no Java icon pipeline on ${packageInfo.versionName} " +
+                    "(${packageInfo.longVersionCode}); launcher is handled by the " +
+                    "native_init payload, no JNI patch installed",
+            )
+            return
+        }
+
+        // The exact-build gate. Everything below installs the production patches.
+        if (packageInfo.longVersionCode != VERSION_CODE || packageInfo.versionName != VERSION_NAME) {
+            Log.w(
+                TAG,
+                "unsupported launcher build ${packageInfo.versionName} (${packageInfo.longVersionCode}); " +
+                    "native patch not installed",
+            )
+            return
+        }
+
+        // A matching version string must never divert an APK that still has the Java pipeline.
+        // The capability gate above already proved the Java pipeline is absent, so only the
+        // no-DEX arm64 shape remains to be checked before loading the patch library.
         val nativeApk = ZipFile(apkPath).use { zip ->
             zip.getEntry("lib/arm64-v8a/libapp.so") != null &&
                 zip.getEntry("lib/arm64-v8a/libapp_launcher.so") != null &&
@@ -140,29 +191,39 @@ internal object HyperOs4NativeHooks {
 
         // Reuse the same Material 2025 color engine as the current built-in theme.
         // It reads the selected variant and system light/dark mode without loading
-        // an app icon. Compute once and pass only the supported background tint,
+        // an app icon. Compute once and pass the two packed ARGB scalars,
         // before patch installation; no per-icon JNI or pooled ColorFilter writes.
         PixelMonetColorEngine.init(StartupPaletteContext(context))
         val palette = PixelMonetColorEngine.getIconColors()
         System.loadLibrary("monoicon_hyperos4")
         val status = nativeConfigure(
-            info.nativeLibraryDir.orEmpty(), apkPath, palette.background,
+            info.nativeLibraryDir.orEmpty(), apkPath, palette.background, palette.foreground,
         )
-        if (reportStatus(status)) return
+        if (status < STATUS_WAITING) {
+            reportStatus(status)
+            return
+        }
 
-        // One bounded startup observer. No polling, parsing or rendering in icon/UI callbacks.
+        // Wait for the complete native transaction before requesting settings
+        // reloads. Registration generations also cover observers installed later.
+        // This worker performs no work in icon, Dart, or UI callbacks.
         Thread({
             try {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
                 val deadline = SystemClock.elapsedRealtime() + WAIT_LIMIT_MS
-                while (true) {
-                    val remaining = deadline - SystemClock.elapsedRealtime()
-                    if (remaining <= 0) break
-                    Thread.sleep(minOf(POLL_INTERVAL_MS, remaining))
-                    if (reportStatus(nativeStatus())) return@Thread
+                var current = status
+                var pendingReported = false
+                while (current == STATUS_WAITING) {
+                    if (!pendingReported && SystemClock.elapsedRealtime() >= deadline) {
+                        Log.w(TAG, "Native status still pending after 35 s; continuing installation observation")
+                        pendingReported = true
+                    }
+                    Thread.sleep(POLL_INTERVAL_MS)
+                    current = nativeStatus()
                 }
-                if (!reportStatus(nativeStatus())) {
-                    Log.w(TAG, "Native status still pending after 35 s; hook installation unconfirmed")
+                reportStatus(current)
+                if (current == STATUS_INSTALLED) {
+                    observeSettingsReplay(context)
                 }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
@@ -175,6 +236,35 @@ internal object HyperOs4NativeHooks {
         }
     }
 
+    private fun observeSettingsReplay(context: Context) {
+        // Exact-build pool/URI evidence: SETTINGS_REPLAY_STATIC_EVIDENCE.md.
+        // notifyChange changes no persisted setting. The existing observer reloads
+        // both controller settings and invokes the launcher's original refresh.
+        val uri = Settings.System.getUriFor("key_monochrome_color")
+        var requestedGeneration = -1L
+        var failureReported = false
+        while (!Thread.currentThread().isInterrupted) {
+            // Sample BEFORE notifying. A registration completing between this
+            // load and notify is either reached now or causes a later replay.
+            val generation = nativeReplayGeneration()
+            if (generation >= 0 && generation != requestedGeneration) {
+                try {
+                    context.contentResolver.notifyChange(uri, null, 0)
+                    requestedGeneration = generation
+                    failureReported = false
+                } catch (t: RuntimeException) {
+                    if (!failureReported) {
+                        Log.w(TAG, "Settings replay request failed; will retry: ${t.message}", t)
+                        failureReported = true
+                    }
+                }
+            }
+            // Keep observing late registrations for the process lifetime. Stable
+            // generations do no Binder work and never invalidate the icon cache.
+            Thread.sleep(if (failureReported) 1_000L else REPLAY_INTERVAL_MS)
+        }
+    }
+
     /** Returns true for a terminal result; waiting must never be reported as installed. */
     private fun reportStatus(status: Int): Boolean = when (status) {
         STATUS_WAITING -> false
@@ -183,8 +273,8 @@ internal object HyperOs4NativeHooks {
                 HookRegistry.install(HOOK_NAME, required = false) {}
                 Log.i(
                     TAG,
-                    "Custom background tint instructions installed; rendering RUNTIME UNVERIFIED; " +
-                        "palette and preference changes require launcher restart",
+                    "Custom foreground/background instructions installed; rendering RUNTIME UNVERIFIED; " +
+                        "settings replay requests enabled; palette changes require launcher restart",
                 )
             }
             true
@@ -202,9 +292,10 @@ internal object HyperOs4NativeHooks {
                 -9 -> "patch recovery incomplete; launcher restart required"
                 -10 -> "cannot safely pause all launcher threads; instructions unchanged"
                 -11 -> "background settings code is active; instructions unchanged"
+                -12 -> "cannot prepare reachable executable palette/observer code pages"
                 else -> "unknown native status"
             }
-            Log.w(TAG, "Native custom background tint installation incomplete: status=$status ($reason)")
+            Log.w(TAG, "Native custom palette installation incomplete: status=$status ($reason)")
             true
         }
     }
@@ -220,6 +311,8 @@ internal object HyperOs4NativeHooks {
         nativeDir: String,
         apkPath: String,
         background: Int,
+        foreground: Int,
     ): Int
     private external fun nativeStatus(): Int
+    private external fun nativeReplayGeneration(): Long
 }
