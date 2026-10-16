@@ -46,6 +46,7 @@
 #include <ctime>
 #include <cstdint>
 #include <cstring>
+#include "hyperos4_icon_files.h"
 
 namespace monoicon::hyos {
 
@@ -60,6 +61,10 @@ struct NativeAPIEntries {
 };
 
 const NativeAPIEntries* gApi = nullptr;
+
+extern "C" bool monoicon_hyos_prepare_icon_files() {
+    return gApi && monoicon_hyos_install_icon_files(gApi->hookFunc);
+}
 
 // Which function this build hooks. Reported in the status file so a run can never be
 // attributed to the wrong experiment.

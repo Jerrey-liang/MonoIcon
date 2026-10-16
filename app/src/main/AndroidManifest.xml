@@ -5,6 +5,14 @@
     <!-- Fallback path for the in-app "Restart HyperOS Launcher" button -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
+    <queries>
+        <package android:name="com.miui.home" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <!--
       Read the wallpaper IMAGE so the theme seed can be quantised the way Material
       Color Utilities defines it (Celebi quantise + Score ranking). Without it we
@@ -70,6 +78,15 @@
             </intent-filter>
 
         </activity>
+
+        <receiver
+            android:name=".hook.HyperOs4RefreshReceiver"
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR_SERVICE" />
+        <service
+            android:name=".hook.HyperOs4RefreshJob"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
     </application>
 

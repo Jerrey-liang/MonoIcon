@@ -2,6 +2,7 @@ package com.jerrey.monoicon
 
 import android.app.Application
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
 import com.jerrey.monoicon.logging.LogStore
 import com.jerrey.monoicon.logging.LogcatLogger
 import com.jerrey.monoicon.logging.loge
@@ -44,6 +45,7 @@ class MonoIconApplication : Application() {
             .onFailure { loge(TAG, "config initialisation failed", it) }
 
         installCrashLogger()
+        HyperOs4PalettePublisher.init(this)
     }
 
     /**

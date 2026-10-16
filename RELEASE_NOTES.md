@@ -1,71 +1,35 @@
-# MonoIcon 2.0.1
+# MonoIcon 2.1.0
 
-**versionCode 2** · 上一个版本 / Previous release: 2.0.0
-
----
+**versionCode 3** · 上一个版本 / Previous release: 2.0.1
 
 ## 中文
 
-### 新增
+此次为功能更新：新增对当前 HyperOS 4 测试环境的适配，并完善图标显示与设置切换。
 
-- **日志导出** — 日志页新增「导出日志」，通过系统文件选择器把完整日志保存为带时间戳的 `.txt`。使用 Android 官方存储访问框架，不需要任何存储权限。
+- 修复部分图标不变色、变成纯色块或保留原图的问题。
+- 完善电话、日历、时钟和小爱等系统应用的主题图标。
+- 改善圆形图标的大小，支持与系统默认形状切换。
+- 完善配色、Lawnicons 和总开关的切换与关闭恢复。
+- 改善更新模块后的设置应用流程。
 
-### 改进
+**仅适配当前测试环境，其他版本的系统桌面没有经过测试，不保证可用。**
 
-- **查看日志不再需要 root** — 日志页改为显示 MonoIcon 自身记录的日志，不再依赖 root 去读取系统日志。离开页面、旋转屏幕、Activity 重建都不会再清空日志；退出应用前的内容会持久保留。
-- **应用抽屉滑动更流畅** — 同一个图标在重复绑定时不再重新生成，图标生成结果按请求缓存；同时消除了绑定热路径上的重复反射查找与主线程上重复的配色计算。
-- **启动日志明确版本** — 模块加载时打印的版本号已同步为 2.0.1。
+当前环境：设备 22041211AC，Android 17，HyperOS 4（OS4.0.0.3.XAACNXM），系统桌面 RELEASE-8.01.02.6144-260818-08251107-R。
 
-### 修复
-
-- **缓存失效不完整** — 应用更新/卸载后，部分图标缓存此前不会被清除（缓存键解析错误），现已修正。
-- **图标替换结果一致性** — 不再把渲染器内部的共享遮罩位图交给桌面进程，避免潜在的显示异常。
-
-### 兼容性
-
-> **HyperOS 4 尚未完全支持。**
->
-> 本版本已加入针对 HyperOS 4 桌面的适配代码，但**尚不完整**：HyperOS 4 的桌面与旧版差异较大，图标主题化可能不生效或表现异常。HyperOS 4 的完整支持仍在开发中，请等待后续版本。
->
-> MonoIcon 目前面向 **HyperOS 3 及更早版本**。
-
-- 运行环境不变：Android 15（API 35）及以上、LSPosed（libxposed API 101+）
-- root 仍为可选，且**仅「重启作用域」需要**；不授予时图标主题化与日志功能均正常工作
-
-### 构建说明
-
-本版本引入了 native 构建，自行编译需要额外安装 **NDK 28.2.13676358** 与 **CMake 3.22.1**，否则 `assembleRelease` 会失败。
-
----
+当前 HyperOS 4 适配需要为 MonoIcon 授予 root，并启用系统桌面与系统界面作用域。更新后请重启作用域。日历、时钟在启用主题图标时使用静态图案。
 
 ## English
 
-### Added
+This feature release adds support for the current HyperOS 4 test environment and improves icon rendering and settings changes.
 
-- **Log export** — the logs page gains an "Export logs" action that saves the full log as a timestamped `.txt` through the system file picker. It uses the Android Storage Access Framework, so it needs no storage permission.
+- Fixes unchanged icons, solid-colour blocks and original icons overriding the selected style.
+- Improves themed Phone, Calendar, Clock and assistant icons.
+- Improves circular icon sizing and switching to the system default shape.
+- Improves colour, Lawnicons and master-toggle changes, including restoring original icons.
+- Improves applying settings after module updates.
 
-### Improved
+**Only the current test environment is adapted and verified. Other system launcher versions have not been tested and are not guaranteed to work.**
 
-- **Viewing logs no longer needs root** — the logs page now shows the log MonoIcon records for itself instead of reading the system log through root. Leaving the page, rotating the screen or recreating the Activity no longer clears it, and entries are persisted so they survive the app being closed.
-- **Smoother app-drawer scrolling** — an icon is no longer regenerated when it is rebound; generated results are cached per request, and the bind path no longer repeats reflection lookups or recomputes the colour palette on the main thread.
-- **Version shown at startup** — the version the module logs on load is now 2.0.1.
+Tested environment: device 22041211AC, Android 17, HyperOS 4 (OS4.0.0.3.XAACNXM), launcher RELEASE-8.01.02.6144-260818-08251107-R.
 
-### Fixed
-
-- **Incomplete cache invalidation** — after an app was updated or uninstalled, some icon cache entries were not cleared (the cache key was being parsed incorrectly). This is corrected.
-- **Icon replacement consistency** — the renderer's internal shared mask bitmap is no longer handed to the launcher process, avoiding a possible display glitch.
-
-### Compatibility
-
-> **HyperOS 4 is not fully supported yet.**
->
-> This release adds code targeting the HyperOS 4 launcher, but it is **not complete**: HyperOS 4 differs substantially from earlier versions, and icon theming may not take effect or may behave incorrectly there. Full HyperOS 4 support is still in development; please wait for a later release.
->
-> MonoIcon currently targets **HyperOS 3 and earlier**.
-
-- Runtime requirements are unchanged: Android 15 (API 35) or newer, LSPosed (libxposed API 101+)
-- Root remains optional and is now needed **only for "Restart scope"**; icon theming and the logs page work without it
-
-### Build note
-
-This release introduces a native build. Compiling it yourself additionally requires **NDK 28.2.13676358** and **CMake 3.22.1**; without them `assembleRelease` will fail.
+This HyperOS 4 adaptation requires root for MonoIcon and both launcher and SystemUI scopes. Restart the scopes after updating. Calendar and Clock use static artwork while themed icons are enabled.

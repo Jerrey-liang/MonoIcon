@@ -66,9 +66,15 @@ class AospMonochromeMaskStrategy : MaskStrategy {
             if (adaptiveSource != null) {
                 val size = aospTargetSize(adaptiveSource, d)
                 val mono = DrawableConverter.getMonochromeLayer(adaptiveSource)
-                if (mono != null) {
+                // Some HyperOS 4 APKs expose an empty or fully opaque placeholder
+                // as monochrome. That is not a glyph; continue through the normal
+                // Lawnicons/AOSP fallback instead of publishing a solid plate.
+                val nativeMask = mono?.let {
+                    LabMonochromeExtractor.extractPixelNativeMonochrome(it, size)
+                }?.takeIf(::hasUsableGlyph)
+                if (nativeMask != null) {
                     source = MaskStrategy.SOURCE_NATIVE
-                    mask = LabMonochromeExtractor.extractPixelNativeMonochrome(mono, size)
+                    mask = nativeMask
                     keyBitmap = mask
                     logd(TAG, "[AospMask] source=AOSP_NATIVE raw=$rawUsed")
                 } else {
@@ -193,5 +199,18 @@ class AospMonochromeMaskStrategy : MaskStrategy {
 
     companion object {
         private const val TAG = "MonoIcon.AospMask"
+
+        internal fun hasUsableGlyph(mask: Bitmap): Boolean {
+            val pixels = IntArray(mask.width * mask.height)
+            mask.getPixels(pixels, 0, mask.width, 0, 0, mask.width, mask.height)
+            var min = 255
+            var max = 0
+            for (pixel in pixels) {
+                val alpha = pixel ushr 24
+                min = minOf(min, alpha)
+                max = maxOf(max, alpha)
+            }
+            return max >= 32 && max - min >= 16
+        }
     }
 }

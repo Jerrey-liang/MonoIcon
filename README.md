@@ -1,125 +1,104 @@
 # MonoIcon
 
-把 HyperOS 的第三方应用图标重绘成**单色 Material You 主题图标**的 LSPosed 模块。
+将应用图标统一为单色 Material You 风格的 LSPosed 模块，无需额外安装图标包或主题。
 
-无需图标包、无需 MTZ 主题：模块在桌面进程内接管图标加载，复用 AOSP 的单色遮罩与配色管线重新合成图标，因此图标形状与颜色跟随系统主题，换壁纸即换色。
+当前版本：**2.1.0**。
 
-> **兼容性说明：尚不支持 HyperOS 4**
->
-> MonoIcon 目前面向 HyperOS 3 及更早版本。HyperOS 4 的桌面与旧版差异较大，MonoIcon **尚未完全支持**，在 HyperOS 4 上图标主题化可能不生效或表现异常。HyperOS 4 的支持仍在开发中，请等待后续版本。
+## 兼容性说明
+
+> **本版本仅适配并验证了当前测试环境。其他版本的系统桌面没有经过测试，不保证可用。请在安装前核对系统桌面版本。**
+
+| 项目 | 当前测试环境 |
+| --- | --- |
+| 设备型号 | 22041211AC |
+| 系统 | HyperOS 4，OS4.0.0.3.XAACNXM |
+| Android 版本 | Android 17 |
+| 系统桌面版本 | RELEASE-8.01.02.6144-260818-08251107-R |
+
+相同的 HyperOS 大版本不代表系统桌面版本相同。系统或桌面更新后，也需要重新确认兼容性。
 
 ## 功能
 
-- **单色主题图标** — 在 `com.miui.home` 内接管桌面图标、文件夹预览与最近任务的图标管线，把彩色图标重绘为单色主题图标
-- **9 种取色方案** — Material Dynamic Color 2025 的 Monochrome / Neutral / Tonal Spot / Vibrant / Expressive / Fidelity / Content / Rainbow / Fruit Salad
-- **Lawnicons 遮罩** — 内置 Lawnicons 字形资源，为没有 monochrome 图层的应用提供遮罩（可在设置中关闭）
-- **圆形图标** — 不需要 MTZ 主题即可把图标统一裁成圆形（默认关闭）
-- **通知图标** — `com.android.systemui` 的通知应用图标使用同一套单色渲染（默认开启）
-- **一键重启作用域** — 重启桌面与系统界面，使新配置与新钩子立即生效（需要 root）
+- 桌面、文件夹预览和最近任务中的单色主题图标。
+- 9 种取色方案，可按喜好选择。
+- 内置 Lawnicons 字形，可在设置中开启或关闭。
+- 圆形图标与系统默认形状切换。
+- 通知应用图标使用统一样式。
+- 一键重启作用域，方便应用新设置。
 
-## 环境要求
+启用后，日历、时钟等动态图标会使用静态主题图标。日历图案中的数字不表示当天日期。
 
-运行：
+## 安装与使用
 
-- Android 15（API 35）或更高版本
-- LSPosed，libxposed API 101+（`minApiVersion=101`，`targetApiVersion=102`）
-- 作用域：`com.miui.home`、`com.android.systemui`
-- root 可选：仅「重启作用域」需要；不授予时图标主题化与日志功能照常工作
+1. 安装 MonoIcon 发布版 APK。
+2. 在 LSPosed 中启用模块，并勾选「系统桌面」和「系统界面」作用域。
+3. 为 MonoIcon 授予 root 权限。当前 HyperOS 4 适配需要此权限。
+4. 打开 MonoIcon，选择喜欢的配色和图标形状。
+5. 安装或更新模块后，使用应用中的「重启作用域」。修改设置后若显示未刷新，也可使用此按钮。
 
-构建：
+## 2.1.0 更新
 
-- JDK 17 或更高版本
-- Android SDK：平台 `android-37.2`、构建工具 `37.0.0`（compileSdk 37.2）
+- 新增对上述 HyperOS 4 测试环境的适配。
+- 修复部分图标不变色、显示为纯色块或仍保留原图的问题。
+- 完善电话、日历、时钟等系统应用的图标显示。
+- 改善圆形图标大小，以及配色、Lawnicons 和总开关的切换与恢复。
 
-## 安装
+## 已知问题
 
-1. 从 Releases 安装 APK，或在本地构建后安装 `app/build/outputs/apk/debug/app-debug.apk`
-2. 在 LSPosed Manager 中启用本模块，并勾选作用域 `com.miui.home` 与 `com.android.systemui`
-3. 重启作用域内应用使钩子生效：使用设置页的「图标样式 → 重启作用域」（需要 root），或手动重启桌面与系统界面
-4. 打开 MonoIcon 设置页，按需调整取色方案、圆形图标、Lawnicons 与通知图标
-
-## 构建
-
-```bash
-# Windows PowerShell
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-
-./gradlew :app:assembleDebug      # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:assembleRelease    # → app/build/outputs/apk/release/app-release.apk（已开启 R8）
-
-# 测试
-./gradlew :app:testDebugUnitTest            # JVM 单元测试
-./gradlew :app:connectedDebugAndroidTest    # 仪器测试，需要已连接的设备
-```
-
-Gradle 与 AGP 由 wrapper 与 `gradle/libs.versions.toml` 固定（Gradle 9.7.1 / AGP 9.4.0 / Kotlin 2.4.20）。
+- HyperOS 4环境下圆形图标尚未完全适配
+- Monoicon现在还没有添加对大图标的支持，请等待后续版本更新
 
 ## 许可证
 
-[Apache License 2.0](LICENSE)。
-
-二次分发时请同时遵守所使用第三方组件的许可：LSPosed 与 libxposed API、Miuix、Lawnicons、Material Color Utilities、AndroidX。
+[Apache License 2.0](LICENSE)。二次分发时请同时遵守所使用第三方组件的许可证。
 
 ---
 
 # MonoIcon
 
-An LSPosed module that redraws HyperOS third-party app icons as **monochrome Material You themed icons**.
+An LSPosed module that gives app icons a consistent monochrome Material You style, without a separate icon pack or theme.
 
-No icon pack and no MTZ theme required: the module takes over icon loading inside the launcher process and recomposes each icon through the AOSP monochrome mask and colour pipeline, so icon shape and colour follow the system theme and change with the wallpaper.
+Current version: **2.1.0**.
 
-> **Compatibility: HyperOS 4 is not supported yet**
->
-> MonoIcon currently targets HyperOS 3 and earlier. HyperOS 4 changes the launcher substantially, and MonoIcon does **not** fully support it yet — icon theming may not take effect, or may behave incorrectly, on HyperOS 4. Support is still in development; please wait for a later release.
+## Compatibility
+
+> **This release is adapted and verified only for the test environment below. Other system launcher versions have not been tested and are not guaranteed to work. Check your launcher version before installing.**
+
+| Item | Tested environment |
+| --- | --- |
+| Device model | 22041211AC |
+| System | HyperOS 4, OS4.0.0.3.XAACNXM |
+| Android version | Android 17 |
+| System launcher | RELEASE-8.01.02.6144-260818-08251107-R |
+
+Devices with the same major HyperOS version may have different launcher versions. Compatibility must be checked again after system or launcher updates.
 
 ## Features
 
-- **Monochrome themed icons** — takes over the icon pipeline for desktop icons, folder previews and recents inside `com.miui.home`, redrawing coloured icons as monochrome themed icons
-- **9 colour variants** — Monochrome / Neutral / Tonal Spot / Vibrant / Expressive / Fidelity / Content / Rainbow / Fruit Salad from Material Dynamic Color 2025
-- **Lawnicons masks** — a bundled Lawnicons glyph set supplies masks for apps that ship no monochrome layer (can be turned off in settings)
-- **Circular icons** — clips every icon to a circle without an MTZ theme (off by default)
-- **Notification icons** — notification app icons in `com.android.systemui` use the same monochrome rendering (on by default)
-- **One-tap scope restart** — restarts the launcher and SystemUI so new settings and hooks take effect immediately (requires root)
+- Monochrome icons on the home screen, in folder previews and in recents.
+- Nine colour variants.
+- Bundled Lawnicons glyphs with an optional toggle.
+- Circular icons or the system default shape.
+- Consistent notification app icons.
+- One-tap scope restart to apply changes.
 
-## Requirements
-
-Runtime:
-
-- Android 15 (API 35) or newer
-- LSPosed with libxposed API 101+ (`minApiVersion=101`, `targetApiVersion=102`)
-- Scope: `com.miui.home`, `com.android.systemui`
-- Root is optional: only the scope restart needs it; icon theming and the logs page work without it
-
-Build:
-
-- JDK 17 or newer
-- Android SDK: platform `android-37.2`, build-tools `37.0.0` (compileSdk 37.2)
+Dynamic icons such as Calendar and Clock use static themed icons while enabled. Numbers in the calendar artwork do not indicate the current date.
 
 ## Installation
 
-1. Install the APK from Releases, or build it locally and install `app/build/outputs/apk/debug/app-debug.apk`
-2. Enable the module in LSPosed Manager and tick the scope `com.miui.home` and `com.android.systemui`
-3. Restart the scoped apps so the hooks load: use **Icon style → Restart scope** in the settings screen (requires root), or restart the launcher and SystemUI manually
-4. Open the MonoIcon settings screen to adjust the colour variant, circular icons, Lawnicons and notification icons
+1. Install the MonoIcon release APK.
+2. Enable it in LSPosed and select the system launcher and SystemUI scopes.
+3. Grant root access to MonoIcon; this HyperOS 4 adaptation requires it.
+4. Open MonoIcon and choose your colours and icon shape.
+5. Use **Restart scope** after installing or updating the module, or if a setting change has not appeared yet.
 
-## Build
+## What's new in 2.1.0
 
-```bash
-# Windows PowerShell
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-
-./gradlew :app:assembleDebug      # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:assembleRelease    # → app/build/outputs/apk/release/app-release.apk (R8 enabled)
-
-# Tests
-./gradlew :app:testDebugUnitTest            # JVM unit tests
-./gradlew :app:connectedDebugAndroidTest    # instrumented tests, needs a connected device
-```
-
-Gradle and AGP are pinned by the wrapper and `gradle/libs.versions.toml` (Gradle 9.7.1 / AGP 9.4.0 / Kotlin 2.4.20).
+- Support for the HyperOS 4 test environment listed above.
+- Fixes for unchanged icons, solid-colour blocks and original icons overriding the selected style.
+- Improved Phone, Calendar and Clock icons.
+- Improved circular icon sizing and switching between colours, Lawnicons and the master toggle.
 
 ## License
 
-[Apache License 2.0](LICENSE).
-
-When redistributing, also comply with the licences of the third-party components used: LSPosed and the libxposed API, Miuix, Lawnicons, Material Color Utilities and AndroidX.
+[Apache License 2.0](LICENSE). Redistribution must also comply with the licences of the included third-party components.

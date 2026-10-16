@@ -12,6 +12,7 @@ import io.github.libxposed.service.XposedServiceHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -51,6 +52,11 @@ object ConfigManager {
     private const val KEY_CIRCLE_ICONS = "circle_icons"
     private const val KEY_NOTIFICATION_ICONS = "notification_icons"
     private const val KEY_LANGUAGE = "ui_language"
+    private const val KEY_PENDING_REMOTE = "pending_remote_keys"
+    private val uiKeys = setOf(
+        KEY_ENABLED, KEY_THEME_ID, KEY_VARIANT_ID, KEY_LAWNICONS_ENABLED,
+        KEY_CIRCLE_ICONS, KEY_NOTIFICATION_ICONS, KEY_LANGUAGE,
+    )
 
     /** Language ids: system default / Simplified Chinese / English. */
     private const val LANGUAGE_SYSTEM = "system"
@@ -66,7 +72,31 @@ object ConfigManager {
     val serviceState: StateFlow<XposedService?> = mutableServiceState.asStateFlow()
 
     private val remoteService: XposedService? get() = mutableServiceState.value
+    @Volatile
     private var fallbackPrefs: SharedPreferences? = null
+    @Volatile
+    private var uiRemotePrefs: SharedPreferences? = null
+    private val uiPrefsLock = Any()
+    private val configListeners = CopyOnWriteArraySet<(String?) -> Unit>()
+
+    /** App-process changes; null means the framework preference source changed. */
+    fun addOnConfigChangedListener(listener: (String?) -> Unit) {
+        configListeners.add(listener)
+    }
+
+    fun removeOnConfigChangedListener(listener: (String?) -> Unit) {
+        configListeners.remove(listener)
+    }
+
+    private fun notifyConfigChanged(key: String?) {
+        if (key != KEY_LANGUAGE) {
+            runCatching { CacheManager.clearAll() }
+        }
+        configListeners.forEach { listener ->
+            runCatching { listener(key) }
+                .onFailure { android.util.Log.w(TAG, "config listener failed: ${it.message}") }
+        }
+    }
 
     /** Guards the one-shot UI-side initialization (MainActivity may be recreated). */
     private val uiInitDone = AtomicBoolean(false)
@@ -89,12 +119,27 @@ object ConfigManager {
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             XposedServiceHelper.registerListener(object : XposedServiceHelper.OnServiceListener {
                 override fun onServiceBind(service: XposedService) {
-                    mutableServiceState.value = service
+                    synchronized(uiPrefsLock) {
+                        uiRemotePrefs = try {
+                            service.getRemotePreferences(PREFS_NAME).also(::reconcileUiPreferences)
+                        } catch (t: Throwable) {
+                            android.util.Log.w(TAG, "preference sync failed: ${t.message}")
+                            null
+                        }
+                        mutableServiceState.value = service
+                    }
+                    notifyConfigChanged(null)
                     android.util.Log.i(TAG, "XposedService bound")
                 }
 
                 override fun onServiceDied(service: XposedService) {
-                    if (mutableServiceState.compareAndSet(service, null)) {
+                    val changed = synchronized(uiPrefsLock) {
+                        mutableServiceState.compareAndSet(service, null).also {
+                            if (it) uiRemotePrefs = null
+                        }
+                    }
+                    if (changed) {
+                        notifyConfigChanged(null)
                         android.util.Log.i(TAG, "XposedService died")
                     }
                 }
@@ -114,6 +159,86 @@ object ConfigManager {
      */
     fun xposedService(): XposedService? = remoteService
 
+    private fun uiRemotePreferences(): SharedPreferences? =
+        uiRemotePrefs ?: remoteService?.getRemotePreferences(PREFS_NAME)
+
+    private fun pendingRemoteKeys(): Set<String> =
+        fallbackPrefs?.getStringSet(KEY_PENDING_REMOTE, emptySet()).orEmpty()
+
+    private fun readUiBoolean(key: String, default: Boolean): Boolean = synchronized(uiPrefsLock) {
+        val local = fallbackPrefs?.getBoolean(key, default) ?: default
+        if (key in pendingRemoteKeys()) return@synchronized local
+        try {
+            uiRemotePreferences()?.getBoolean(key, local) ?: local
+        } catch (_: Throwable) {
+            local
+        }
+    }
+
+    private fun readUiString(key: String, default: String): String = synchronized(uiPrefsLock) {
+        val local = fallbackPrefs?.getString(key, default) ?: default
+        if (key in pendingRemoteKeys()) return@synchronized local
+        try {
+            uiRemotePreferences()?.getString(key, local) ?: local
+        } catch (_: Throwable) {
+            local
+        }
+    }
+
+    /** Mirror every setting locally, including writes made while LSPosed is bound. */
+    private fun writeUiPreference(key: String, value: Any) {
+        synchronized(uiPrefsLock) {
+            try {
+                fallbackPrefs?.edit()?.apply {
+                    putValue(key, value)
+                    putStringSet(KEY_PENDING_REMOTE, pendingRemoteKeys() + key)
+                }?.apply()
+            } catch (t: Throwable) {
+                android.util.Log.w(TAG, "local setting write failed for $key: ${t.message}")
+            }
+            try {
+                uiRemotePreferences()?.let { remote ->
+                    remote.edit().putValue(key, value).apply()
+                    fallbackPrefs?.edit()
+                        ?.putStringSet(KEY_PENDING_REMOTE, pendingRemoteKeys() - key)?.apply()
+                }
+            } catch (t: Throwable) {
+                // Keep the local pending marker so a later service bind can replay it.
+                android.util.Log.w(TAG, "remote setting write failed for $key: ${t.message}")
+            }
+        }
+        notifyConfigChanged(key)
+    }
+
+    /** Preserve offline edits; otherwise the established framework store wins on bind. */
+    private fun reconcileUiPreferences(remote: SharedPreferences) {
+        val local = fallbackPrefs ?: return
+        val localValues = local.all
+        val remoteValues = remote.all
+        val pending = pendingRemoteKeys()
+        val remoteEditor = remote.edit()
+        val localEditor = local.edit()
+        for (key in uiKeys) {
+            val localValue = localValues[key]
+            val remoteValue = remoteValues[key]
+            if ((key in pending || remoteValue == null) && localValue != null) {
+                remoteEditor.putValue(key, localValue)
+            } else if (remoteValue != null) {
+                localEditor.putValue(key, remoteValue)
+            }
+        }
+        // Do not discard pending edits if the remote write fails.
+        remoteEditor.apply()
+        localEditor.remove(KEY_PENDING_REMOTE).apply()
+    }
+
+    private fun SharedPreferences.Editor.putValue(key: String, value: Any): SharedPreferences.Editor =
+        when (value) {
+            is Boolean -> putBoolean(key, value)
+            is String -> putString(key, value)
+            else -> this
+        }
+
     // ── UI language (Phase 13) ────────────────────────────────────────
 
     /**
@@ -132,72 +257,24 @@ object ConfigManager {
     }
 
     /** UI side: the selected language id (`system` / `zh` / `en`). */
-    fun getLanguageFromUi(): String = fallbackPrefs?.getString(KEY_LANGUAGE, LANGUAGE_SYSTEM)
-        ?: languageOrSystem()
-
-    private fun languageOrSystem(): String = try {
-        remoteService?.getRemotePreferences(PREFS_NAME)?.getString(KEY_LANGUAGE, LANGUAGE_SYSTEM)
-            ?: LANGUAGE_SYSTEM
-    } catch (_: Throwable) {
-        LANGUAGE_SYSTEM
-    }
+    fun getLanguageFromUi(): String = readUiString(KEY_LANGUAGE, LANGUAGE_SYSTEM)
 
     /**
      * Persists the language both in the module shared preferences (read by
      * `attachBaseContext`) and, when available, in the framework remote
      * preferences so the hook processes see the same value.
      */
-    fun setLanguage(languageId: String) {
-        try {
-            fallbackPrefs?.edit()?.putString(KEY_LANGUAGE, languageId)?.apply()
-            remoteService?.getRemotePreferences(PREFS_NAME)
-                ?.edit()
-                ?.putString(KEY_LANGUAGE, languageId)
-                ?.apply()
-            android.util.Log.i(TAG, "setLanguage=$languageId")
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setLanguage failed: ${t.message}")
-        }
-    }
+    fun setLanguage(languageId: String) = writeUiPreference(KEY_LANGUAGE, languageId)
 
     /** Reads the toggle (UI side; falls back to shared prefs). */
-    fun isEnabledFromUi(): Boolean {
-        val service = remoteService
-        return if (service != null) {
-            try {
-                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_ENABLED, true)
-            } catch (t: Throwable) {
-                fallbackPrefs?.getBoolean(KEY_ENABLED, true) ?: true
-            }
-        } else {
-            fallbackPrefs?.getBoolean(KEY_ENABLED, true) ?: true
-        }
-    }
+    fun isEnabledFromUi(): Boolean = readUiBoolean(KEY_ENABLED, true)
 
     /** Writes the toggle via the framework remote preferences. Falls back to module shared prefs. */
-    fun setEnabled(enabled: Boolean) {
-        try {
-            val service = remoteService
-            if (service != null) {
-                service.getRemotePreferences(PREFS_NAME)
-                    .edit()
-                    .putBoolean(KEY_ENABLED, enabled)
-                    .apply()
-                android.util.Log.i(TAG, "setEnabled=$enabled (remote)")
-            } else {
-                fallbackPrefs?.edit()?.putBoolean(KEY_ENABLED, enabled)?.apply()
-                android.util.Log.i(TAG, "setEnabled=$enabled (fallback prefs)")
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setEnabled failed: ${t.message}")
-            try {
-                fallbackPrefs?.edit()?.putBoolean(KEY_ENABLED, enabled)?.apply()
-            } catch (_: Throwable) { }
-        }
-    }
+    fun setEnabled(enabled: Boolean) = writeUiPreference(KEY_ENABLED, enabled)
 
     // ── Launcher (hook) process side ──────────────────────────────────
 
+    @Volatile
     private var remotePrefsProvider: (() -> SharedPreferences?)? = null
     private val cachedEnabled = AtomicBoolean(true)
     private val lastRefreshMs = AtomicLong(0L)
@@ -258,6 +335,7 @@ object ConfigManager {
      * once per [REFRESH_INTERVAL_MS]. Pure memory read on the fast path.
      */
     fun isEnabled(): Boolean {
+        if (remotePrefsProvider == null) return isEnabledFromUi()
         if (claimRefresh(lastRefreshMs)) {
             cachedEnabled.set(readRemote())
         }
@@ -287,93 +365,37 @@ object ConfigManager {
 
     /** Launcher side: reads the persisted theme ID (defaults to pixel_default). */
     fun getThemeId(): String = try {
-        remotePrefsProvider?.invoke()?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
+        val provider = remotePrefsProvider
+        if (provider == null) getThemeIdFromUi()
+        else provider()?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
     } catch (t: Throwable) {
         "pixel_default"
     }
 
     /** UI side: reads the theme ID from remote preferences (falls back to shared prefs). */
-    fun getThemeIdFromUi(): String {
-        val service = remoteService
-        return if (service != null) {
-            try {
-                service.getRemotePreferences(PREFS_NAME).getString(KEY_THEME_ID, "pixel_default")
-                    ?: "pixel_default"
-            } catch (t: Throwable) {
-                fallbackPrefs?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
-            }
-        } else {
-            fallbackPrefs?.getString(KEY_THEME_ID, "pixel_default") ?: "pixel_default"
-        }
-    }
+    fun getThemeIdFromUi(): String = readUiString(KEY_THEME_ID, "pixel_default")
 
     /** Writes the theme ID via the framework remote preferences. */
-    fun setThemeId(themeId: String) {
-        try {
-            val service = remoteService
-            if (service != null) {
-                service.getRemotePreferences(PREFS_NAME)
-                    .edit()
-                    .putString(KEY_THEME_ID, themeId)
-                    .apply()
-                android.util.Log.i(TAG, "setThemeId=$themeId (remote)")
-            } else {
-                fallbackPrefs?.edit()?.putString(KEY_THEME_ID, themeId)?.apply()
-                android.util.Log.i(TAG, "setThemeId=$themeId (fallback prefs)")
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setThemeId failed: ${t.message}")
-            try {
-                fallbackPrefs?.edit()?.putString(KEY_THEME_ID, themeId)?.apply()
-            } catch (_: Throwable) { }
-        }
-    }
+    fun setThemeId(themeId: String) = writeUiPreference(KEY_THEME_ID, themeId)
 
     // ── Material Dynamic Color Variant ────────────────────────────────
 
     /** Launcher side: reads the selected Google 2025 Variant. */
     fun getVariantId(): String = try {
-        remotePrefsProvider?.invoke()?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
+        val provider = remotePrefsProvider
+        if (provider == null) getVariantIdFromUi()
+        else provider()?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
     } catch (_: Throwable) {
         "tonal_spot"
     }
 
     /** UI side: reads the selected Variant from remote preferences. */
-    fun getVariantIdFromUi(): String {
-        val service = remoteService
-        return if (service != null) {
-            try {
-                service.getRemotePreferences(PREFS_NAME)
-                    .getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
-            } catch (_: Throwable) {
-                fallbackPrefs?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
-            }
-        } else {
-            fallbackPrefs?.getString(KEY_VARIANT_ID, "tonal_spot") ?: "tonal_spot"
-        }
-    }
+    fun getVariantIdFromUi(): String = readUiString(KEY_VARIANT_ID, "tonal_spot")
 
     /** Persists the selected Google 2025 Variant. */
     fun setVariantId(variantId: String) {
         val normalized = variantId.trim().lowercase().ifBlank { "tonal_spot" }
-        try {
-            val service = remoteService
-            if (service != null) {
-                service.getRemotePreferences(PREFS_NAME)
-                    .edit()
-                    .putString(KEY_VARIANT_ID, normalized)
-                    .apply()
-                android.util.Log.i(TAG, "setVariantId=$normalized (remote)")
-            } else {
-                fallbackPrefs?.edit()?.putString(KEY_VARIANT_ID, normalized)?.apply()
-                android.util.Log.i(TAG, "setVariantId=$normalized (fallback prefs)")
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setVariantId failed: ${t.message}")
-            try {
-                fallbackPrefs?.edit()?.putString(KEY_VARIANT_ID, normalized)?.apply()
-            } catch (_: Throwable) { }
-        }
+        writeUiPreference(KEY_VARIANT_ID, normalized)
     }
 
     // ── Lawnicons bundle toggle (Phase 8) ─────────────────────────────
@@ -387,6 +409,7 @@ object ConfigManager {
      * once — otherwise the change would only take effect for new icons.
      */
     fun isLawniconsEnabled(): Boolean {
+        if (remotePrefsProvider == null) return isLawniconsEnabledFromUi()
         if (claimRefresh(lastLawniconsRefreshMs)) {
             val value = readRemoteLawnicons()
             if (value != lastLawniconsValue) {
@@ -410,40 +433,10 @@ object ConfigManager {
     }
 
     /** UI side: reads the Lawnicons toggle (falls back to shared prefs). */
-    fun isLawniconsEnabledFromUi(): Boolean {
-        val service = remoteService
-        return if (service != null) {
-            try {
-                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_LAWNICONS_ENABLED, true)
-            } catch (_: Throwable) {
-                fallbackPrefs?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: true
-            }
-        } else {
-            fallbackPrefs?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: true
-        }
-    }
+    fun isLawniconsEnabledFromUi(): Boolean = readUiBoolean(KEY_LAWNICONS_ENABLED, true)
 
     /** Persists the Lawnicons toggle via the framework remote preferences. */
-    fun setLawniconsEnabled(enabled: Boolean) {
-        try {
-            val service = remoteService
-            if (service != null) {
-                service.getRemotePreferences(PREFS_NAME)
-                    .edit()
-                    .putBoolean(KEY_LAWNICONS_ENABLED, enabled)
-                    .apply()
-                android.util.Log.i(TAG, "setLawniconsEnabled=$enabled (remote)")
-            } else {
-                fallbackPrefs?.edit()?.putBoolean(KEY_LAWNICONS_ENABLED, enabled)?.apply()
-                android.util.Log.i(TAG, "setLawniconsEnabled=$enabled (fallback prefs)")
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setLawniconsEnabled failed: ${t.message}")
-            try {
-                fallbackPrefs?.edit()?.putBoolean(KEY_LAWNICONS_ENABLED, enabled)?.apply()
-            } catch (_: Throwable) { }
-        }
-    }
+    fun setLawniconsEnabled(enabled: Boolean) = writeUiPreference(KEY_LAWNICONS_ENABLED, enabled)
 
     // ── Circle icon shape toggle (Phase 9) ────────────────────────────
 
@@ -459,6 +452,7 @@ object ConfigManager {
      * them — the settings UI therefore shows the restart hint.
      */
     fun isCircleIconsEnabled(): Boolean {
+        if (remotePrefsProvider == null) return isCircleIconsEnabledFromUi()
         if (claimRefresh(lastCircleRefreshMs)) {
             val value = readRemoteCircleIcons()
             if (value != lastCircleValue) {
@@ -487,40 +481,10 @@ object ConfigManager {
     }
 
     /** UI side: reads the circle-icon toggle (falls back to shared prefs). */
-    fun isCircleIconsEnabledFromUi(): Boolean {
-        val service = remoteService
-        return if (service != null) {
-            try {
-                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_CIRCLE_ICONS, false)
-            } catch (_: Throwable) {
-                fallbackPrefs?.getBoolean(KEY_CIRCLE_ICONS, false) ?: false
-            }
-        } else {
-            fallbackPrefs?.getBoolean(KEY_CIRCLE_ICONS, false) ?: false
-        }
-    }
+    fun isCircleIconsEnabledFromUi(): Boolean = readUiBoolean(KEY_CIRCLE_ICONS, false)
 
     /** Persists the circle-icon toggle via the framework remote preferences. */
-    fun setCircleIconsEnabled(enabled: Boolean) {
-        try {
-            val service = remoteService
-            if (service != null) {
-                service.getRemotePreferences(PREFS_NAME)
-                    .edit()
-                    .putBoolean(KEY_CIRCLE_ICONS, enabled)
-                    .apply()
-                android.util.Log.i(TAG, "setCircleIconsEnabled=$enabled (remote)")
-            } else {
-                fallbackPrefs?.edit()?.putBoolean(KEY_CIRCLE_ICONS, enabled)?.apply()
-                android.util.Log.i(TAG, "setCircleIconsEnabled=$enabled (fallback prefs)")
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setCircleIconsEnabled failed: ${t.message}")
-            try {
-                fallbackPrefs?.edit()?.putBoolean(KEY_CIRCLE_ICONS, enabled)?.apply()
-            } catch (_: Throwable) { }
-        }
-    }
+    fun setCircleIconsEnabled(enabled: Boolean) = writeUiPreference(KEY_CIRCLE_ICONS, enabled)
 
     // ── Notification app-icon toggle (Phase 11, SystemUI process) ─────
 
@@ -534,6 +498,7 @@ object ConfigManager {
      * settings UI shows the restart hint.
      */
     fun isNotificationIconsEnabled(): Boolean {
+        if (remotePrefsProvider == null) return isNotificationIconsEnabledFromUi()
         if (claimRefresh(lastNotificationIconsRefreshMs)) {
             val value = readRemoteNotificationIcons()
             if (value != lastNotificationIconsValue) {
@@ -557,38 +522,8 @@ object ConfigManager {
     }
 
     /** UI side: reads the notification-icon toggle (falls back to shared prefs). */
-    fun isNotificationIconsEnabledFromUi(): Boolean {
-        val service = remoteService
-        return if (service != null) {
-            try {
-                service.getRemotePreferences(PREFS_NAME).getBoolean(KEY_NOTIFICATION_ICONS, true)
-            } catch (_: Throwable) {
-                fallbackPrefs?.getBoolean(KEY_NOTIFICATION_ICONS, true) ?: true
-            }
-        } else {
-            fallbackPrefs?.getBoolean(KEY_NOTIFICATION_ICONS, true) ?: true
-        }
-    }
+    fun isNotificationIconsEnabledFromUi(): Boolean = readUiBoolean(KEY_NOTIFICATION_ICONS, true)
 
     /** Persists the notification-icon toggle via the framework remote preferences. */
-    fun setNotificationIconsEnabled(enabled: Boolean) {
-        try {
-            val service = remoteService
-            if (service != null) {
-                service.getRemotePreferences(PREFS_NAME)
-                    .edit()
-                    .putBoolean(KEY_NOTIFICATION_ICONS, enabled)
-                    .apply()
-                android.util.Log.i(TAG, "setNotificationIconsEnabled=$enabled (remote)")
-            } else {
-                fallbackPrefs?.edit()?.putBoolean(KEY_NOTIFICATION_ICONS, enabled)?.apply()
-                android.util.Log.i(TAG, "setNotificationIconsEnabled=$enabled (fallback prefs)")
-            }
-        } catch (t: Throwable) {
-            android.util.Log.w(TAG, "setNotificationIconsEnabled failed: ${t.message}")
-            try {
-                fallbackPrefs?.edit()?.putBoolean(KEY_NOTIFICATION_ICONS, enabled)?.apply()
-            } catch (_: Throwable) { }
-        }
-    }
+    fun setNotificationIconsEnabled(enabled: Boolean) = writeUiPreference(KEY_NOTIFICATION_ICONS, enabled)
 }

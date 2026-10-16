@@ -23,19 +23,22 @@ constexpr int kSignalCookie = 0x4d493450;
 struct ThreadSlot {
     std::atomic<int> tid{0};
     std::atomic<int> parked{0};
+    std::atomic<int> signalledGeneration{0};
     std::atomic<uintptr_t> interruptedPc{0};
 };
 inline ThreadSlot slots[kMaxThreads];
 inline std::atomic<int> slotCount{0};
 inline std::atomic<int> pauseActive{0};
 inline std::atomic<int> ownerPid{0};
+inline std::atomic<int> pauseGeneration{kSignalCookie};
 static_assert(std::atomic<int>::is_always_lock_free && sizeof(std::atomic<int>) == sizeof(int));
 static_assert(std::atomic<uintptr_t>::is_always_lock_free);
 
 inline void pauseHandler(int, siginfo_t* info, void* context) {
     const int savedErrno = errno;
     if (info != nullptr && info->si_code == SI_QUEUE &&
-        info->si_pid == ownerPid.load() && info->si_value.sival_int == kSignalCookie && pauseActive.load()) {
+        info->si_pid == ownerPid.load() && info->si_value.sival_int == pauseActive.load() && pauseActive.load()) {
+        const int generation = info->si_value.sival_int;
         const int tid = static_cast<int>(syscall(SYS_gettid));
         const int count = slotCount.load();
         for (int i = 0; i < count; ++i) {
@@ -49,10 +52,10 @@ inline void pauseHandler(int, siginfo_t* info, void* context) {
                 if ((pc & 3) != 0) pc = 0;
             }
             slots[i].interruptedPc.store(pc);
-            slots[i].parked.store(1);
+            slots[i].parked.store(generation);
             const timespec retry{0, 10000000};
-            while (pauseActive.load()) {
-                syscall(SYS_futex, &pauseActive, FUTEX_WAIT_PRIVATE, 1, &retry, nullptr, 0);
+            while (pauseActive.load() == generation) {
+                syscall(SYS_futex, &pauseActive, FUTEX_WAIT_PRIVATE, generation, &retry, nullptr, 0);
             }
             // The patching thread completed D/I cache maintenance before release.
             asm volatile("isb" ::: "memory");
@@ -135,7 +138,7 @@ public:
         for (int i = 0; i < count; ++i) {
             // Slots for peers that exited before acknowledgment may remain.
             // acquire() already verified every currently live peer is parked.
-            if (!slots[i].parked.load()) continue;
+            if (slots[i].parked.load() != pauseActive.load()) continue;
             const uintptr_t pc = slots[i].interruptedPc.load();
             if (pc == 0 || (pc & 3) != 0 || (pc >= start && pc < end)) return false;
         }
@@ -162,7 +165,8 @@ public:
         if (!ignored(previous_)) return false;
         const int64_t started = monotonicNanos();
         if (started < 0) return false;
-        pauseActive.store(1);
+        const int generation = pauseGeneration.fetch_add(1) + 1;
+        pauseActive.store(generation);
         while (true) {
             int tids[kMaxThreads];
             const int count = listThreads(tids);
@@ -177,17 +181,20 @@ public:
                     if (known == static_cast<int>(kMaxThreads)) return false;
                     slots[index].tid.store(tids[i]);
                     slotCount.store(known + 1);
+                }
+                if (slots[index].signalledGeneration.load() != generation) {
+                    slots[index].signalledGeneration.store(generation);
                     siginfo_t signal{};
                     signal.si_signo = SIGURG;
                     signal.si_code = SI_QUEUE;
                     signal.si_pid = ownerPid.load();
                     signal.si_uid = static_cast<uid_t>(syscall(SYS_getuid));
-                    signal.si_value.sival_int = kSignalCookie;
+                    signal.si_value.sival_int = generation;
                     const long sent = syscall(SYS_rt_tgsigqueueinfo, ownerPid.load(), tids[i], SIGURG, &signal);
                     if (sent != 0 && errno != ESRCH) return false;
                     // Always enumerate again after sending, including ESRCH.
                     allParked = false;
-                } else if (!slots[index].parked.load()) {
+                } else if (slots[index].parked.load() != generation) {
                     allParked = false;
                 }
             }
@@ -202,7 +209,7 @@ public:
                     int index = 0;
                     const int known = slotCount.load();
                     while (index < known && slots[index].tid.load() != tids[i]) ++index;
-                    if (index == known || !slots[index].parked.load()) { allParked = false; break; }
+                    if (index == known || slots[index].parked.load() != generation) { allParked = false; break; }
                 }
             }
             if (allParked) {

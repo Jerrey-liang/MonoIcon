@@ -35,6 +35,7 @@ if("${ANDROID_ABI}" STREQUAL "arm64-v8a")
         hyperos4_native_init.cpp
         hyperos4_hook_backend.cpp
         hyperos4_palette_install.cpp
+        hyperos4_icon_files.cpp
     )
 
     target_compile_features(monoicon_hyperos4_native_init PRIVATE cxx_std_17)

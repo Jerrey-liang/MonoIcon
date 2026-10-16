@@ -2,6 +2,7 @@ package com.jerrey.monoicon.ui
 
 import android.content.Context
 import android.content.Intent
+import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.logging.logw
@@ -24,6 +25,7 @@ private const val TAG = "MonoIcon.ScopeRestart"
 fun restartScopedApps(context: Context, packages: List<String>): Boolean {
     val scope = packages.filter { it.isNotBlank() }.distinct()
     if (scope.isEmpty()) return false
+    if ("com.miui.home" in scope && !HyperOs4PalettePublisher.flushBeforeRestart(context)) return false
 
     val killAll = scope.joinToString("; ") { "killall $it" }
     val commands = listOf(

@@ -40,7 +40,9 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <link.h>
+#include <pthread.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -51,19 +53,25 @@
 #include <cstring>
 #include <limits.h>
 #include <memory>
-#include <thread>
 
 #include "hyperos4_code_page.h"
 #include "hyperos4_functions_6144_inc.h"
 #include "hyperos4_observer_code.h"
 #include "hyperos4_thread_pause.h"
+#include "hyperos4_icon_files.h"
+#include "hyperos4_dynamic_icons_6144.h"
 
 namespace monoicon::hyos {
 
 constexpr char kLogTag[] = "MonoIcon.Palette";
-constexpr char kPalettePath[] = "/data/user/0/com.miui.home/files/monoicon_palette.txt";
-constexpr char kStatusPath[] = "/data/user/0/com.miui.home/files/monoicon_hyos_palette.txt";
-constexpr char kFallbackPalettePath[] = "/data/local/tmp/monoicon_palette.txt";
+constexpr size_t kConfigCapacity = 256;
+
+void LauncherFilePath(char* path, size_t capacity, const char* name) {
+    // Android isolates secondary users with a 100000 UID range. Never read the
+    // owner's stale config or a global adb file when running as another user.
+    std::snprintf(path, capacity, "/data/user/%u/com.miui.home/files/%s",
+                  static_cast<unsigned>(getuid()) / 100000u, name);
+}
 
 // 6144 libapp.so patch table. word/replacement per instruction; function and
 // functionSize bound the identity snapshot and the thread-pause exclusion.
@@ -81,8 +89,25 @@ constexpr InstructionPatch kInstructionPatches[] = {
     {0x8cefb8,  0xf85d83a2, 0x00000000},  // foreground ldur -> veneer branch
     {0x194a79c, 0x540002e0, 0xd503201f},  // onSettingsChanged b.eq -> nop
     {0x12c8f4c, 0x54000040, 0xd503201f},  // didUpdateWidget b.eq -> nop
-    {0xe2abdc,  0x97fa1ff6, 0x910082c0},  // _hasMonochromeLayer bl -> add x0,x22,#0x20 (true)
+    // Dynamic/MAML sources bypass the exported PNGs. Complete their existing
+    // Future with null so the caller proceeds to the normal theme source.
+    {0x191a184, 0xf85f03a1, monoicon::hyperos4::dynamic6144::kFancyBranch},
+    {0x191a644, 0xf85f03a1, monoicon::hyperos4::dynamic6144::kAnimatingBranch},
+    {0x191af1c, 0xf85f03a1, monoicon::hyperos4::dynamic6144::kMamlAdaptiveBranch},
+    // Existing theme archives and AI-HD art outrank ModIconSource. Let their
+    // own async miss result select our PNG source (or the raw APK fallback).
+    {0x1aad408, 0xf85e83a5, monoicon::hyperos4::dynamic6144::kThemeSourceBranch},
+    {0x1aaacc4, 0xf85703a0, monoicon::hyperos4::dynamic6144::kAiHdSourceBranch},
+    {0x1aab688, 0xf9403f40, monoicon::hyperos4::dynamic6144::kModSourceBranch},
+    {0x1aab6d4, 0x94000280, 0x1400002d}, // skip layered mod art; use the complete PNG
+    // Return the composed image via the existing async style identity path.
+    // Running IconComposer.applyStyle again shrinks already-normalized circles.
+    {0x17e743c, 0xa9bf79fd, monoicon::hyperos4::dynamic6144::kModStyleBranch},
+    {0x1aab2b8, 0x94000031, monoicon::hyperos4::dynamic6144::kThemeStyleBranch},
+    // Keep _hasMonochromeLayer's real result. Claiming a layer exists does not
+    // create a MonoIcon mask; it turns legacy/system icons into solid blocks.
 };
+constexpr size_t kLegacyPatchCount = 8;
 constexpr size_t kInstructionPatchCount =
     sizeof(kInstructionPatches) / sizeof(kInstructionPatches[0]);
 
@@ -110,6 +135,7 @@ enum PaletteResult : uint32_t {
     kResultProtectionDenied = 9,
     kResultVerifyFailed = 10,
     kResultRollbackIncomplete = 11,
+    kResultDisabled = 12,
 };
 
 struct PaletteStatus {
@@ -134,7 +160,9 @@ constexpr uint32_t kStatusMagic = 0x4D4F504Cu;  // "MOPL"
 extern "C" __attribute__((used, visibility("default")))
 PaletteStatus monoicon_hyos_palette = {};
 
-std::atomic<uint32_t> gPaletteInstallState{0};  // 0 idle, 1 in flight, 2 done
+// A PID is the ownership token: an inherited spawner state cannot suppress a
+// child worker, and compare_exchange(pid,pid) can never start a second worker.
+std::atomic<uint32_t> gPaletteWorkerPid{0};
 
 void LogPalette(const char* message) {
     __android_log_write(ANDROID_LOG_INFO, kLogTag, message);
@@ -173,11 +201,9 @@ void AppendUint(char* buffer, size_t capacity, uint32_t value) {
 }  // namespace
 
 void WritePaletteStatus(const char* phase) {
-    const char* paths[] = {
-        "/data/user/0/com.miui.home/files/monoicon_hyos_palette.txt",
-        "/data/data/com.miui.home/files/monoicon_hyos_palette.txt",
-        "/data/local/tmp/monoicon_hyos_palette.txt",
-    };
+    char statusPath[160];
+    LauncherFilePath(statusPath, sizeof(statusPath), "monoicon_hyos_palette.txt");
+    const char* paths[] = {statusPath};
     char body[768] = {};
     AppendText(body, sizeof(body), "phase=");
     AppendText(body, sizeof(body), phase);
@@ -237,12 +263,12 @@ void WritePaletteStatus(const char* phase) {
                __atomic_load_n(&monoicon_hyos_palette.words_verified, __ATOMIC_ACQUIRE));
     AppendText(body, sizeof(body), "\n");
     for (const char* path : paths) {
-        const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+        const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
         if (fd < 0) continue;
         ssize_t written;
         do {
             written = write(fd, body, std::strlen(body));
-        } while (written < 0);
+        } while (written < 0 && errno == EINTR);
         close(fd);
         if (written > 0) {
             __atomic_store_n(&monoicon_hyos_palette.status_file_written, 1u,
@@ -253,7 +279,7 @@ void WritePaletteStatus(const char* phase) {
 }
 
 // ---------------------------------------------------------------------------
-// Palette file: "<background> <foreground>", each hex (0x…) or decimal.
+// Versioned app/native contract; legacy two-color files remain readable.
 // ---------------------------------------------------------------------------
 bool ParseUint32(const char*& p, const char* end, uint32_t& out) {
     while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) ++p;
@@ -272,37 +298,92 @@ bool ParseUint32(const char*& p, const char* end, uint32_t& out) {
         else if (base == 16 && c >= 'a' && c <= 'f') digit = static_cast<unsigned>(c - 'a' + 10);
         else if (base == 16 && c >= 'A' && c <= 'F') digit = static_cast<unsigned>(c - 'A' + 10);
         else break;
-        if (value > (UINT64_MAX - digit) / base) return false;
+        if (digit >= base || value > (UINT64_MAX - digit) / base) return false;
         value = value * base + digit;
         any = true;
         ++p;
     }
-    if (!any || value > 0xffffffffull) return false;
+    if (!any || value > 0xffffffffull ||
+        (p < end && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')) return false;
     out = static_cast<uint32_t>(value);
     return true;
 }
 
-bool ReadPalette(uint32_t& background, uint32_t& foreground) {
-    const char* paths[] = {kPalettePath, kFallbackPalettePath};
-    for (const char* path : paths) {
-        const int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd < 0) continue;
-        char buffer[128] = {};
-        ssize_t count;
-        do {
-            count = read(fd, buffer, sizeof(buffer) - 1u);
-        } while (count < 0);
+struct PaletteConfig {
+    uint32_t enabled = 1, background = 0, foreground = 0;
+    uint32_t circle = 0, lawnicons = 0;
+    uint32_t version = 0;
+    char generation[35] = {};
+    char payload[kConfigCapacity] = {};
+};
+
+PaletteResult ReadPalette(PaletteConfig& config) {
+    char path[160];
+    LauncherFilePath(path, sizeof(path), "monoicon_palette.txt");
+    const int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kResultNoFile;
+    struct stat st{};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+        st.st_size >= static_cast<off_t>(sizeof(config.payload))) {
         close(fd);
-        if (count <= 0) return false;
-        const char* p = buffer;
-        const char* end = buffer + count;
-        uint32_t bg = 0, fg = 0;
-        if (!ParseUint32(p, end, bg) || !ParseUint32(p, end, fg)) return false;
-        background = bg;
-        foreground = fg;
-        return true;
+        return kResultParseFailed;
     }
-    return false;
+    size_t total = 0;
+    while (total < static_cast<size_t>(st.st_size)) {
+        const ssize_t count = read(fd, config.payload + total, st.st_size - total);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { close(fd); return kResultParseFailed; }
+        total += static_cast<size_t>(count);
+    }
+    close(fd);
+    const char* p = config.payload;
+    const char* end = p + total;
+    constexpr char prefix[] = "MONOICON ";
+    if (total >= sizeof(prefix) - 1 && std::memcmp(p, prefix, sizeof(prefix) - 1) == 0) {
+        p += sizeof(prefix) - 1;
+        if (!ParseUint32(p, end, config.version) || (config.version != 1 && config.version != 2) ||
+            !ParseUint32(p, end, config.enabled) || config.enabled > 1 ||
+            !ParseUint32(p, end, config.background) ||
+            !ParseUint32(p, end, config.foreground) ||
+            !ParseUint32(p, end, config.circle) || config.circle > 1 ||
+            !ParseUint32(p, end, config.lawnicons) || config.lawnicons > 1) return kResultParseFailed;
+        if (config.version == 2) {
+            while (p < end && (*p == ' ' || *p == '\t')) ++p;
+            if (end - p < 34 || p[0] != 'g' || p[1] != '-') return kResultParseFailed;
+            for (size_t i = 2; i < 34; ++i) {
+                if (!((p[i] >= '0' && p[i] <= '9') || (p[i] >= 'a' && p[i] <= 'f'))) return kResultParseFailed;
+            }
+            std::memcpy(config.generation, p, 34);
+            p += 34;
+        }
+    } else if (!ParseUint32(p, end, config.background) ||
+               !ParseUint32(p, end, config.foreground)) {
+        return kResultParseFailed;
+    }
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) ++p;
+    return p == end ? kResultNone : kResultParseFailed;
+}
+
+// Published only after the transaction finishes. The app waits for these exact
+// bytes before notifying the launcher, so a notification cannot race a reload.
+bool AcknowledgePalette(const PaletteConfig& config) {
+    char path[160], temp[160];
+    LauncherFilePath(path, sizeof(path), "monoicon_palette.applied");
+    LauncherFilePath(temp, sizeof(temp), "monoicon_palette.applied.tmp");
+    const int fd = open(temp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) return false;
+    size_t written = 0;
+    const size_t length = std::strlen(config.payload);
+    while (written < length) {
+        const ssize_t count = write(fd, config.payload + written, length - written);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        written += static_cast<size_t>(count);
+    }
+    const bool synced = written == length && fsync(fd) == 0;
+    close(fd);
+    if (!synced || rename(temp, path) != 0) { unlink(temp); return false; }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -327,21 +408,51 @@ uintptr_t FindImageBias(const char* fragment) {
     return probe.bias;
 }
 
+std::array<uint32_t, kInstructionPatchCount> gCurrentInstructions = [] {
+    std::array<uint32_t, kInstructionPatchCount> words{};
+    for (size_t i = 0; i < words.size(); ++i) words[i] = kInstructionPatches[i].original;
+    return words;
+}();
+bool gPaletteInstalled = false;
+void* gForegroundPage = nullptr;
+
 template <size_t N>
-bool Matches(const uint8_t* memory, const std::array<uint8_t, N>& expected) {
+bool Matches(const uint8_t* memory, const std::array<uint8_t, N>& original,
+             uint32_t vaddr = 0) {
+    auto expected = original;
+    // On reload validate our previous transaction, not the unmodified image.
+    // All other bytes remain pinned to the verified 6144 snapshot.
+    if (vaddr != 0) {
+        for (size_t i = 0; i < kInstructionPatchCount; ++i) {
+            const auto& patch = kInstructionPatches[i];
+            if (patch.vaddr >= vaddr && patch.vaddr - vaddr + 4 <= N) {
+                std::memcpy(expected.data() + patch.vaddr - vaddr,
+                            &gCurrentInstructions[i], sizeof(uint32_t));
+            }
+        }
+    }
     return std::memcmp(memory, expected.data(), N) == 0;
 }
 
 // Validate every patched function against its embedded 6144 snapshot.
 bool ValidateImages(uintptr_t appBias, uintptr_t launcherBias) {
     namespace f = monoicon::hyperos4::functions6144;
+    namespace d = monoicon::hyperos4::dynamic6144;
     uint32_t checked = 0;
     const bool appOk =
-        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x1a04848), f::kOriginalIsSupportMonochrome) &&
-        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x194ad28), f::kOriginalLoadCurrentSettings) &&
-        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x8ceef0), f::kOriginalForegroundHelper) &&
-        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x194a6f0), f::kOriginalOnSettingsChanged) &&
-        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x12c8e14), f::kOriginalDidUpdateWidget);
+        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x1a04848), f::kOriginalIsSupportMonochrome, 0x1a04848) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x194ad28), f::kOriginalLoadCurrentSettings, 0x194ad28) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x8ceef0), f::kOriginalForegroundHelper, 0x8ceef0) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x194a6f0), f::kOriginalOnSettingsChanged, 0x194a6f0) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + 0x12c8e14), f::kOriginalDidUpdateWidget, 0x12c8e14) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kFancyVaddr), d::kFancyOriginal, d::kFancyVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kAnimatingVaddr), d::kAnimatingOriginal, d::kAnimatingVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kMamlAdaptiveVaddr), d::kMamlAdaptiveOriginal, d::kMamlAdaptiveVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kThemeSourceVaddr), d::kThemeSourceOriginal, d::kThemeSourceVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kAiHdSourceVaddr), d::kAiHdSourceOriginal, d::kAiHdSourceVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kModSourceVaddr), d::kModSourceOriginal, d::kModSourceVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kModStyleVaddr), d::kModStyleOriginal, d::kModStyleVaddr) &&
+        Matches(reinterpret_cast<const uint8_t*>(appBias + d::kThemeStyleVaddr), d::kThemeStyleOriginal, d::kThemeStyleVaddr);
     const bool launcherOk = Matches(
         reinterpret_cast<const uint8_t*>(launcherBias + monoicon::hyperos4::observer::kFunctionVaddr),
         monoicon::hyperos4::observer::kOriginalFunction);
@@ -350,6 +461,10 @@ bool ValidateImages(uintptr_t appBias, uintptr_t launcherBias) {
               f::kOriginalForegroundHelper.size() +
               f::kOriginalOnSettingsChanged.size() +
               f::kOriginalDidUpdateWidget.size() +
+              d::kFancyOriginal.size() + d::kAnimatingOriginal.size() + d::kMamlAdaptiveOriginal.size() +
+              d::kThemeSourceOriginal.size() + d::kAiHdSourceOriginal.size() +
+              d::kModSourceOriginal.size() +
+              d::kModStyleOriginal.size() + d::kThemeStyleOriginal.size() +
               monoicon::hyperos4::observer::kOriginalFunction.size();
     __atomic_store_n(&monoicon_hyos_palette.identity_bytes_checked, checked,
                      __ATOMIC_RELEASE);
@@ -399,10 +514,10 @@ void* PrepareForegroundPage(uintptr_t from, size_t pageSize, uint32_t foreground
            gapCount < sizeof(gaps) / sizeof(gaps[0])) {
         unsigned long long start = 0, end = 0;
         if (sscanf(line, "%llx-%llx", &start, &end) != 2 || end <= start) continue;
-        const uintptr_t mapEnd = static_cast<uintptr_t>(std::min<uintptr_t>(end, upper));
+        const uintptr_t mapStart = static_cast<uintptr_t>(std::min<uintptr_t>(start, upper));
         const uintptr_t gapStart = (previous + pageSize - 1) & ~(pageSize - 1);
-        if (gapStart < mapEnd && pageSize <= mapEnd - gapStart) {
-            gaps[gapCount++] = {gapStart, mapEnd};
+        if (gapStart < mapStart && pageSize <= mapStart - gapStart) {
+            gaps[gapCount++] = {gapStart, mapStart};
         }
         if (end >= upper) break;
         previous = std::max(previous, static_cast<uintptr_t>(end));
@@ -464,16 +579,16 @@ struct RuntimePatch {
 
 uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
                                    size_t pageSize, uint32_t background,
-                                   uint32_t foreground) {
+                                   uint32_t foreground, bool enabled, bool exportedIcons, bool circle) {
     if (!ValidateImages(appBias, launcherBias)) {
         Fail(kResultIdentityMismatch, "identity-mismatch");
         return kResultIdentityMismatch;
     }
 
     uint32_t foregroundBranch = 0;
-    void* foregroundPage = PrepareForegroundPage(
-        appBias + kForegroundPatchVaddr, pageSize, foreground, foregroundBranch);
-    if (foregroundPage == nullptr) {
+    void* foregroundPage = enabled && !exportedIcons ? PrepareForegroundPage(
+        appBias + kForegroundPatchVaddr, pageSize, foreground, foregroundBranch) : nullptr;
+    if (enabled && !exportedIcons && foregroundPage == nullptr) {
         Fail(kResultCodePageUnavailable, "code-page-unavailable");
         return kResultCodePageUnavailable;
     }
@@ -493,10 +608,23 @@ uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
             case kForegroundPatchVaddr: replacement = foregroundBranch; break;
             default: break;
         }
-        patches[i] = {appBias + p.vaddr, p.original, replacement};
+        if (exportedIcons) {
+            // Exported PNGs already contain MonoIcon's foreground, background and
+            // shape. Select the normal theme loader, without the OEM tint pass.
+            replacement = i >= kLegacyPatchCount ? p.replacement : p.original;
+            if (p.vaddr == 0x194adc4) replacement = 0xaa1103e4u; // mov x4, x17 (false)
+            if (p.vaddr == 0x194a79c || p.vaddr == 0x12c8f4c) replacement = 0xd503201fu;
+            // Full-bleed exports still need the selected system icon mask. Only
+            // circles are complete shapes and must skip that second mask/scale.
+            if (!circle && (p.vaddr == 0x17e743c || p.vaddr == 0x1aab2b8)) replacement = p.original;
+        } else if (i >= kLegacyPatchCount) {
+            replacement = p.original;
+        }
+        patches[i] = {appBias + p.vaddr, gCurrentInstructions[i],
+                      enabled ? replacement : p.original};
     }
 
-    uintptr_t pages[9] = {};
+    uintptr_t pages[kInstructionPatchCount] = {};
     size_t pageCount = 0;
     for (const auto& p : patches) {
         const uintptr_t page = p.address & ~(pageSize - 1);
@@ -507,17 +635,25 @@ uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
         }
     }
 
+    if (exportedIcons) monoicon_hyos_protect_code_pages(pages, pageCount, pageSize);
+
     ::hyperos4::ThreadPause pause;
     if (!pause.acquire()) {
-        // The RX page stays mapped; it is unreachable and harmless.
+        if (foregroundPage != nullptr) munmap(foregroundPage, pageSize);
         Fail(kResultThreadPauseUnavailable, "thread-pause-unavailable");
         return kResultThreadPauseUnavailable;
     }
     // A peer must not resume midway through the MOVZ/MOVK sequence with an
     // old partial value. Reject active settings code; never edit saved registers.
     if (!pause.excludes(appBias + kSettingsFunctionVaddr,
-                        appBias + kSettingsFunctionVaddr + kSettingsFunctionSize)) {
+                        appBias + kSettingsFunctionVaddr + kSettingsFunctionSize) ||
+        !pause.excludes(appBias + kForegroundFunctionVaddr,
+                        appBias + kForegroundFunctionVaddr + kForegroundFunctionSize) ||
+        (gForegroundPage != nullptr && !pause.excludes(
+            reinterpret_cast<uintptr_t>(gForegroundPage),
+            reinterpret_cast<uintptr_t>(gForegroundPage) + 9 * sizeof(uint32_t)))) {
         const bool finished = pause.finish();
+        if (finished && foregroundPage != nullptr) munmap(foregroundPage, pageSize);
         Fail(finished ? kResultPaletteInUse : kResultRollbackIncomplete,
              finished ? "palette-in-use" : "rollback-incomplete");
         return finished ? kResultPaletteInUse : kResultRollbackIncomplete;
@@ -525,12 +661,13 @@ uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
     // Re-validate with peers parked: no thread can change the pages now.
     if (!ValidateImages(appBias, launcherBias)) {
         const bool finished = pause.finish();
+        if (finished && foregroundPage != nullptr) munmap(foregroundPage, pageSize);
         Fail(kResultIdentityMismatch, "identity-mismatch-under-pause");
         (void)finished;
         return kResultIdentityMismatch;
     }
 
-    bool writable[8] = {};
+    bool writable[kInstructionPatchCount] = {};
     for (size_t i = 0; i < pageCount; ++i) {
         if (!Protect(pages[i], pageSize, PROT_READ | PROT_WRITE | PROT_EXEC)) {
             bool restored = true;
@@ -538,6 +675,7 @@ uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
                 restored &= Protect(pages[j], pageSize, PROT_READ | PROT_EXEC);
             }
             const bool finished = pause.finish();
+            if (finished && foregroundPage != nullptr) munmap(foregroundPage, pageSize);
             Fail(finished && restored ? kResultProtectionDenied : kResultRollbackIncomplete,
                  finished && restored ? "protection-denied" : "rollback-incomplete");
             return finished && restored ? kResultProtectionDenied : kResultRollbackIncomplete;
@@ -565,13 +703,21 @@ uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
                      __ATOMIC_RELEASE);
 
     if (verified) {
+        void* previousPage = gForegroundPage;
+        gForegroundPage = foregroundPage;
+        gPaletteInstalled = enabled;
+        for (size_t i = 0; i < kInstructionPatchCount; ++i) {
+            gCurrentInstructions[i] = patches[i].replacement;
+        }
         const bool finished = pause.finish();
         if (finished) {
-            Fail(kResultInstalled, "installed");
+            if (previousPage != nullptr) munmap(previousPage, pageSize);
+            Fail(enabled ? kResultInstalled : kResultDisabled,
+                 enabled ? "installed" : "disabled-restored");
         } else {
             Fail(kResultRollbackIncomplete, "rollback-incomplete");
         }
-        return finished ? kResultInstalled : kResultRollbackIncomplete;
+        return finished ? (enabled ? kResultInstalled : kResultDisabled) : kResultRollbackIncomplete;
     }
 
     // Rollback: restore every original word with peers still parked.
@@ -589,113 +735,171 @@ uint32_t InstallPaletteTransaction(uintptr_t appBias, uintptr_t launcherBias,
         recovered &= ReadInstruction(p.address) == p.original;
     }
     const bool finished = pause.finish();
+    if (finished && recovered && foregroundPage != nullptr) munmap(foregroundPage, pageSize);
     Fail(finished && recovered ? kResultVerifyFailed : kResultRollbackIncomplete,
          finished && recovered ? "verify-failed-rolled-back" : "rollback-incomplete");
     return finished && recovered ? kResultVerifyFailed : kResultRollbackIncomplete;
 }
 
-// ---------------------------------------------------------------------------
-// Public entry: called from the library-load callbacks in the launcher child.
-// ---------------------------------------------------------------------------
-extern "C" __attribute__((used, visibility("default")))
-uint32_t monoicon_hyos_palette_install() {
-    // The HYOS spawner runs this function before forking the launcher child and
-    // finishes with kResultImageMissing ("not-launcher-child"). The child
-    // inherits that state, so a plain one-shot guard would make the child skip
-    // its own install. The guard is therefore per-process: a completed install
-    // only short-circuits when it was completed by THIS pid.
-    const uint32_t pid = static_cast<uint32_t>(getpid());
-    const uint32_t state = gPaletteInstallState.load(std::memory_order_acquire);
-    if (state == 2u &&
-        __atomic_load_n(&monoicon_hyos_palette.pid, __ATOMIC_ACQUIRE) == pid) {
-        return __atomic_load_n(&monoicon_hyos_palette.result, __ATOMIC_ACQUIRE);
-    }
-    uint32_t expected = state;
-    if (!gPaletteInstallState.compare_exchange_strong(expected, 1u,
-                                                      std::memory_order_acq_rel,
-                                                      std::memory_order_acquire)) {
-        // Another thread in this process is already installing.
-        return __atomic_load_n(&monoicon_hyos_palette.result, __ATOMIC_ACQUIRE);
-    }
+std::atomic<bool> gIconsEnabled{false};
 
-    __atomic_store_n(&monoicon_hyos_palette.pid, pid, __ATOMIC_RELEASE);
-    const bool isChild = [&] {
-        const int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
-        if (fd < 0) return false;
-        char name[64] = {};
-        ssize_t count;
-        do {
-            count = read(fd, name, sizeof(name));
-        } while (count < 0);
-        close(fd);
-        constexpr char expected[] = "com.miui.home";
-        return count >= static_cast<ssize_t>(sizeof(expected)) &&
-               std::memcmp(name, expected, sizeof(expected)) == 0;
-    }();
-    __atomic_store_n(&monoicon_hyos_palette.in_launcher_child, isChild ? 1u : 0u,
-                     __ATOMIC_RELEASE);
-    __atomic_store_n(&monoicon_hyos_palette.magic, kStatusMagic, __ATOMIC_RELEASE);
-    __atomic_fetch_add(&monoicon_hyos_palette.attempts, 1u, __ATOMIC_RELAXED);
+extern "C" bool monoicon_hyos_icons_enabled() {
+    return gIconsEnabled.load(std::memory_order_acquire);
+}
 
-    // Never touch the spawner's shared pages; only the child renders icons.
-    if (!isChild) {
-        Fail(kResultImageMissing, "not-launcher-child");
-        gPaletteInstallState.store(2u, std::memory_order_release);
-        return kResultImageMissing;
-    }
-
-    const long pageSizeLong = sysconf(_SC_PAGESIZE);
-    if (pageSizeLong <= 0 || pageSizeLong > 65536 || (pageSizeLong & (pageSizeLong - 1)) != 0) {
-        Fail(kResultImageMissing, "bad-page-size");
-        gPaletteInstallState.store(2u, std::memory_order_release);
-        return kResultImageMissing;
-    }
-    const size_t pageSize = static_cast<size_t>(pageSizeLong);
-    __atomic_store_n(&monoicon_hyos_palette.page_size,
-                     static_cast<uint32_t>(pageSize), __ATOMIC_RELEASE);
-
-    uint32_t background = 0, foreground = 0;
-    if (!ReadPalette(background, foreground)) {
-        Fail(kResultNoFile, "palette-file-missing");
-        gPaletteInstallState.store(2u, std::memory_order_release);
-        return kResultNoFile;
-    }
-    __atomic_store_n(&monoicon_hyos_palette.background, background, __ATOMIC_RELEASE);
-    __atomic_store_n(&monoicon_hyos_palette.foreground, foreground, __ATOMIC_RELEASE);
-
-    // The first library-load callback can fire before the Dart snapshot is
-    // visible through dl_iterate_phdr (on device it appeared as late as ~3.3 s
-    // into a cold start). Do not block the loader callback that long: hand the
-    // bounded retry + transaction to a detached worker instead. Later callbacks
-    // see state==2 for this pid and return the in-flight result.
-    std::thread worker([background, foreground, pageSize] {
-        uintptr_t appBias = 0, launcherBias = 0;
-        for (uint32_t attempt = 0; attempt < 400; ++attempt) {  // 20 s bound
-            appBias = FindImageBias("libapp.so");
-            launcherBias = FindImageBias("libapp_launcher.so");
-            if (appBias != 0u && launcherBias != 0u) break;
-            usleep(50000);
+void* PaletteWorker(void* data) {
+    const size_t pageSize = reinterpret_cast<uintptr_t>(data);
+    uintptr_t appBias = 0, launcherBias = 0;
+    PaletteConfig applied;
+    bool haveApplied = false, acknowledged = false;
+    uint32_t previousFailure = UINT32_MAX;
+    for (;;) {
+        PaletteConfig next;
+        uint32_t result = ReadPalette(next);
+        if (result == kResultNone) {
+            if (appBias == 0) appBias = FindImageBias("libapp.so");
+            if (launcherBias == 0) launcherBias = FindImageBias("libapp_launcher.so");
+            if (appBias == 0 || launcherBias == 0) result = kResultImageMissing;
         }
-        if (appBias == 0u || launcherBias == 0u) {
-            Fail(kResultImageMissing, "image-missing");
-            return;
+        if (result != kResultNone) {
+            // A missing first file or temporarily absent image is recoverable.
+            // Keep the last valid transaction until a complete replacement is
+            // published; malformed/truncated writes never become instructions.
+            if (result != previousFailure) {
+                Fail(static_cast<PaletteResult>(result),
+                     result == kResultNoFile ? "palette-file-missing" :
+                     result == kResultImageMissing ? "image-missing" : "palette-parse-failed");
+                previousFailure = result;
+            }
+            usleep(500000);
+            continue;
+        }
+        // Some HYOS paths discard private file-backed pages through direct
+        // syscalls. Only recover bytes equal to our last patch or the pinned
+        // original; any third-party/unknown instruction remains a hard failure.
+        bool discarded = false, known = true;
+        std::array<uint32_t, kInstructionPatchCount> observed{};
+        if (haveApplied) {
+            for (size_t i = 0; i < kInstructionPatchCount; ++i) {
+                const uint32_t word = ReadInstruction(appBias + kInstructionPatches[i].vaddr);
+                observed[i] = word;
+                if (word != gCurrentInstructions[i]) {
+                    if (word != kInstructionPatches[i].original) { known = false; break; }
+                    discarded = true;
+                }
+            }
+            if (!known) {
+                gIconsEnabled.store(false, std::memory_order_release);
+                Fail(kResultIdentityMismatch, "unexpected-code-change");
+                return nullptr;
+            }
+            if (discarded) {
+                gCurrentInstructions = observed;
+                haveApplied = false;
+                acknowledged = false;
+            }
+        }
+        if (haveApplied && std::strcmp(applied.payload, next.payload) == 0) {
+            if (!acknowledged) acknowledged = AcknowledgePalette(applied);
+            usleep(500000);
+            continue;
         }
         __atomic_store_n(&monoicon_hyos_palette.app_bias_low,
-                         static_cast<uint32_t>(appBias & 0xffffffffu), __ATOMIC_RELEASE);
+                         static_cast<uint32_t>(appBias), __ATOMIC_RELEASE);
         __atomic_store_n(&monoicon_hyos_palette.app_bias_high,
                          static_cast<uint32_t>(appBias >> 32), __ATOMIC_RELEASE);
         __atomic_store_n(&monoicon_hyos_palette.launcher_bias_low,
-                         static_cast<uint32_t>(launcherBias & 0xffffffffu), __ATOMIC_RELEASE);
+                         static_cast<uint32_t>(launcherBias), __ATOMIC_RELEASE);
         __atomic_store_n(&monoicon_hyos_palette.launcher_bias_high,
                          static_cast<uint32_t>(launcherBias >> 32), __ATOMIC_RELEASE);
+        __atomic_fetch_add(&monoicon_hyos_palette.attempts, 1u, __ATOMIC_RELAXED);
+        const bool exportedIcons = next.version == 2;
+        if (!ValidateImages(appBias, launcherBias)) {
+            gIconsEnabled.store(false, std::memory_order_release);
+            Fail(kResultIdentityMismatch, "identity-mismatch");
+            return nullptr;
+        }
+        if (next.enabled && exportedIcons && !monoicon_hyos_icon_generation_ready(next.generation)) {
+            Fail(kResultNoFile, "icon-generation-unavailable");
+            usleep(500000);
+            continue;
+        }
+        if (next.enabled && exportedIcons && !monoicon_hyos_prepare_icon_files()) {
+            Fail(kResultNoFile, "icon-hooks-unavailable");
+            usleep(500000);
+            continue;
+        }
+        const bool sameCode = haveApplied && (applied.version == 2) == exportedIcons && applied.enabled == next.enabled &&
+            (!next.enabled || !exportedIcons || applied.circle == next.circle) &&
+            (!next.enabled || exportedIcons || (applied.background == next.background &&
+                               applied.foreground == next.foreground));
+        if (sameCode || (!next.enabled && !gPaletteInstalled)) {
+            result = next.enabled ? kResultInstalled : kResultDisabled;
+        } else {
+            result = InstallPaletteTransaction(appBias, launcherBias, pageSize,
+                                               next.background, next.foreground,
+                                               next.enabled != 0, exportedIcons, next.circle != 0);
+        }
+        if (result == kResultInstalled || result == kResultDisabled) {
+            __atomic_store_n(&monoicon_hyos_palette.background, next.background, __ATOMIC_RELEASE);
+            __atomic_store_n(&monoicon_hyos_palette.foreground, next.foreground, __ATOMIC_RELEASE);
+            monoicon_hyos_select_icon_generation(next.enabled && exportedIcons ? next.generation : nullptr);
+            gIconsEnabled.store(next.enabled != 0 && exportedIcons, std::memory_order_release);
+            applied = next;
+            haveApplied = true;
+            acknowledged = AcknowledgePalette(applied);
+            previousFailure = UINT32_MAX;
+            Fail(static_cast<PaletteResult>(result), next.enabled ? "config-applied" : "disabled-restored");
+            LogPalette(next.enabled ? "updated MonoIcon configuration" : "restored launcher configuration");
+        } else if (result == kResultRollbackIncomplete || result == kResultIdentityMismatch) {
+            // Unknown code or an incomplete rendezvous must not be retried as
+            // though our previous instruction state were still trustworthy.
+            gIconsEnabled.store(false, std::memory_order_release);
+            return nullptr;
+        }
+        usleep(500000);
+    }
+}
 
-        LogPalette("palette transaction starting in the launcher child");
-        InstallPaletteTransaction(appBias, launcherBias, pageSize,
-                                  background, foreground);
-    });
-    worker.detach();
-    // In flight: the transaction publishes its terminal result when it ends.
-    gPaletteInstallState.store(2u, std::memory_order_release);
+// Public entry: the loader callback never waits for configuration, Dart image
+// discovery, or the peer rendezvous. Exactly one worker belongs to each child.
+extern "C" __attribute__((used, visibility("default")))
+uint32_t monoicon_hyos_palette_install() {
+    const int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return kResultImageMissing;
+    char name[64] = {};
+    ssize_t count;
+    do { count = read(fd, name, sizeof(name)); } while (count < 0 && errno == EINTR);
+    close(fd);
+    constexpr char launcher[] = "com.miui.home";
+    if (count < static_cast<ssize_t>(sizeof(launcher)) ||
+        std::memcmp(name, launcher, sizeof(launcher)) != 0) return kResultImageMissing;
+
+    const uint32_t pid = static_cast<uint32_t>(getpid());
+    uint32_t owner = gPaletteWorkerPid.load(std::memory_order_acquire);
+    do {
+        if (owner == pid) return __atomic_load_n(&monoicon_hyos_palette.result, __ATOMIC_ACQUIRE);
+    } while (!gPaletteWorkerPid.compare_exchange_weak(owner, pid,
+                std::memory_order_acq_rel, std::memory_order_acquire));
+
+    const long pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize <= 0 || pageSize > 65536 || (pageSize & (pageSize - 1)) != 0) {
+        gPaletteWorkerPid.store(0, std::memory_order_release);
+        return kResultImageMissing;
+    }
+    __atomic_store_n(&monoicon_hyos_palette.pid, pid, __ATOMIC_RELEASE);
+    __atomic_store_n(&monoicon_hyos_palette.in_launcher_child, 1u, __ATOMIC_RELEASE);
+    __atomic_store_n(&monoicon_hyos_palette.magic, kStatusMagic, __ATOMIC_RELEASE);
+    __atomic_store_n(&monoicon_hyos_palette.page_size, static_cast<uint32_t>(pageSize), __ATOMIC_RELEASE);
+    pthread_t worker;
+    const int error = pthread_create(&worker, nullptr, PaletteWorker,
+                                     reinterpret_cast<void*>(static_cast<uintptr_t>(pageSize)));
+    if (error != 0) {
+        gPaletteWorkerPid.store(0, std::memory_order_release);
+        Fail(kResultThreadPauseUnavailable, "worker-unavailable");
+        return kResultThreadPauseUnavailable;
+    }
+    pthread_detach(worker);
     return kResultNone;
 }
 

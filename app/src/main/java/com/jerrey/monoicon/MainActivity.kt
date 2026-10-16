@@ -49,9 +49,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             MonoIconApp()
         }
-        // HyperOS 4: the dex-less launcher reads its palette from its own files
-        // dir and repaints on a settings notification; publish both here.
-        HyperOs4PalettePublisher.publish(applicationContext)
     }
 
     override fun onResume() {

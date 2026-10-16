@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.BitmapDrawable
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.logging.logd
@@ -126,7 +127,7 @@ internal object SystemUiIconHooks {
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept { chain: Chain ->
                     val argument = chain.getArg(0)
-                    if (isOwnThemedDrawable(argument)) argument else chain.proceed()
+                    styledIconResult(argument, method.returnType) ?: chain.proceed()
                 }
             installed++
         }
@@ -139,6 +140,22 @@ internal object SystemUiIconHooks {
     /** True when [value] is a MonoIcon drawable that must not be styled again. */
     internal fun isOwnThemedDrawable(value: Any?): Boolean = value is ColoredMonochromeDrawable
 
+    /** HyperOS 4's customizer declares BitmapDrawable, so its guard must honor that type. */
+    internal fun styledIconResult(value: Any?, returnType: Class<*>): Drawable? {
+        val drawable = value as? ColoredMonochromeDrawable ?: return null
+        if (returnType.isInstance(drawable)) return drawable
+        if (!returnType.isAssignableFrom(BitmapDrawable::class.java)) return null
+        val width = drawable.bounds.width().takeIf { it > 0 } ?: drawable.intrinsicWidth
+        val height = drawable.bounds.height().takeIf { it > 0 } ?: drawable.intrinsicHeight
+        if (width <= 0 || height <= 0) return null
+        val bounds = android.graphics.Rect(drawable.bounds)
+        return try {
+            BitmapDrawable(null, rasterize(drawable, width, height, Bitmap.DENSITY_NONE))
+        } finally {
+            drawable.bounds = bounds
+        }
+    }
+
     // ── Hooks ─────────────────────────────────────────────────────────
 
     private fun installDrawableHook(api: XposedInterface, method: java.lang.reflect.Method) {
@@ -146,6 +163,7 @@ internal object SystemUiIconHooks {
         api.hook(method)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
+                ensureInitialised(chain.thisObject)
                 if (!active()) return@intercept chain.proceed()
 
                 val original = try {
@@ -172,6 +190,7 @@ internal object SystemUiIconHooks {
         api.hook(method)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain: Chain ->
+                ensureInitialised(chain.thisObject)
                 if (!active()) return@intercept chain.proceed()
 
                 val original = try {
@@ -220,7 +239,9 @@ internal object SystemUiIconHooks {
         val height = original.height
         if (width <= 0 || height <= 0) return null
 
-        val key = "$pkg|${width}x$height|${ConfigManager.iconShape()}"
+        ensureInitialised(manager)
+        val colors = PixelMonetColorEngine.getIconColors()
+        val key = "$pkg|${width}x$height|${ConfigManager.iconShape()}|${ConfigManager.isLawniconsEnabled()}|${colors.foreground}|${colors.background}"
         bitmapCache[key]?.get()?.takeIf { !it.isRecycled }?.let { return it }
 
         val themed = themedDrawable(manager, pkg, null) ?: return null
@@ -274,6 +295,7 @@ internal object SystemUiIconHooks {
         try {
             PixelMonetColorEngine.init(context)
             LawniconsAssetSource.init(context)
+            HyperOs4SystemEvents.register(context)
             initialised = true
             android.util.Log.i(TAG, "initialised in ${context.packageName}")
         } catch (t: Throwable) {

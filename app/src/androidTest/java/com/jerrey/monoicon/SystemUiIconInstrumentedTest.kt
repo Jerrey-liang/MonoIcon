@@ -109,6 +109,22 @@ class SystemUiIconInstrumentedTest {
         assertFalse(SystemUiIconHooks.isOwnThemedDrawable("not a drawable"))
     }
 
+    @Test
+    fun styledIconGuardHonorsBitmapDrawableReturnTypeAndPreservesBounds() {
+        val mask = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+        Canvas(mask).drawCircle(16f, 16f, 8f, Paint().apply { color = Color.WHITE })
+        val themed = ColoredMonochromeDrawable(mask, Color.WHITE, Color.BLACK, IconShape.CIRCLE)
+        themed.setBounds(4, 6, 68, 70)
+        val originalBounds = android.graphics.Rect(themed.bounds)
+        assertSame(themed, SystemUiIconHooks.styledIconResult(themed, android.graphics.drawable.Drawable::class.java))
+        val bitmap = SystemUiIconHooks.styledIconResult(themed, BitmapDrawable::class.java) as BitmapDrawable
+        assertEquals(64, bitmap.bitmap.width)
+        assertEquals(64, bitmap.bitmap.height)
+        assertEquals(0, Color.alpha(bitmap.bitmap.getPixel(0, 0)))
+        assertTrue(Color.alpha(bitmap.bitmap.getPixel(32, 32)) > 220)
+        assertEquals(originalBounds, themed.bounds)
+    }
+
     /** Adaptive icon with a white plate and a black glyph in the middle. */
     private fun fakeAdaptiveIcon(): AdaptiveIconDrawable {
         val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {

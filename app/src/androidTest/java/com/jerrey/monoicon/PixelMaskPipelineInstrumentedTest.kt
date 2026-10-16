@@ -24,6 +24,7 @@ import com.jerrey.monoicon.theme.mask.AospMonochromeMaskStrategy
 import com.jerrey.monoicon.theme.mask.IconNormalizerCompat
 import com.jerrey.monoicon.theme.mask.LabMonochromeExtractor
 import com.jerrey.monoicon.theme.mask.LawniconsAssetSource
+import com.jerrey.monoicon.theme.mask.MaskStrategy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -67,6 +68,21 @@ class PixelMaskPipelineInstrumentedTest {
     }
 
     // ── AOSP adaptive (no mono) ────────────────────────────────────────
+
+    @Test
+    fun placeholderMonochromeFallsBackToRealForeground() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        for (placeholder in listOf(Color.TRANSPARENT, Color.WHITE)) {
+            val adaptive = AdaptiveIconDrawable(
+                ColorDrawable(Color.WHITE), SplitDrawable(64, 64, Color.BLACK),
+                ColorDrawable(placeholder),
+            )
+            val result = AospMonochromeMaskStrategy().generate(adaptive, "com.example.placeholder/Main")
+            assertNotNull(result)
+            assertTrue("placeholder must use a fallback source", result!!.source != MaskStrategy.SOURCE_NATIVE)
+            assertTrue("fallback must retain a glyph", AospMonochromeMaskStrategy.hasUsableGlyph(result.mask!!))
+        }
+    }
 
     @Test
     fun adaptiveWithoutMonoUsesAospEdgeFlip() {
@@ -133,9 +149,13 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
-        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // glyph body
-        assertTrue(Color.alpha(mask.getPixel(12, 12)) < 32)   // plate
-        assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // corner
+        assertEquals(MaskStrategy.SOURCE_AOSP_ADAPTIVE_SILHOUETTE, result.source)
+        // AdaptiveIconDrawable reports the visible 2/3 viewport as its
+        // intrinsic size, not the foreground bitmap's 64-pixel size. Negative
+        // inset then enlarges the glyph: (12,12) on a 64-grid is inside it.
+        assertTrue(alphaAt(mask, 0.5f, 0.5f) > 220)     // glyph body
+        assertTrue(alphaAt(mask, 0.125f, 0.125f) < 32)  // outside the enlarged glyph
+        assertTrue(alphaAt(mask, 0.03125f, 0.03125f) < 32)
         IconDrawableCache.remove(identity)
     }
 
@@ -174,9 +194,10 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
-        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 200)  // dark details
-        assertTrue(Color.alpha(mask.getPixel(12, 32)) < 64)   // badge body (haze-cleared)
-        assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // plate corner
+        assertEquals(MaskStrategy.SOURCE_AOSP_ADAPTIVE, result.source)
+        assertTrue(alphaAt(mask, 0.5f, 0.5f) > 200)       // dark details
+        assertTrue(alphaAt(mask, 0.1875f, 0.5f) < 64)    // badge body (haze-cleared)
+        assertTrue(alphaAt(mask, 0.03125f, 0.03125f) < 32)
         IconDrawableCache.remove(identity)
     }
 
@@ -212,8 +233,9 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
-        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // dark motif
-        assertTrue(Color.alpha(mask.getPixel(12, 12)) < 64)   // bright art (haze-cleared)
+        assertEquals(MaskStrategy.SOURCE_AOSP_ADAPTIVE, result.source)
+        assertTrue(alphaAt(mask, 0.5f, 0.5f) > 220)       // dark motif
+        assertTrue(alphaAt(mask, 0.1875f, 0.1875f) < 64)  // bright art (haze-cleared)
         IconDrawableCache.remove(identity)
     }
 
@@ -328,9 +350,10 @@ class PixelMaskPipelineInstrumentedTest {
 
     @Test
     fun coloredPlateLegacyIconFollowsAospEdgeFlip() {
-        // fenbi-class: solid blue plate + WHITE motif. Faithful AOSP: the
-        // white motif shares the plate's gray value, so the flip punches it
-        // out (hole), and the mid-gray blue plate keeps a mid alpha.
+        // fenbi-class: solid blue plate + WHITE motif. The white motif and
+        // wrapper are the maximum gray; the blue plate is the minimum gray.
+        // Min/max stretch followed by flip makes the motif a hole and the
+        // blue plate opaque (there is no black pixel to anchor the range).
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/legacy-colored-plate"
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -352,10 +375,11 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
+        assertEquals(MaskStrategy.SOURCE_AOSP_LEGACY, result.source)
         assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)       // wrap border
         assertTrue(Color.alpha(mask.getPixel(32, 32)) < 32)     // white motif → HOLE (AOSP)
         val blueAlpha = Color.alpha(mask.getPixel(45, 22))
-        assertTrue("blue plate alpha=$blueAlpha", blueAlpha in 90..190)
+        assertTrue("blue plate alpha=$blueAlpha", blueAlpha > 220)
         IconDrawableCache.remove(identity)
     }
 
@@ -435,11 +459,23 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(Color.alpha(mask.getPixel(32, 32)) < 32)   // white body → HOLE (AOSP)
         val blueAlpha = Color.alpha(mask.getPixel(45, 22))
         assertTrue("blue plate alpha=$blueAlpha", blueAlpha in 90..190)
-        assertTrue(Color.alpha(mask.getPixel(32, 27)) > 180)  // black outline ring
+        // Locate the outline after IconNormalizer + legacy viewport scaling;
+        // y=27 lies inside the white hole for this fixture on the real device.
+        val outlinePeak = (mask.height / 4 until mask.height / 2).maxOf { y ->
+            Color.alpha(mask.getPixel(mask.width / 2, y))
+        }
+        assertTrue("black outline peak=$outlinePeak", outlinePeak > 180)
         IconDrawableCache.remove(identity)
     }
 
     // ── Compatibility fallback helpers ─────────────────────────────────
+
+    private fun alphaAt(mask: Bitmap, x: Float, y: Float): Int = Color.alpha(
+        mask.getPixel(
+            (mask.width * x).toInt().coerceIn(0, mask.width - 1),
+            (mask.height * y).toInt().coerceIn(0, mask.height - 1),
+        ),
+    )
 
     @Test
     fun midToneCurveMatchesPixelLauncher() {
