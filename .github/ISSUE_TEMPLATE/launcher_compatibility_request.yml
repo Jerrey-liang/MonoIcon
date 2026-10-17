@@ -1,0 +1,86 @@
+
+name: Launcher Compatibility Request
+description: Request support for another HyperOS 4 launcher build
+title: "[Compatibility]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        当前已验证的环境请查看仓库 README。
+        提交请求不代表一定会适配。请先搜索是否已有相同版本的请求。
+
+  - type: input
+    id: launcher_version
+    attributes:
+      label: 系统桌面完整版本号
+      description: 请提供完整版本号，不要只填写 8.01.02。
+      placeholder: "RELEASE-8.01.02.XXXX-YYYYMMDD-HHMMSS-R"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 设备型号
+      placeholder: "例如 22041211AC"
+    validations:
+      required: true
+
+  - type: input
+    id: system_version
+    attributes:
+      label: HyperOS 完整版本
+      placeholder: "例如 OS4.0.0.3.XAACNXM"
+    validations:
+      required: true
+
+  - type: input
+    id: monoicon_version
+    attributes:
+      label: MonoIcon 版本
+      placeholder: "例如 2.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: 请求类型
+      options:
+        - 请求支持新的桌面版本
+        - 模块已启用但图标未生效
+        - 图标颜色或外观异常
+        - Launcher 崩溃或异常退出
+        - 其他问题
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: 具体情况
+      description: 请说明希望支持的原因，以及已经尝试过的排查方法。
+      placeholder: 描述问题或适配需求……
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tester
+    attributes:
+      label: 是否愿意协助测试
+      description: 愿意测试的用户可能更有助于推进适配。
+      options:
+        - 可以协助测试并反馈
+        - 暂时无法协助测试
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已搜索现有 Issues，尽量避免重复请求。
+          required: true
+        - label: 我理解提交请求不代表该版本一定会被适配。
+          required: true
