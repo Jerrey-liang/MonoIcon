@@ -47,6 +47,4 @@ node tools/render_lawnicons_masks.cjs --verify
 
 回归用例覆盖横向与纵向胶囊直边、透明留白、图案纵横比、2×2 默认圆角、drawable 克隆及边界变化、单通道抗锯齿边缘、原始图标的用户隔离和高清 Lawnicons 缓存。
 
-按本次要求，仅做本机静态检查、编译及本机单元检查，Android 绘图测试只编译。没有安装模块、重启桌面或操作设备设置，编译成功不代表真机视觉验收通过。
-
 2026-10-31 本机结果：53 项 JVM 测试、485 项 C++ 检查通过；Debug、Release 和 Android 测试 APK 编译通过。6144 的两个 ELF、38 份完整快照（28,464 字节）和 28 处原始指令匹配。两个 APK 内的 r7 Profile 与全部 77 个 Lawnicons PNG 均与源文件逐字节/哈希一致。
