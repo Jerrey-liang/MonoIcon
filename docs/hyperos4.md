@@ -52,7 +52,6 @@ revision 7 新增可选 `icons.largeIconPrefixes` 和 `icons.geometryBridge`，�
 
 大图标 Widget 的缓存不受现有 HD 广播完整清理，因此发布状态会提示使用「重启作用域」加载新的大图标。此要求也适用于后续切换大图标造型；普通图标和文件夹继续使用已有刷新流程。`.large-signature` 记录批次使用的网格与资源配置，避免重启时复用已过期的比例。
 
-2026-10-16 在 Redmi 22041211AC / OS4.0.0.3.XAACNXM 上的验证属于重构前实现，覆盖主用户桌面、文件夹预览、最近任务与 PNG／配置开关链路。本次重构在 2026-10-30 完成一次限定范围的真机链路验证，结果见下文；它只证明配置传输、补丁事务和部分 PNG 读取。后续用户反馈仍需点击图标触发刷新，以及圆形返回动画短暂变方。2026-10-31 的 revision 4 与桌面启动观察器针对这两点修复；测试环境已下线，本轮仅静态检查和编译，尚无新的真机视觉验收结论。
 
 HyperOS 4 的 root 用于发布图标；日志页面本身不依赖 root。日历、时钟等动态主题资源在启用时使用静态 MonoIcon 字形，关闭后恢复系统路径。Lawnicons 日历字形中的数字是资源图案，不表示当前日期。
 
@@ -129,13 +128,13 @@ Root 用于发布配置和图标；日志页面本身不依赖 Root。`result=13
 
 ## 验证
 
-2026-10-31 开机首次进入修复：新增设备加密存储、同步首轮事务及预加载线程启动入口，后台唤醒复用现有批次。Debug／Release（含 arm64 原生库）、AndroidTest APK、Kotlin 测试源码编译与 Lint 均通过（0 errors、81 warnings、1 hint）。两个安装包已核对包含新启动代码；官方 r6 Profile 的 SHA-256 仍为 `469116b4f7d56830144c34e4951f51a562c52230f4b455497c8e7c226260e5c5`，此前图标／文件夹／动画指令保持不变。未运行测试程序、连接或操作设备；首次开机视觉效果尚未实测。
+2026-10-31 开机首次进入修复：新增设备加密存储、同步首轮事务及预加载线程启动入口，后台唤醒复用现有批次。Debug／Release（含 arm64 原生库）、AndroidTest APK、Kotlin 测试源码编译与 Lint 均通过（0 errors、81 warnings、1 hint）。两个安装包已核对包含新启动代码；官方 r6 Profile 的 SHA-256 仍为 `469116b4f7d56830144c34e4951f51a562c52230f4b455497c8e7c226260e5c5`，此前图标／文件夹／动画指令保持不变。
 
-2026-10-31 后续 revision 6：针对大文件夹仍需交互刷新、日历／时钟预览仍为原图的反馈，补上原生文件夹条目重载和 MAML 预览 fallback。Debug／Release、Kotlin 测试源码编译、Lint（0 errors、82 warnings、1 hint）及 C++17 严格语法检查通过。离线核对了两个 ELF、29 份完整快照、28 处原始指令，并反汇编确认新跳转目标及 `mov x0, x6; ret`；两个 APK 中的 r6 Profile 与源文件逐字节一致。r5 的 25 处补丁和 22 份快照完整保留。本轮未运行测试程序或连接设备，实际预览效果尚待用户验收。
+2026-10-31 后续 revision 6：针对大文件夹仍需交互刷新、日历／时钟预览仍为原图的反馈，补上原生文件夹条目重载和 MAML 预览 fallback。Debug／Release、Kotlin 测试源码编译、Lint（0 errors、82 warnings、1 hint）及 C++17 严格语法检查通过。离线核对了两个 ELF、29 份完整快照、28 处原始指令，并反汇编确认新跳转目标及 `mov x0, x6; ret`；两个 APK 中的 r6 Profile 与源文件逐字节一致。r5 的 25 处补丁和 22 份快照完整保留。
 
-2026-10-31 后续 revision 5：根据用户“只有被点的图标刷新”和“大文件夹预览未主题化”的反馈，加入代理控件重载、文件夹预览通知和 PNG 路径选择。Debug／Release 构建、Kotlin 测试源码编译、Lint（0 errors、82 warnings、1 hint）与 C++17 严格语法检查通过；两个 APK 内的 Profile 与源文件逐字节一致。离线原始 APK 核对覆盖 22 份完整函数快照、25 处原指令；revision 4 的 22 处补丁全部保留。本轮仍未运行测试程序或连接设备，实际刷新和大文件夹画面尚待验收。
+2026-10-31 后续 revision 5：根据用户“只有被点的图标刷新”和“大文件夹预览未主题化”的反馈，加入代理控件重载、文件夹预览通知和 PNG 路径选择。Debug／Release 构建、Kotlin 测试源码编译、Lint（0 errors、82 warnings、1 hint）与 C++17 严格语法检查通过；两个 APK 内的 Profile 与源文件逐字节一致。离线原始 APK 核对覆盖 22 份完整函数快照、25 处原指令；revision 4 的 22 处补丁全部保留。
 
-2026-10-31 本轮离线检查：`:app:assembleDebug`、`:app:assembleRelease`、`:app:compileDebugUnitTestKotlin`、`:app:lintDebug` 全部通过。Lint 为 0 errors、82 warnings、1 hint，其中启动钩子的 `Application.attach` 反射产生一条非阻塞的隐藏 API 警告。原生 Profile 解析器及对应测试源码通过 C++17／`-Wall -Wextra -Wpedantic -Werror -fsyntax-only`；6144 原始 APK 的两个 ELF 摘要、18 份完整函数快照、22 处原指令通过离线核对，新增四处补丁只在 `circle` 模式替换为 NOP。按用户要求，未运行单元测试、原生测试程序或设备测试，也未连接或安装到设备；动画视觉效果和启动刷新仍待设备恢复后验收。
+2026-10-31 本轮离线检查：`:app:assembleDebug`、`:app:assembleRelease`、`:app:compileDebugUnitTestKotlin`、`:app:lintDebug` 全部通过。Lint 为 0 errors、82 warnings、1 hint，其中启动钩子的 `Application.attach` 反射产生一条非阻塞的隐藏 API 警告。原生 Profile 解析器及对应测试源码通过 C++17／`-Wall -Wextra -Wpedantic -Werror -fsyntax-only`；6144 原始 APK 的两个 ELF 摘要、18 份完整函数快照、22 处原指令通过离线核对，新增四处补丁只在 `circle` 模式替换为 NOP。
 
 标准构建：`:app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:testDebugUnitTest`。
 
