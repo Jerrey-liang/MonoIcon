@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 class HyperOs4DeviceIntegrationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
-    private val launcherFiles = "/data/user/${android.os.Process.myUid() / 100000}/com.miui.home/files"
+    private val launcherFiles = "/data/user_de/${android.os.Process.myUid() / 100000}/com.miui.home/files"
 
     private fun root(command: String): ByteArray {
         val process = ProcessBuilder("su", "-M", "-c", command).start()

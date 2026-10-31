@@ -158,7 +158,8 @@ fun wrapLocale(base: Context, languageId: String): Context {
 
 /** True when the device locale is Chinese (used to resolve [AppLanguage.SYSTEM]). */
 fun systemPrefersChinese(context: Context): Boolean {
-    val locales = context.resources.configuration.locales
+    // MainActivity may wrap its own locale. The application retains the device locale.
+    val locales = context.applicationContext.resources.configuration.locales
     val tag = if (locales.isEmpty) Locale.getDefault().language else locales.get(0).language
     return tag.startsWith("zh")
 }

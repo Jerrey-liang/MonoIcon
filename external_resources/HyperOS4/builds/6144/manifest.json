@@ -1,0 +1,1281 @@
+{
+  "schema_version": 1,
+  "purpose": "offline_analysis_only",
+  "compatibility": "NOT_ASSESSED",
+  "baseline_id": "6144",
+  "input": {
+    "kind": "apk",
+    "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+    "sha256": "b5e9aaa1ef1f052e3b9e31c685ff201436700728d5fc52d9d56d0c9326fdfa9c",
+    "size": 56223785
+  },
+  "apk": {
+    "sha256": "b5e9aaa1ef1f052e3b9e31c685ff201436700728d5fc52d9d56d0c9326fdfa9c",
+    "size": 56223785
+  },
+  "environment": {
+    "device": "22041211AC",
+    "os": "OS4.0.0.3.XAACNXM",
+    "android": 17
+  },
+  "launcher": {
+    "package_name": "com.miui.home",
+    "version_name": "RELEASE-8.01.02.6144-260818-08251107-R",
+    "version_code": 801026144
+  },
+  "libraries": {
+    "libapp.so": {
+      "sha256": "60c8c7a47634b3474dd9e1052f996473882456e87b0f37a2bfe1fe377c413ce9",
+      "size": 28700808,
+      "elf": {
+        "class": "ELF64",
+        "endianness": "little",
+        "machine": 183,
+        "machine_name": "AArch64",
+        "type": 3,
+        "type_name": "ET_DYN",
+        "version": 1,
+        "os_abi": 0,
+        "abi_version": 0,
+        "entry": 0,
+        "flags": 0,
+        "header_size": 64,
+        "program_header_offset": 64,
+        "program_header_entry_size": 56,
+        "program_header_count": 7,
+        "section_header_offset": 28699976,
+        "section_header_entry_size": 64,
+        "section_header_count": 13,
+        "section_name_table_index": 10
+      },
+      "gnu_build_id": "4f1bdaedd19666f2b22817f1fabc965f",
+      "android_note": null,
+      "notes": [
+        {
+          "offset": 456,
+          "origin": "libapp.so: section 1",
+          "alignment": 4,
+          "name": "GNU",
+          "name_hex": "474e5500",
+          "type": 3,
+          "description_hex": "4f1bdaedd19666f2b22817f1fabc965f",
+          "gnu_build_id": "4f1bdaedd19666f2b22817f1fabc965f"
+        }
+      ],
+      "program_headers": [
+        {
+          "type": 6,
+          "flags": 4,
+          "offset": 64,
+          "vaddr": 64,
+          "paddr": 64,
+          "filesz": 392,
+          "memsz": 392,
+          "align": 8
+        },
+        {
+          "type": 1,
+          "flags": 4,
+          "offset": 0,
+          "vaddr": 0,
+          "paddr": 0,
+          "filesz": 8412946,
+          "memsz": 8412946,
+          "align": 65536
+        },
+        {
+          "type": 1,
+          "flags": 5,
+          "offset": 8454144,
+          "vaddr": 8454144,
+          "paddr": 8454144,
+          "filesz": 19569536,
+          "memsz": 19569536,
+          "align": 65536
+        },
+        {
+          "type": 1,
+          "flags": 6,
+          "offset": 28049408,
+          "vaddr": 28049408,
+          "paddr": 28049408,
+          "filesz": 144,
+          "memsz": 144,
+          "align": 65536
+        },
+        {
+          "type": 4,
+          "flags": 4,
+          "offset": 456,
+          "vaddr": 456,
+          "paddr": 456,
+          "filesz": 32,
+          "memsz": 32,
+          "align": 4
+        },
+        {
+          "type": 2,
+          "flags": 6,
+          "offset": 28049408,
+          "vaddr": 28049408,
+          "paddr": 28049408,
+          "filesz": 96,
+          "memsz": 96,
+          "align": 8
+        },
+        {
+          "type": 1685382481,
+          "flags": 6,
+          "offset": 0,
+          "vaddr": 0,
+          "paddr": 0,
+          "filesz": 0,
+          "memsz": 0,
+          "align": 1
+        }
+      ],
+      "load_segments": [
+        {
+          "flags": 4,
+          "offset": 0,
+          "vaddr": 0,
+          "paddr": 0,
+          "filesz": 8412946,
+          "memsz": 8412946,
+          "align": 65536,
+          "sha256": null
+        },
+        {
+          "flags": 5,
+          "offset": 8454144,
+          "vaddr": 8454144,
+          "paddr": 8454144,
+          "filesz": 19569536,
+          "memsz": 19569536,
+          "align": 65536,
+          "sha256": "0242e5b660267f9ba70ce7ffec8d07771c24b3ec7bf533c97d6559c85522fee0"
+        },
+        {
+          "flags": 6,
+          "offset": 28049408,
+          "vaddr": 28049408,
+          "paddr": 28049408,
+          "filesz": 144,
+          "memsz": 144,
+          "align": 65536,
+          "sha256": null
+        }
+      ],
+      "section_headers": [
+        {
+          "name_offset": 0,
+          "type": 0,
+          "flags": 0,
+          "addr": 0,
+          "offset": 0,
+          "size": 0,
+          "link": 0,
+          "info": 0,
+          "align": 0,
+          "entry_size": 0,
+          "name": ""
+        },
+        {
+          "name_offset": 59,
+          "type": 7,
+          "flags": 2,
+          "addr": 456,
+          "offset": 456,
+          "size": 32,
+          "link": 0,
+          "info": 0,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".note.gnu.build-id"
+        },
+        {
+          "name_offset": 12,
+          "type": 3,
+          "flags": 2,
+          "addr": 488,
+          "offset": 488,
+          "size": 133,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".dynstr"
+        },
+        {
+          "name_offset": 20,
+          "type": 11,
+          "flags": 2,
+          "addr": 624,
+          "offset": 624,
+          "size": 144,
+          "link": 2,
+          "info": 1,
+          "align": 8,
+          "entry_size": 24,
+          "name": ".dynsym"
+        },
+        {
+          "name_offset": 43,
+          "type": 5,
+          "flags": 2,
+          "addr": 768,
+          "offset": 768,
+          "size": 56,
+          "link": 3,
+          "info": 0,
+          "align": 8,
+          "entry_size": 4,
+          "name": ".hash"
+        },
+        {
+          "name_offset": 97,
+          "type": 1,
+          "flags": 2,
+          "addr": 832,
+          "offset": 832,
+          "size": 8412048,
+          "link": 0,
+          "info": 0,
+          "align": 64,
+          "entry_size": 0,
+          "name": ".rodata"
+        },
+        {
+          "name_offset": 49,
+          "type": 1,
+          "flags": 2,
+          "addr": 8412880,
+          "offset": 8412880,
+          "size": 66,
+          "link": 0,
+          "info": 0,
+          "align": 1,
+          "entry_size": 0,
+          "name": ".eh_frame"
+        },
+        {
+          "name_offset": 1,
+          "type": 1,
+          "flags": 6,
+          "addr": 8454144,
+          "offset": 8454144,
+          "size": 19569536,
+          "link": 0,
+          "info": 0,
+          "align": 64,
+          "entry_size": 0,
+          "name": ".text"
+        },
+        {
+          "name_offset": 78,
+          "type": 6,
+          "flags": 3,
+          "addr": 28049408,
+          "offset": 28049408,
+          "size": 96,
+          "link": 2,
+          "info": 0,
+          "align": 8,
+          "entry_size": 16,
+          "name": ".dynamic"
+        },
+        {
+          "name_offset": 7,
+          "type": 1,
+          "flags": 3,
+          "addr": 28049504,
+          "offset": 28049504,
+          "size": 48,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".bss"
+        },
+        {
+          "name_offset": 87,
+          "type": 3,
+          "flags": 0,
+          "addr": 0,
+          "offset": 28049552,
+          "size": 120,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".shstrtab"
+        },
+        {
+          "name_offset": 105,
+          "type": 1,
+          "flags": 0,
+          "addr": 0,
+          "offset": 28049672,
+          "size": 650284,
+          "link": 0,
+          "info": 0,
+          "align": 1,
+          "entry_size": 0,
+          "name": ".gnu_debugdata"
+        },
+        {
+          "name_offset": 28,
+          "type": 1,
+          "flags": 0,
+          "addr": 0,
+          "offset": 28699956,
+          "size": 20,
+          "link": 0,
+          "info": 0,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".gnu_debuglink"
+        }
+      ],
+      "path": "lib/arm64-v8a/libapp.so"
+    },
+    "libapp_launcher.so": {
+      "sha256": "4fc22fd1aece08daf02cf73a36058a28385499a41c80c7f62a52feb57ee63d2b",
+      "size": 15505576,
+      "elf": {
+        "class": "ELF64",
+        "endianness": "little",
+        "machine": 183,
+        "machine_name": "AArch64",
+        "type": 3,
+        "type_name": "ET_DYN",
+        "version": 1,
+        "os_abi": 0,
+        "abi_version": 0,
+        "entry": 0,
+        "flags": 0,
+        "header_size": 64,
+        "program_header_offset": 64,
+        "program_header_entry_size": 56,
+        "program_header_count": 10,
+        "section_header_offset": 15503848,
+        "section_header_entry_size": 64,
+        "section_header_count": 27,
+        "section_name_table_index": 24
+      },
+      "gnu_build_id": null,
+      "android_note": {
+        "abi_api": 35,
+        "ndk_version": "r27d",
+        "ndk_build": "13750724"
+      },
+      "notes": [
+        {
+          "offset": 624,
+          "origin": "libapp_launcher.so: section 1",
+          "alignment": 4,
+          "name": "Android",
+          "name_hex": "416e64726f696400",
+          "type": 1,
+          "description_hex": "230000007232376400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000031333735303732340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "android_note": {
+            "abi_api": 35,
+            "ndk_version": "r27d",
+            "ndk_build": "13750724"
+          }
+        }
+      ],
+      "program_headers": [
+        {
+          "type": 6,
+          "flags": 4,
+          "offset": 64,
+          "vaddr": 64,
+          "paddr": 64,
+          "filesz": 560,
+          "memsz": 560,
+          "align": 8
+        },
+        {
+          "type": 1,
+          "flags": 4,
+          "offset": 0,
+          "vaddr": 0,
+          "paddr": 0,
+          "filesz": 4973800,
+          "memsz": 4973800,
+          "align": 16384
+        },
+        {
+          "type": 1,
+          "flags": 5,
+          "offset": 4973824,
+          "vaddr": 4990208,
+          "paddr": 4990208,
+          "filesz": 9057968,
+          "memsz": 9057968,
+          "align": 16384
+        },
+        {
+          "type": 1,
+          "flags": 6,
+          "offset": 14031808,
+          "vaddr": 14064576,
+          "paddr": 14064576,
+          "filesz": 1033432,
+          "memsz": 1037376,
+          "align": 16384
+        },
+        {
+          "type": 1,
+          "flags": 6,
+          "offset": 15065344,
+          "vaddr": 15114496,
+          "paddr": 15114496,
+          "filesz": 65472,
+          "memsz": 88608,
+          "align": 16384
+        },
+        {
+          "type": 2,
+          "flags": 6,
+          "offset": 15048232,
+          "vaddr": 15081000,
+          "paddr": 15081000,
+          "filesz": 1088,
+          "memsz": 1088,
+          "align": 8
+        },
+        {
+          "type": 1685382482,
+          "flags": 4,
+          "offset": 14031808,
+          "vaddr": 14064576,
+          "paddr": 14064576,
+          "filesz": 1033432,
+          "memsz": 1037376,
+          "align": 1
+        },
+        {
+          "type": 1685382480,
+          "flags": 4,
+          "offset": 3707684,
+          "vaddr": 3707684,
+          "paddr": 3707684,
+          "filesz": 171180,
+          "memsz": 171180,
+          "align": 4
+        },
+        {
+          "type": 1685382481,
+          "flags": 6,
+          "offset": 0,
+          "vaddr": 0,
+          "paddr": 0,
+          "filesz": 0,
+          "memsz": 0,
+          "align": 0
+        },
+        {
+          "type": 4,
+          "flags": 4,
+          "offset": 624,
+          "vaddr": 624,
+          "paddr": 624,
+          "filesz": 152,
+          "memsz": 152,
+          "align": 4
+        }
+      ],
+      "load_segments": [
+        {
+          "flags": 4,
+          "offset": 0,
+          "vaddr": 0,
+          "paddr": 0,
+          "filesz": 4973800,
+          "memsz": 4973800,
+          "align": 16384,
+          "sha256": null
+        },
+        {
+          "flags": 5,
+          "offset": 4973824,
+          "vaddr": 4990208,
+          "paddr": 4990208,
+          "filesz": 9057968,
+          "memsz": 9057968,
+          "align": 16384,
+          "sha256": "b08b990f2f730df0062cda61e2e9d08de9a92e1733fc800c4fe9e61b251bd040"
+        },
+        {
+          "flags": 6,
+          "offset": 14031808,
+          "vaddr": 14064576,
+          "paddr": 14064576,
+          "filesz": 1033432,
+          "memsz": 1037376,
+          "align": 16384,
+          "sha256": null
+        },
+        {
+          "flags": 6,
+          "offset": 15065344,
+          "vaddr": 15114496,
+          "paddr": 15114496,
+          "filesz": 65472,
+          "memsz": 88608,
+          "align": 16384,
+          "sha256": null
+        }
+      ],
+      "section_headers": [
+        {
+          "name_offset": 0,
+          "type": 0,
+          "flags": 0,
+          "addr": 0,
+          "offset": 0,
+          "size": 0,
+          "link": 0,
+          "info": 0,
+          "align": 0,
+          "entry_size": 0,
+          "name": ""
+        },
+        {
+          "name_offset": 36,
+          "type": 7,
+          "flags": 2,
+          "addr": 624,
+          "offset": 624,
+          "size": 152,
+          "link": 0,
+          "info": 0,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".note.android.ident"
+        },
+        {
+          "name_offset": 153,
+          "type": 11,
+          "flags": 2,
+          "addr": 776,
+          "offset": 776,
+          "size": 50088,
+          "link": 6,
+          "info": 1,
+          "align": 8,
+          "entry_size": 24,
+          "name": ".dynsym"
+        },
+        {
+          "name_offset": 140,
+          "type": 1879048191,
+          "flags": 2,
+          "addr": 50864,
+          "offset": 50864,
+          "size": 4174,
+          "link": 2,
+          "info": 0,
+          "align": 2,
+          "entry_size": 2,
+          "name": ".gnu.version"
+        },
+        {
+          "name_offset": 102,
+          "type": 1879048190,
+          "flags": 2,
+          "addr": 55040,
+          "offset": 55040,
+          "size": 128,
+          "link": 6,
+          "info": 3,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".gnu.version_r"
+        },
+        {
+          "name_offset": 176,
+          "type": 1879048182,
+          "flags": 2,
+          "addr": 55168,
+          "offset": 55168,
+          "size": 1016,
+          "link": 2,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".gnu.hash"
+        },
+        {
+          "name_offset": 80,
+          "type": 3,
+          "flags": 2,
+          "addr": 56184,
+          "offset": 56184,
+          "size": 71541,
+          "link": 0,
+          "info": 0,
+          "align": 1,
+          "entry_size": 0,
+          "name": ".dynstr"
+        },
+        {
+          "name_offset": 130,
+          "type": 4,
+          "flags": 2,
+          "addr": 127728,
+          "offset": 127728,
+          "size": 1312872,
+          "link": 2,
+          "info": 0,
+          "align": 8,
+          "entry_size": 24,
+          "name": ".rela.dyn"
+        },
+        {
+          "name_offset": 65,
+          "type": 4,
+          "flags": 66,
+          "addr": 1440600,
+          "offset": 1440600,
+          "size": 46416,
+          "link": 2,
+          "info": 20,
+          "align": 8,
+          "entry_size": 24,
+          "name": ".rela.plt"
+        },
+        {
+          "name_offset": 248,
+          "type": 1,
+          "flags": 50,
+          "addr": 1490944,
+          "offset": 1490944,
+          "size": 2209956,
+          "link": 0,
+          "info": 0,
+          "align": 4096,
+          "entry_size": 0,
+          "name": ".rodata"
+        },
+        {
+          "name_offset": 211,
+          "type": 1,
+          "flags": 2,
+          "addr": 3700900,
+          "offset": 3700900,
+          "size": 6784,
+          "link": 0,
+          "info": 0,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".gcc_except_table"
+        },
+        {
+          "name_offset": 88,
+          "type": 1,
+          "flags": 2,
+          "addr": 3707684,
+          "offset": 3707684,
+          "size": 171180,
+          "link": 0,
+          "info": 0,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".eh_frame_hdr"
+        },
+        {
+          "name_offset": 201,
+          "type": 1,
+          "flags": 2,
+          "addr": 3878864,
+          "offset": 3878864,
+          "size": 1094936,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".eh_frame"
+        },
+        {
+          "name_offset": 25,
+          "type": 1,
+          "flags": 6,
+          "addr": 4990208,
+          "offset": 4973824,
+          "size": 9026980,
+          "link": 0,
+          "info": 0,
+          "align": 64,
+          "entry_size": 0,
+          "name": ".text"
+        },
+        {
+          "name_offset": 70,
+          "type": 1,
+          "flags": 6,
+          "addr": 14017200,
+          "offset": 14000816,
+          "size": 30976,
+          "link": 0,
+          "info": 0,
+          "align": 16,
+          "entry_size": 0,
+          "name": ".plt"
+        },
+        {
+          "name_offset": 117,
+          "type": 1,
+          "flags": 3,
+          "addr": 14064576,
+          "offset": 14031808,
+          "size": 1016000,
+          "link": 0,
+          "info": 0,
+          "align": 32,
+          "entry_size": 0,
+          "name": ".data.rel.ro"
+        },
+        {
+          "name_offset": 13,
+          "type": 15,
+          "flags": 3,
+          "addr": 15080576,
+          "offset": 15047808,
+          "size": 16,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".fini_array"
+        },
+        {
+          "name_offset": 1,
+          "type": 14,
+          "flags": 2097155,
+          "addr": 15080592,
+          "offset": 15047824,
+          "size": 408,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".init_array"
+        },
+        {
+          "name_offset": 229,
+          "type": 6,
+          "flags": 3,
+          "addr": 15081000,
+          "offset": 15048232,
+          "size": 1088,
+          "link": 6,
+          "info": 0,
+          "align": 8,
+          "entry_size": 16,
+          "name": ".dynamic"
+        },
+        {
+          "name_offset": 31,
+          "type": 1,
+          "flags": 3,
+          "addr": 15082088,
+          "offset": 15049320,
+          "size": 424,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".got"
+        },
+        {
+          "name_offset": 56,
+          "type": 1,
+          "flags": 3,
+          "addr": 15082512,
+          "offset": 15049744,
+          "size": 15496,
+          "link": 0,
+          "info": 0,
+          "align": 8,
+          "entry_size": 0,
+          "name": ".got.plt"
+        },
+        {
+          "name_offset": 186,
+          "type": 8,
+          "flags": 3,
+          "addr": 15098008,
+          "offset": 15065240,
+          "size": 3944,
+          "link": 0,
+          "info": 0,
+          "align": 1,
+          "entry_size": 0,
+          "name": ".relro_padding"
+        },
+        {
+          "name_offset": 271,
+          "type": 1,
+          "flags": 3,
+          "addr": 15114496,
+          "offset": 15065344,
+          "size": 65472,
+          "link": 0,
+          "info": 0,
+          "align": 128,
+          "entry_size": 0,
+          "name": ".data"
+        },
+        {
+          "name_offset": 75,
+          "type": 8,
+          "flags": 3,
+          "addr": 15180032,
+          "offset": 15130816,
+          "size": 23072,
+          "link": 0,
+          "info": 0,
+          "align": 128,
+          "entry_size": 0,
+          "name": ".bss"
+        },
+        {
+          "name_offset": 238,
+          "type": 3,
+          "flags": 0,
+          "addr": 0,
+          "offset": 15130816,
+          "size": 277,
+          "link": 0,
+          "info": 0,
+          "align": 1,
+          "entry_size": 0,
+          "name": ".shstrtab"
+        },
+        {
+          "name_offset": 256,
+          "type": 1,
+          "flags": 0,
+          "addr": 0,
+          "offset": 15131093,
+          "size": 372724,
+          "link": 0,
+          "info": 0,
+          "align": 1,
+          "entry_size": 0,
+          "name": ".gnu_debugdata"
+        },
+        {
+          "name_offset": 161,
+          "type": 1,
+          "flags": 0,
+          "addr": 0,
+          "offset": 15503820,
+          "size": 28,
+          "link": 0,
+          "info": 0,
+          "align": 4,
+          "entry_size": 0,
+          "name": ".gnu_debuglink"
+        }
+      ],
+      "path": "lib/arm64-v8a/libapp_launcher.so"
+    }
+  },
+  "evidence": {
+    "environment.device": {
+      "status": "verified_in_repository",
+      "sources": [
+        "README.md: Compatibility / current test environment",
+        "docs/hyperos4.md: opening baseline statement"
+      ],
+      "method": "Recorded test environment; not inferred from ELF notes."
+    },
+    "environment.os": {
+      "status": "verified_in_repository",
+      "sources": [
+        "README.md: Compatibility / current test environment",
+        "docs/hyperos4.md: opening baseline statement"
+      ],
+      "method": "Recorded test environment; not inferred from ELF notes."
+    },
+    "environment.android": {
+      "status": "verified_in_repository",
+      "sources": [
+        "README.md: Compatibility / current test environment",
+        "docs/hyperos4.md: opening baseline statement"
+      ],
+      "method": "Recorded test environment; not inferred from ELF notes."
+    },
+    "launcher.package_name": {
+      "status": "verified_in_repository",
+      "sources": [
+        "docs/hyperos4.md",
+        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md"
+      ],
+      "method": "Recorded launcher package/version identity."
+    },
+    "launcher.version_name": {
+      "status": "verified_in_repository",
+      "sources": [
+        "docs/hyperos4.md",
+        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md"
+      ],
+      "method": "Recorded launcher package/version identity."
+    },
+    "launcher.version_code": {
+      "status": "verified_in_repository",
+      "sources": [
+        "docs/hyperos4.md",
+        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md"
+      ],
+      "method": "Recorded launcher package/version identity."
+    },
+    "apk.sha256": {
+      "status": "verified_from_local_apk",
+      "source": "external_resources/HyperOS4/MiuiHome_6144.apk",
+      "method": "SHA256 over all APK bytes",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json"
+      ]
+    },
+    "apk.size": {
+      "status": "verified_from_local_apk",
+      "source": "external_resources/HyperOS4/MiuiHome_6144.apk",
+      "method": "Filesystem byte length",
+      "corroborating_sources": []
+    },
+    "libraries.libapp.so.sha256": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json"
+      ]
+    },
+    "libraries.libapp.so.size": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
+      ]
+    },
+    "libraries.libapp.so.elf": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
+      ]
+    },
+    "libraries.libapp.so.program_headers": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
+    },
+    "libraries.libapp.so.load_segments": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
+      ]
+    },
+    "libraries.libapp.so.section_headers": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
+    },
+    "libraries.libapp.so.notes": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
+    },
+    "libraries.libapp.so.gnu_build_id": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
+        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
+      ]
+    },
+    "libraries.libapp.so.android_note": {
+      "status": "not_observed_in_notes",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
+        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
+      ]
+    },
+    "libraries.libapp.so.path": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp.so"
+      },
+      "method": "Exact ZIP entry name."
+    },
+    "libraries.libapp_launcher.so.sha256": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json"
+      ]
+    },
+    "libraries.libapp_launcher.so.size": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
+      ]
+    },
+    "libraries.libapp_launcher.so.elf": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
+      ]
+    },
+    "libraries.libapp_launcher.so.program_headers": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
+    },
+    "libraries.libapp_launcher.so.load_segments": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
+      ]
+    },
+    "libraries.libapp_launcher.so.section_headers": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
+    },
+    "libraries.libapp_launcher.so.notes": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
+    },
+    "libraries.libapp_launcher.so.gnu_build_id": {
+      "status": "not_observed_in_notes",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
+        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
+      ]
+    },
+    "libraries.libapp_launcher.so.android_note": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
+      "corroborating_sources": [
+        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
+        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
+      ]
+    },
+    "libraries.libapp_launcher.so.path": {
+      "status": "verified_from_local_apk",
+      "source": {
+        "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
+        "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
+      },
+      "method": "Exact ZIP entry name."
+    }
+  },
+  "recorded_validation": {
+    "status": "verified_baseline_recorded_in_repository",
+    "sources": [
+      "README.md",
+      "docs/hyperos4.md"
+    ],
+    "date": "2026-10-16",
+    "scope": "Only the recorded 22041211AC / OS4.0.0.3.XAACNXM / Android 17 / 6144 environment. No new device test or Hook ABI assessment is performed by intake."
+  },
+  "identity_limits": [
+    "This manifest is an offline evidence archive, not runtime configuration; existing validation and callback order are unchanged.",
+    "Matching GNU Build ID, Android Note or executable-segment SHA256 alone cannot prove Hook ABI compatibility.",
+    "Android Note abi_api=35 and r27d/13750724 describe native build metadata; they do not identify the running Android OS version.",
+    "A null GNU Build ID means none was observed in this input PT_NOTE/SHT_NOTE data; it is not an invented identifier.",
+    "Sources under external_resources/HyperOS4 other than this manifest and BUILD_INTAKE.md are local ignored evidence and may be absent from a fresh checkout."
+  ],
+  "artifacts": [
+    {
+      "path": "app/src/main/cpp/hyperos4_functions_6144_inc.h",
+      "kind": "function_snapshots",
+      "description": "6144 function byte snapshots used by palette validation.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "app/src/main/cpp/hyperos4_dynamic_icons_6144.h",
+      "kind": "function_snapshots_and_patch_constants",
+      "description": "6144 async icon-source snapshots and branch constants.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "app/src/main/cpp/hyperos4_observer_original.inc",
+      "kind": "function_snapshot",
+      "description": "Original launcher observer function bytes.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "app/src/main/cpp/hyperos4_observer_code.h",
+      "kind": "observer_patch_constants_and_emitter",
+      "description": "Pinned observer location, continuation and veneer emitter; includes original snapshot.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "app/src/main/cpp/hyperos4_palette_install.cpp",
+      "kind": "patch_table_and_validation",
+      "description": "kInstructionPatches, Matches and ValidateImages; transaction and rollback remain unchanged.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "app/src/main/cpp/hyperos4_hook_backend.cpp",
+      "kind": "canary_identity_and_abi_evidence",
+      "description": "Pinned RVA, 32-byte anchor signature, first-word check and existing register/ABI evidence.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "app/src/main/cpp/hyperos4_native_init.cpp",
+      "kind": "native_entry_and_callback_sequence",
+      "description": "Existing process-family checks, native_init, loaded-library callbacks and RTLD_NOLOAD replay.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "tools/generate_hyperos4_dynamic_icons.py",
+      "kind": "snapshot_generator",
+      "description": "Generator pins the full libapp.so SHA256 before producing existing 6144 snapshots.",
+      "status": "present_in_workspace",
+      "availability": "tracked"
+    },
+    {
+      "path": "external_resources/HyperOS4/analysis/port6144/generate_6144_tables.py",
+      "kind": "historical_snapshot_generator",
+      "description": "Existing generator referenced by the tracked 6144 headers; not rerun during intake.",
+      "status": "present_in_workspace",
+      "availability": "local_ignored"
+    },
+    {
+      "path": "external_resources/HyperOS4/analysis/port6144/verify_6144_patches.py",
+      "kind": "historical_patch_verifier",
+      "description": "Existing verification of 6144 identities and patch evidence.",
+      "status": "present_in_workspace",
+      "availability": "local_ignored"
+    },
+    {
+      "path": "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json",
+      "kind": "historical_verification_result",
+      "description": "Recorded APK/ELF hashes and instruction verification results.",
+      "status": "present_in_workspace",
+      "availability": "local_ignored"
+    },
+    {
+      "path": "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
+      "kind": "historical_elf_facts",
+      "description": "Recorded segment mappings, sizes and note offsets.",
+      "status": "present_in_workspace",
+      "availability": "local_ignored"
+    },
+    {
+      "path": "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
+      "kind": "historical_analysis_report",
+      "description": "Recorded identity and existing hook-point analysis.",
+      "status": "present_in_workspace",
+      "availability": "local_ignored"
+    },
+    {
+      "path": "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
+      "kind": "historical_analysis_report",
+      "description": "Section 4 records the 6144 ELF baseline and addressing evidence.",
+      "status": "present_in_workspace",
+      "availability": "local_ignored"
+    }
+  ]
+}

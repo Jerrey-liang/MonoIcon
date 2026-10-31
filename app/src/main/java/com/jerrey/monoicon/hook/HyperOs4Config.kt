@@ -16,10 +16,13 @@ internal data class HyperOs4Config(
         return "MONOICON 2 ${bit(enabled)} ${argb(background)} ${argb(foreground)} ${bit(circle)} ${bit(lawnicons)} $generation\n"
     }
 
-    companion object {
-        fun supports(versionCode: Long, versionName: String?, hasCode: Boolean, arm64: Boolean): Boolean =
-            versionCode == 801026144L && versionName == "RELEASE-8.01.02.6144-260818-08251107-R" && !hasCode && arm64
+    /** Commit reference only: compatibility data stays in the immutable Profile. */
+    fun encode(generation: String, profileDigest: String): String {
+        require(Regex("[a-f0-9]{64}").matches(profileDigest))
+        return encode(generation).replace("MONOICON 2 ", "MONOICON 3 ").trimEnd() + " $profileDigest\n"
+    }
 
+    companion object {
         private fun bit(value: Boolean) = if (value) 1 else 0
         private fun argb(value: Int) = "0x" + value.toUInt().toString(16).padStart(8, '0')
     }

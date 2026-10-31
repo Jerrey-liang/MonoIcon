@@ -24,6 +24,25 @@ import org.junit.runner.RunWith
 class LawniconsCacheInstrumentedTest {
 
     @Test
+    fun runtimeLookupKeepsHighResolutionForSmallApkIconsAndCapsOversizedRequests() {
+        val bundle = CountingBundle("v1", glyphPng())
+        val cache = MonochromeCache(2 * 1024 * 1024)
+        val smallApk = LawniconsAssetSource.lookupRuntimeMask(PACKAGE, 48, bundle, cache)
+        val normalApk = LawniconsAssetSource.lookupRuntimeMask(PACKAGE, 192, bundle, cache)
+        val largeTile = LawniconsAssetSource.lookupRuntimeMask(PACKAGE, 768, bundle, cache)
+        val oversized = LawniconsAssetSource.lookupRuntimeMask(PACKAGE, Int.MAX_VALUE, bundle, cache)
+
+        assertEquals("Small APK resources must not downsample the bundle", 640, smallApk!!.width)
+        assertEquals(640, smallApk.height)
+        assertSame("Equivalent runtime resolutions share one mask", smallApk, normalApk)
+        assertEquals(768, largeTile!!.width)
+        assertEquals("Untrusted drawable dimensions remain bounded", 1024, oversized!!.width)
+        assertEquals(3, bundle.opens)
+        assertTrue(cache.size <= 2 * 1024 * 1024)
+        assertNull(LawniconsAssetSource.lookupRuntimeMask(PACKAGE, 0, bundle, cache))
+    }
+
+    @Test
     fun repeatedAssetAndAliasLookupsAvoidReadsAndKeepIdenticalPixels() {
         val bundle = CountingBundle("v1", glyphPng())
         val cache = MonochromeCache(64 * 1024)

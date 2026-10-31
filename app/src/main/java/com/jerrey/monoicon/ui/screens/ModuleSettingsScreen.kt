@@ -1,113 +1,140 @@
+// Adapted from KernelSU SettingsMiuix (GPL-3.0-or-later), commit 2fe188310309bd7a7c9b5a80beed6f14469c6cd2.
 package com.jerrey.monoicon.ui.screens
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
-import top.yukonga.miuix.kmp.basic.BasicComponent
+import com.jerrey.monoicon.ui.settings.AppUpdateChecker
+import com.jerrey.monoicon.ui.settings.SendLogDialog
+import com.jerrey.monoicon.ui.settings.UiPreferences
+import com.jerrey.monoicon.ui.settings.rememberUiSettings
+import com.jerrey.monoicon.ui.settings.settingsText
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private const val TAG = "MonoIcon.Settings"
-
-/**
- * Module settings tab (Phase 13): master switch and UI language.
- *
- * Uses the shared [PageContent] host, so the page title sits at exactly the same
- * place and distance from the first card as on every other primary page.
- *
- * The language selection is applied to the Activity configuration in
- * [com.jerrey.monoicon.MainActivity.attachBaseContext]; the composition updates
- * immediately through [onLanguageChange].
- */
 @Composable
 fun ModuleSettingsScreen(
     language: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit,
     modifier: Modifier = Modifier,
     onTitleBottomPositioned: ((Int) -> Unit)? = null,
+    onOpenTheme: () -> Unit = {},
+    onOpenAbout: () -> Unit = {},
+    onOpenLogs: () -> Unit = {},
 ) {
     val strings = LocalStrings.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings = rememberUiSettings()
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
-    var restartHint by remember { mutableStateOf(false) }
+    var restartHint by rememberSaveable { mutableStateOf(false) }
+    var showSendLogDialog by rememberSaveable { mutableStateOf(false) }
 
-    PageContent(
-        title = strings.moduleSettings,
-        modifier = modifier,
-        onTitleBottomPositioned = onTitleBottomPositioned,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(PageSpacing.betweenCards)) {
-            Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
-                BasicComponent(
-                    title = strings.masterSwitch,
-                    summary = strings.masterSwitchSummary,
-                    endActions = {
-                        Switch(
-                            checked = enabled,
-                            onCheckedChange = { value ->
-                                enabled = value
-                                restartHint = true
-                                ConfigManager.setEnabled(value)
-                                logi(TAG, "master switch=$value")
-                            },
-                        )
-                    },
-                )
-            }
-
-            SmallTitle(text = strings.language)
-            Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
-                AppLanguage.entries.forEach { option ->
-                    val label = when (option) {
-                        AppLanguage.SYSTEM -> strings.languageSystem
-                        AppLanguage.CHINESE -> strings.languageChinese
-                        AppLanguage.ENGLISH -> strings.languageEnglish
-                    }
-                    BasicComponent(
-                        title = label,
-                        summary = if (option == AppLanguage.SYSTEM) strings.languageSummary else null,
-                        endActions = {
-                            Checkbox(
-                                state = ToggleableState(language == option),
-                                onClick = {
-                                    onLanguageChange(option)
-                                    ConfigManager.setLanguage(option.id)
-                                    logi(TAG, "language=${option.id}")
-                                },
-                            )
-                        },
-                        onClick = {
-                            onLanguageChange(option)
-                            ConfigManager.setLanguage(option.id)
-                            logi(TAG, "language=${option.id}")
-                        },
-                    )
-                }
-            }
-
-            if (restartHint) {
-                Text(
-                    text = strings.restartHint,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = PageSpacing.gutter),
-                )
-            }
+    Column(modifier = modifier.padding(horizontal = 12.dp)) {
+        Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+            SwitchPreference(
+                title = settingsText("settings_check_update"),
+                summary = settingsText("settings_check_update_summary"),
+                startAction = { SettingsIcon(Icons.Rounded.SystemUpdate) },
+                checked = settings.checkUpdate,
+                onCheckedChange = { value ->
+                    UiPreferences.update { it.copy(checkUpdate = value) }
+                    if (value) scope.launch { AppUpdateChecker.check(context, force = true) }
+                },
+            )
+        }
+        Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+            ArrowPreference(
+                title = settingsText("settings_theme"),
+                summary = settingsText("settings_theme_summary"),
+                startAction = { SettingsIcon(Icons.Rounded.Palette) },
+                onClick = onOpenTheme,
+            )
+            OverlayDropdownPreference(
+                title = strings.language,
+                summary = strings.languageSummary,
+                items = listOf(strings.languageSystem, strings.languageChinese, strings.languageEnglish),
+                startAction = { SettingsIcon(Icons.Rounded.Language) },
+                selectedIndex = language.ordinal,
+                onSelectedIndexChange = { index ->
+                    val option = AppLanguage.entries[index]
+                    ConfigManager.setLanguage(option.id)
+                    onLanguageChange(option)
+                    logi("MonoIcon.Settings", "language=${option.id}")
+                },
+            )
+        }
+        Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+            SwitchPreference(
+                title = strings.masterSwitch,
+                summary = strings.masterSwitchSummary,
+                startAction = { SettingsIcon(Icons.Rounded.PowerSettingsNew) },
+                checked = enabled,
+                onCheckedChange = { value ->
+                    enabled = value
+                    restartHint = true
+                    ConfigManager.setEnabled(value)
+                    logi("MonoIcon.Settings", "master switch=$value")
+                },
+            )
+        }
+        Card(modifier = Modifier.padding(vertical = 12.dp).fillMaxWidth()) {
+            ArrowPreference(
+                title = settingsText("send_log"),
+                startAction = { SettingsIcon(Icons.Rounded.BugReport) },
+                onClick = { showSendLogDialog = true },
+            )
+            ArrowPreference(
+                title = strings.about,
+                startAction = { SettingsIcon(Icons.Rounded.Info) },
+                onClick = onOpenAbout,
+            )
+        }
+        if (restartHint) {
+            Text(
+                text = strings.restartHint,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
         }
     }
+    SendLogDialog(
+        show = showSendLogDialog,
+        onDismissRequest = { showSendLogDialog = false },
+        onOpenLogs = onOpenLogs,
+    )
+}
+
+@Composable
+private fun SettingsIcon(icon: ImageVector) {
+    Icon(icon, contentDescription = null, modifier = Modifier.padding(end = 6.dp), tint = MiuixTheme.colorScheme.onBackground)
 }

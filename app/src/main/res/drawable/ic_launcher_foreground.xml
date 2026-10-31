@@ -1,38 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  MonoIcon foreground: the app-icon-frame glyph.
-
-  A rounded-SQUARE app-icon frame (ring) with a filled circle in its centre: the
-  square is the original colourful app icon, the circle is the single-colour
-  themed icon MonoIcon produces from it.
-
-  Geometry rules this file must keep satisfying:
-  - the glyph is square and centered: 58x58 spanning x/y 25..83, inside the
-    centered 66x66dp adaptive-icon safe zone, so no mask - squircle, circle or
-    rounded square - clips it;
-  - the ring is an evenOdd hole, which DOES render transparent, so a themed-icon
-    build samples the background colour through it. With the dark background the
-    glyph therefore keeps high contrast in both the normal and the themed
-    rendering;
-  - the ring is 11 units thick everywhere (34-25 = 74-63 = 11, and 36-25 = 72-63
-    = 11 on the vertical), which is what keeps it legible down to a 24dp cell;
-  - the corners nest: outer radius 18, inner radius 4, and inner + ring thickness
-    (4 + 11 = 15) stays below the outer radius, so the ring never pinches to zero.
+    MonoIcon: a single, rounded M ribbon. The open centre and two equal stems
+    keep the mark legible at launcher size and when tinted on the About page.
+    Its 52 x 48 silhouette is centred inside the adaptive icon's 66dp safe circle.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- App-icon frame: 58x58 rounded square, 11-unit ring, 18/4-unit corners. -->
     <path
-        android:fillColor="#EEF1FA"
-        android:fillType="evenOdd"
-        android:pathData="M43,25 L65,25 A18,18 0 0 1 83,43 L83,65 A18,18 0 0 1 65,83 L43,83 A18,18 0 0 1 25,65 L25,43 A18,18 0 0 1 43,25 Z M38,36 L70,36 A4,4 0 0 1 74,40 L74,68 A4,4 0 0 1 70,72 L38,72 A4,4 0 0 1 34,68 L34,40 A4,4 0 0 1 38,36 Z" />
-
-    <!-- Themed result: one flat circle, the shape the pipeline actually emits. -->
-    <path
-        android:fillColor="#EEF1FA"
-        android:pathData="M54,54 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 Z" />
+        android:fillColor="#F5F3EE"
+        android:pathData="M28,71 L28,37 C28,33.13 31.13,30 35,30 C37.31,30 39.34,31.12 40.61,32.86 L54,51 L67.39,32.86 C68.66,31.12 70.69,30 73,30 C76.87,30 80,33.13 80,37 L80,71 C80,74.87 76.87,78 73,78 C69.13,78 66,74.87 66,71 L66,56 L59.64,64.55 C56.84,68.31 51.16,68.31 48.36,64.55 L42,56 L42,71 C42,74.87 38.87,78 35,78 C31.13,78 28,74.87 28,71 Z" />
 </vector>

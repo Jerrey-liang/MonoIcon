@@ -1,447 +1,336 @@
+// Adapted from KernelSU HomeMiuix.kt, GPL-3.0-or-later.
+// Source revision: 2fe188310309bd7a7c9b5a80beed6f14469c6cd2.
 package com.jerrey.monoicon.ui.screens
 
-import androidx.compose.foundation.border
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DeveloperBoard
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.ScopeApp
 import com.jerrey.monoicon.ui.XposedState
 import com.jerrey.monoicon.ui.requestScope
+import com.jerrey.monoicon.ui.settings.AppUpdateChecker
+import com.jerrey.monoicon.ui.settings.rememberUiSettings
+import com.jerrey.monoicon.ui.stringsFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.ChevronForward
-import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme.isDynamicColor
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
+import top.yukonga.miuix.kmp.window.WindowDialog
 
-/** Compact card geometry; text can increase the height at larger font scales. */
-private object HeroCard {
-    val minHeight = 120.dp
-    val shape = RoundedCornerShape(20.dp)
-    val textEnd = 96.dp
-    val textVerticalPadding = 16.dp
-    val versionGap = 4.dp
-    val apiGap = 10.dp
-
-    val checkRing = 112.dp
-    val checkRingWidth = 10.dp
-    val checkRingPadding = 16.dp
-    val checkGlyph = 80.dp
-    val checkEndOffset = 24.dp
-    val checkBottomOffset = 28.dp
-}
-
-/**
- * Overview tab (Phase 13).
- *
- * Structure: page title → hero status card → scoped applications → secondary
- * page entries. All of it uses [PageSpacing] so the title and every card share
- * one gutter and one vertical rhythm, and every color still comes from
- * `MiuixTheme.colorScheme`.
- */
+/** The navigation host owns the collapsing top bar and scrolling viewport. */
 @Composable
 fun OverviewScreen(
-    onOpenLogs: () -> Unit,
-    onOpenAbout: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onOpenLogs: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") onOpenAbout: () -> Unit = {},
     modifier: Modifier = Modifier,
-    onTitleBottomPositioned: ((Int) -> Unit)? = null,
+    @Suppress("UNUSED_PARAMETER") onTitleBottomPositioned: ((Int) -> Unit)? = null,
     isActive: Boolean = true,
 ) {
     val strings = LocalStrings.current
+    val labels = homeLabels()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var status by remember { mutableStateOf(XposedState.UNAVAILABLE) }
-    var scopeRequested by remember { mutableStateOf(false) }
-
-    // Real versions of the scoped apps, read from their PackageInfo. Resolved off
-    // the main thread so the page draws immediately.
+    var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
+    var systemInfo by remember { mutableStateOf(HomeSystemInfo()) }
     var scopeApps by remember { mutableStateOf<List<ScopeApp>>(emptyList()) }
-    LaunchedEffect(context, lifecycleOwner, isActive) {
+    var showScope by remember { mutableStateOf(false) }
+    var scopeRequested by remember { mutableStateOf(false) }
+    var scopeRefresh by remember { mutableStateOf(0) }
+
+    LaunchedEffect(context, lifecycleOwner, isActive, scopeRefresh) {
         if (!isActive) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            enabled = ConfigManager.isEnabledFromUi()
             launch {
-                if (scopeApps.isEmpty()) {
-                    scopeApps = withContext(Dispatchers.IO) {
-                        ScopeApp.load(context, XposedState.REQUIRED_SCOPE)
-                    }
-                }
+                systemInfo = withContext(Dispatchers.IO) { HomeSystemInfo.load() }
+                scopeApps = withContext(Dispatchers.IO) { ScopeApp.load(context, XposedState.REQUIRED_SCOPE) }
             }
-            // The existing service callback drives refreshes; no polling or
-            // Binder reads in composition, background pages or back previews.
             ConfigManager.serviceState.collectLatest { service ->
                 repeat(6) { attempt ->
                     val snapshot = withContext(Dispatchers.IO) { XposedState.snapshot(service) }
                     status = snapshot
                     if (service == null || snapshot.bound || attempt == 5) return@collectLatest
-                    // Preserve recovery from transient IPC failures, but never
-                    // poll while waiting for an absent service to bind.
                     delay(500)
                 }
             }
         }
     }
 
-    PageContent(
-        title = "MonoIcon",
-        modifier = modifier,
-        onTitleBottomPositioned = onTitleBottomPositioned,
+    Column(
+        modifier = modifier.padding(horizontal = 12.dp).padding(top = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column {
-            StatusHeroCard(
-                status = status,
-                modifier = Modifier.padding(horizontal = PageSpacing.gutter),
-            )
-
-            Spacer(modifier = Modifier.height(PageSpacing.sectionLabelGap))
-            ScopeApplicationsCard(
-                status = status,
-                apps = scopeApps,
-                scopeRequested = scopeRequested,
-                onRequestScope = { missing ->
-                    scopeRequested = requestScope(missing)
-                },
-            )
-
-            // ── Secondary pages (one card each + chevron) ──
-            Spacer(modifier = Modifier.height(PageSpacing.betweenCards))
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = PageSpacing.gutter)) {
-                NavigationRow(title = strings.logs, onClick = onOpenLogs)
-            }
-            Spacer(modifier = Modifier.height(PageSpacing.betweenCards))
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = PageSpacing.gutter)) {
-                NavigationRow(title = strings.about, onClick = onOpenAbout)
-            }
-        }
+        HomeUpdateCard(labels)
+        StatusHeroCard(status, enabled, labels, onClick = { showScope = true })
+        SystemInfoCards(systemInfo, labels)
     }
-}
 
-/**
- * Hero status card: the page's first visual element.
- *
- * Three text layers on a flattened full-width surface (status → framework
- * version → API level), with an oversized circle-check composition anchored to
- * the bottom-right corner. The check is an overlay child of the card [Box],
- * never a member of the text column, so the two layouts cannot influence each
- * other; the card's own shape clips it into the corner.
- */
-@Composable
-private fun StatusHeroCard(
-    status: XposedState,
-    modifier: Modifier = Modifier,
-) {
-    val strings = LocalStrings.current
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = HeroCard.minHeight),
-        shape = HeroCard.shape,
-        color = MiuixTheme.colorScheme.secondaryContainer,
-        contentColor = MiuixTheme.colorScheme.onSecondaryContainer,
+    WindowDialog(
+        show = showScope,
+        title = strings.lsposedStatus,
+        onDismissRequest = { showScope = false; scopeRefresh++ },
     ) {
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxWidth()
-                    .padding(
-                        start = PageSpacing.cardStart,
-                        end = HeroCard.textEnd,
-                        top = HeroCard.textVerticalPadding,
-                        bottom = HeroCard.textVerticalPadding,
-                    ),
-            ) {
-                // 1st layer — activation state: clearly the largest text of the card.
-                Text(
-                    text = if (status.active) strings.active else strings.inactive,
-                    style = MiuixTheme.textStyles.headline1.copy(
-                        fontSize = 28.sp,
-                        lineHeight = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    color = MiuixTheme.colorScheme.onSecondaryContainer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(modifier = Modifier.height(HeroCard.versionGap))
-                // 2nd layer — framework build.
-                Text(
-                    text = status.frameworkLabel,
-                    style = MiuixTheme.textStyles.body1.copy(
-                        fontSize = 18.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MiuixTheme.colorScheme.onSecondaryContainer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(modifier = Modifier.height(HeroCard.apiGap))
-                // 3rd layer — hook API level.
-                Text(
-                    text = "API ${status.apiVersion}",
-                    style = MiuixTheme.textStyles.footnote1.copy(
-                        fontSize = 16.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    color = MiuixTheme.colorScheme.onSecondaryContainer,
-                    maxLines = 1,
-                )
-            }
-
-            // Both trailing edges extend past the card, leaving the check
-            // visible while the rounded card clips the surrounding ring.
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(
-                        x = HeroCard.checkEndOffset,
-                        y = HeroCard.checkBottomOffset,
-                    )
-                    .size(HeroCard.checkRing)
-                    .border(
-                        width = HeroCard.checkRingWidth,
-                        color = MiuixTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.22f),
-                        shape = CircleShape,
-                    )
-                    .padding(HeroCard.checkRingPadding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = MiuixIcons.Demibold.Ok,
-                    contentDescription = null,
-                    tint = MiuixTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.22f),
-                    modifier = Modifier.size(HeroCard.checkGlyph),
-                )
-            }
-        }
-    }
-}
-
-/**
- * The applications MonoIcon is scoped to, each as name → package → version, plus
- * the framework's scope grant state. Replaces the old single-line scope rows
- * (which only listed package names) and the removed framework diagnostics.
- */
-@Composable
-private fun ScopeApplicationsCard(
-    status: XposedState,
-    apps: List<ScopeApp>,
-    scopeRequested: Boolean,
-    onRequestScope: (List<String>) -> Unit,
-) {
-    val strings = LocalStrings.current
-    val missing = XposedState.REQUIRED_SCOPE.filterNot { status.hasScope(it) }
-
-    SectionLabel(text = strings.scope)
-    Spacer(modifier = Modifier.height(10.dp))
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = PageSpacing.gutter),
-        // Explicit inner margin: the rows below own their own heights so the
-        // scope block keeps one stable vertical rhythm.
-        insideMargin = PaddingValues(
-            start = PageSpacing.cardStart,
-            end = PageSpacing.cardStart,
-            top = 20.dp,
-            bottom = 20.dp,
-        ),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            XposedState.REQUIRED_SCOPE.forEachIndexed { index, pkg ->
-                ScopeAppRow(
-                    name = when (pkg) {
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            if (!status.active) Text(labels.activateHint)
+            XposedState.REQUIRED_SCOPE.forEach { packageName ->
+                BasicComponent(
+                    title = when (packageName) {
                         "com.miui.home" -> strings.scopeAppLauncher
                         "com.android.systemui" -> strings.scopeAppSystemUi
-                        else -> pkg
+                        else -> packageName
                     },
-                    packageName = pkg,
-                    versionLabel = apps.firstOrNull { it.packageName == pkg }
-                        ?.versionLabel(strings.versionPrefix)
-                        ?: ScopeApp.VERSION_UNAVAILABLE,
-                    granted = status.hasScope(pkg),
-                    grantedLabel = strings.scopeGranted,
-                    missingLabel = strings.scopeMissing,
+                    summary = "$packageName\n${scopeApps.firstOrNull { it.packageName == packageName }?.versionLabel(strings.versionPrefix) ?: ScopeApp.VERSION_UNAVAILABLE}",
+                    endActions = {
+                        Text(
+                            text = if (status.hasScope(packageName)) strings.scopeGranted else strings.scopeMissing,
+                            color = if (status.hasScope(packageName)) colorScheme.primary else colorScheme.error,
+                            fontSize = 13.sp,
+                        )
+                    },
                 )
-                if (index != XposedState.REQUIRED_SCOPE.lastIndex) {
-                    // Defaults only — no divider color/thickness of our own. It
-                    // carries no padding, so the row rhythm stays the column's.
-                    HorizontalDivider()
+            }
+            val missing = XposedState.REQUIRED_SCOPE.filterNot(status::hasScope)
+            if (missing.isNotEmpty() && status.bound) {
+                TextButton(
+                    text = if (scopeRequested) strings.scopeRequested else strings.requestScope,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    onClick = { scopeRequested = requestScope(missing) },
+                )
+            }
+            TextButton(
+                text = labels.close,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                onClick = { showScope = false; scopeRefresh++ },
+            )
+        }
+    }
+}
+
+/** KernelSU's intrinsic card, clipped corner icon, text offsets and tilt feedback. */
+@Composable
+private fun StatusHeroCard(status: XposedState, enabled: Boolean, labels: HomeLabels, onClick: () -> Unit) {
+    val strings = LocalStrings.current
+    if (!status.active) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card(modifier = Modifier.weight(1f), onClick = onClick, pressFeedbackType = PressFeedbackType.Tilt) {
+                BasicComponent(
+                    title = strings.inactive,
+                    summary = labels.activateHint,
+                    startAction = {
+                        Icon(
+                            Icons.Rounded.ErrorOutline,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 6.dp),
+                            tint = colorScheme.onBackground,
+                        )
+                    },
+                )
+            }
+        }
+        return
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.defaultColors(
+                color = when {
+                    isDynamicColor -> colorScheme.secondaryContainer
+                    colorScheme.surface.luminance() < 0.5f -> Color(0xFF1A3825)
+                    else -> Color(0xFFDFFAE4)
+                },
+            ),
+            onClick = onClick,
+            pressFeedbackType = PressFeedbackType.Tilt,
+        ) {
+            Box {
+                Box(
+                    modifier = Modifier.fillMaxSize().offset(27.dp, 31.dp),
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                    Icon(
+                        modifier = Modifier.size(110.dp),
+                        imageVector = Icons.Rounded.CheckCircleOutline,
+                        tint = if (isDynamicColor) colorScheme.primary.copy(alpha = 0.8f) else Color(0xFF36D167),
+                        contentDescription = null,
+                    )
+                }
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(16.dp, 10.dp),
+                    contentAlignment = Alignment.BottomStart,
+                ) {
+                    Text(text = status.frameworkName ?: "LSPosed", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                }
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(16.dp, 14.dp),
+                    contentAlignment = Alignment.TopStart,
+                ) {
+                    Column {
+                        Text(
+                            text = if (enabled) labels.working else "${strings.active} [${labels.moduleDisabled}]",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(1.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${labels.version}${status.frameworkLabel}-${status.apiVersion}",
+                                modifier = Modifier.weight(1f, fill = false),
+                                fontSize = 15.sp,
+                            )
+                        }
+                    }
                 }
             }
-            // Only offered while the framework reports a package as unscoped.
-            if (missing.isNotEmpty()) {
-                BasicComponent(
-                    title = if (scopeRequested) strings.scopeRequested else strings.requestScope,
-                    titleColor = BasicComponentDefaults.titleColor(
-                        color = MiuixTheme.colorScheme.primary,
-                    ),
-                    insideMargin = PaddingValues(
-                        start = 0.dp,
-                        end = 0.dp,
-                        top = PageSpacing.cardVerticalPadding,
-                        bottom = PageSpacing.cardVerticalPadding,
-                    ),
-                    onClick = { onRequestScope(missing) },
-                )
+        }
+    }
+}
+
+@Composable
+private fun SystemInfoCards(systemInfo: HomeSystemInfo, labels: HomeLabels) {
+    @Composable
+    fun InfoText(icon: ImageVector, title: String, content: String, bottomPadding: Dp = 24.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = bottomPadding),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.padding(end = 12.dp).size(24.dp), tint = colorScheme.onSurface)
+            Column {
+                Text(text = title, fontSize = MiuixTheme.textStyles.headline1.fontSize, fontWeight = FontWeight.Medium, color = colorScheme.onSurface)
+                Text(text = content, fontSize = MiuixTheme.textStyles.body2.fontSize, color = colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 2.dp))
             }
         }
     }
-}
-
-/** Section label above a card (`作用域`, …), indented like the page's own headings. */
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MiuixTheme.textStyles.body2.copy(
-            fontSize = 14.sp,
-            lineHeight = 20.sp,
-            fontWeight = FontWeight.Medium,
-        ),
-        color = MiuixTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(start = PageSpacing.titleStart, end = PageSpacing.gutter),
-    )
-}
-
-/**
- * One scoped application: name (first layer), package name (second), real
- * version (third), with the framework's grant state trailing the version row.
- *
- * The name and package are always rendered (they are known from the scope
- * list); only the version waits for the PackageManager query.
- */
-@Composable
-private fun ScopeAppRow(
-    name: String,
-    packageName: String,
-    versionLabel: String,
-    granted: Boolean,
-    grantedLabel: String,
-    missingLabel: String,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = name,
-            style = MiuixTheme.textStyles.body1.copy(
-                fontSize = 18.sp,
-                lineHeight = 24.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
-            color = MiuixTheme.colorScheme.onSurfaceContainer,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = packageName,
-            style = MiuixTheme.textStyles.footnote1.copy(
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-            ),
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = versionLabel,
-                style = MiuixTheme.textStyles.footnote1.copy(
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                ),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = if (granted) "✓ $grantedLabel" else "✗ $missingLabel",
-                style = MiuixTheme.textStyles.footnote1.copy(
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                ),
-                color = if (granted) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    MiuixTheme.colorScheme.error
-                },
-                maxLines = 1,
-            )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            InfoText(Icons.Filled.Tag, labels.managerVersion, systemInfo.managerVersion)
+            InfoText(Icons.Filled.DeveloperBoard, labels.kernel, systemInfo.kernelVersion)
+            InfoText(Icons.Filled.Smartphone, labels.deviceModel, systemInfo.deviceModel)
+            InfoText(Icons.Filled.Fingerprint, labels.fingerprint, systemInfo.fingerprint, 0.dp)
         }
     }
 }
 
-/**
- * One entry to a secondary page: a single full-height row with the shared card
- * padding, so 日志 and 关于 are exactly the same height and their chevrons line
- * up. Colors are unchanged (the component's own defaults plus the existing
- * `onSurfaceVariantSummary` chevron tint).
- */
+/** KernelSU's update notice animation, warning colors and sink press feedback. */
 @Composable
-private fun NavigationRow(title: String, onClick: () -> Unit) {
-    BasicComponent(
-        title = title,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
-        insideMargin = PaddingValues(
-            start = PageSpacing.cardStart,
-            end = PageSpacing.cardStart,
-            top = 18.dp,
-            bottom = 18.dp,
-        ),
-        endActions = {
-            Icon(
-                imageVector = MiuixIcons.Regular.ChevronForward,
-                contentDescription = null,
-                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(20.dp),
+private fun HomeUpdateCard(labels: HomeLabels) {
+    val update by AppUpdateChecker.state.collectAsState()
+    val release = update.availableRelease.takeIf { rememberUiSettings().checkUpdate }
+    var showDetails by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+    AnimatedVisibility(visible = release != null, enter = fadeIn() + expandVertically(), exit = shrinkVertically() + fadeOut()) {
+        Card(
+            colors = CardDefaults.defaultColors(
+                color = when {
+                    isDynamicColor -> colorScheme.tertiaryContainer
+                    colorScheme.surface.luminance() < 0.5f -> Color(0xFF3E2F1B)
+                    else -> Color(0xFFFFF0DB)
+                },
+                contentColor = if (isDynamicColor) colorScheme.onTertiaryContainer else Color(0xFFF5A623),
+            ),
+            onClick = { showDetails = true },
+            pressFeedbackType = PressFeedbackType.Sink,
+        ) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "${labels.updateAvailable}: ${release?.name.orEmpty()}", fontSize = 14.sp)
+            }
+        }
+    }
+    WindowDialog(show = showDetails && release != null, title = release?.name, onDismissRequest = { showDetails = false }) {
+        Column {
+            Text(text = release?.notes.orEmpty(), modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
+            TextButton(
+                text = labels.update,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                onClick = {
+                    release?.url?.let { runCatching { uriHandler.openUri(it) } }
+                    showDetails = false
+                },
             )
-        },
-        onClick = onClick,
-    )
+            TextButton(text = labels.close, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), onClick = { showDetails = false })
+        }
+    }
+}
+
+@Composable
+private fun homeLabels() = HomeLabels(LocalStrings.current == stringsFor(AppLanguage.CHINESE, true))
+
+private class HomeLabels(private val chinese: Boolean) {
+    private fun text(zh: String, en: String) = if (chinese) zh else en
+    val working = text("工作中", "Working")
+    val version = text("版本：", "Version: ")
+    val moduleDisabled = text("模块已关闭", "Module disabled")
+    val managerVersion = text("管理器版本", "Manager version")
+    val kernel = text("内核版本", "Kernel version")
+    val deviceModel = text("设备型号", "Device model")
+    val fingerprint = text("系统指纹", "Fingerprint")
+    val close = text("关闭", "Close")
+    val activateHint = text("在 LSPosed 中启用 MonoIcon 并激活作用域", "Enable MonoIcon and its scope in LSPosed")
+    val updateAvailable = text("发现新版本", "New version available")
+    val update = text("更新", "Update")
 }

@@ -7,23 +7,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.state.ToggleableState
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.logging.logi
-import com.jerrey.monoicon.ui.XposedState
-import com.jerrey.monoicon.ui.restartScopedApps
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -34,9 +26,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private const val TAG = "MonoIcon.Settings"
 
 /**
- * Icon style tab (Phase 13): everything that changes how icons are drawn —
- * shape, Lawnicons tier, SystemUI notification icons, the Material 2025 colour
- * variant and the launcher restart needed to apply them.
+ * Icon shape, Lawnicons and Material 2025 colour preferences.
+ * The shared top-bar power menu applies changes that require a scope restart.
  */
 @Composable
 fun IconStyleScreen(
@@ -46,22 +37,11 @@ fun IconStyleScreen(
     onTitleBottomPositioned: ((Int) -> Unit)? = null,
 ) {
     val strings = LocalStrings.current
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
     var lawniconsEnabled by remember { mutableStateOf(ConfigManager.isLawniconsEnabledFromUi()) }
     var circleIconsEnabled by remember { mutableStateOf(ConfigManager.isCircleIconsEnabledFromUi()) }
-    var notificationIconsEnabled by remember {
-        mutableStateOf(ConfigManager.isNotificationIconsEnabledFromUi())
-    }
-    var restarting by remember { mutableStateOf(false) }
     var restartHint by remember { mutableStateOf(false) }
 
-    PageContent(
-        title = strings.iconStyle,
-        modifier = modifier,
-        onTitleBottomPositioned = onTitleBottomPositioned,
-    ) {
+    Column(modifier = modifier.padding(top = 12.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(PageSpacing.betweenCards)) {
             Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
                 BasicComponent(
@@ -89,21 +69,6 @@ fun IconStyleScreen(
                                 lawniconsEnabled = value
                                 ConfigManager.setLawniconsEnabled(value)
                                 logi(TAG, "lawnicons=$value")
-                            },
-                        )
-                    },
-                )
-                BasicComponent(
-                    title = strings.notificationIcons,
-                    summary = strings.notificationIconsSummary,
-                    endActions = {
-                        Switch(
-                            checked = notificationIconsEnabled,
-                            onCheckedChange = { value ->
-                                notificationIconsEnabled = value
-                                restartHint = true
-                                ConfigManager.setNotificationIconsEnabled(value)
-                                logi(TAG, "notificationIcons=$value")
                             },
                         )
                     },
@@ -145,38 +110,6 @@ fun IconStyleScreen(
                         },
                     )
                 }
-            }
-
-            SmallTitle(text = strings.scopeRestart)
-            Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
-                BasicComponent(
-                    title = strings.scopeRestart,
-                    summary = strings.scopeRestartSummary,
-                    endActions = {
-                        Button(
-                            onClick = {
-                                if (restarting) return@Button
-                                restarting = true
-                                scope.launch {
-                                    val targets = XposedState.snapshot().scope
-                                        .ifEmpty { XposedState.REQUIRED_SCOPE }
-                                    val ok = withContext(Dispatchers.IO) {
-                                        restartScopedApps(context, targets)
-                                    }
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        if (ok) strings.restartDone else strings.restartFailed,
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    ).show()
-                                    restarting = false
-                                }
-                            },
-                            enabled = !restarting,
-                        ) {
-                            Text(text = if (restarting) strings.restarting else strings.restart)
-                        }
-                    },
-                )
             }
 
             if (restartHint) {

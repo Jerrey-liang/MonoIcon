@@ -1,17 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  MonoIcon icon background: a flat dark plate.
-
-  Flat on purpose (no gradient, no grid): the glyph is a thin ring plus a dot, so
-  the background has to stay quiet for the silhouette to carry, and a themed-icon
-  build samples this colour straight through the ring's transparent hole.
--->
+<!-- A restrained graphite glow gives the ivory mark depth without decoration. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#1F2433"
-        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="32"
+                android:centerY="22"
+                android:gradientRadius="100">
+                <item android:offset="0" android:color="#374156" />
+                <item android:offset="0.52" android:color="#252A37" />
+                <item android:offset="1" android:color="#171A24" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

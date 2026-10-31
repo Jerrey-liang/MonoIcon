@@ -16,8 +16,8 @@ import java.util.zip.ZipFile
  * Lawnicons bundle 来源抽象（Phase 8）。
  *
  * 目前只有一个实现 [ApkAssetBundle]：读取模块自身 APK 内
- * `assets/lawnicons/`（由桌面端 MonetIconGenerator 的
- * `MonoIconBundleExporter` 生成：index.tsv + masks 目录下的 PNG + aliases.tsv）。
+ * `assets/lawnicons/`（index.tsv + masks 目录下的 PNG + aliases.tsv；
+ * tools/render_lawnicons_masks.cjs 从固定版本的原始 SVG 重建高清 PNG）。
  * 该接口为将来的"运行时下载预渲染掩码包 / 外部目录"预留，掩码生成与缓存
  * 逻辑无需改动。
  */
@@ -123,7 +123,7 @@ internal class ApkAssetBundle(private val apkPath: String) : LawniconsBundle {
  * Lawnicons 掩码查找层（Phase 8 分层：NATIVE → LAWNICONS → AOSP → LUMA）。
  *
  * ## 几何约定（重要）
- * bundle 内的 PNG 由**原始 SVG**渲染而来（215×215，内容占画布约 67–83%），
+ * bundle 内的 PNG 由**原始 SVG**直接渲染为 768×768（内容占画布约 67–83%），
  * 而 MonetIconGenerator 的最终图标画布是 **320×320**（`assets/clip.png`）——
  * 它把 215 的 PNG **按 1:1 居中贴进 320 画布**（`IconProcessor.GenerateIcon`），
  * 因此那边的字形占 tile = 源内容% × 215/320 ≈ **47–56%**（≈56.5% 上限）。
@@ -151,6 +151,12 @@ object LawniconsAssetSource {
      * 与 `IconProcessor.GenerateIcon` 的"215 PNG 居中贴进 320 画布"完全等价。
      */
     private const val CONTENT_SCALE = 215f / 320f
+
+    // Keep enough source detail for a 2×2 launcher tile even when the APK icon
+    // reports a small intrinsic size. The cache remains byte-bounded, and the
+    // upper limit prevents a malformed drawable size from allocating huge masks.
+    private const val MIN_RUNTIME_SIZE = 640
+    private const val MAX_RUNTIME_SIZE = 1024
 
     @Volatile
     private var bundle: LawniconsBundle? = null
@@ -207,12 +213,24 @@ object LawniconsAssetSource {
      * 生成 pack 掩码；未命中/不可用时返回 null。
      *
      * @param identity `pkg/cls`（可退化为 `pkg` 或 `unknown`）
-     * @param size     目标掩码边长（与 AOSP 分支的 `aospTargetSize` 一致）
+     * @param size     请求的边长；Lawnicons 保留至少 640px 的掩码用于大图标。
      */
     fun lookupMask(identity: String?, size: Int): Bitmap? {
-        if (unavailable) return null
+        if (unavailable || size <= 0) return null
         val loaded = bundle ?: return null
-        return lookupMask(identity, size, loaded, MonochromeCache.shared)
+        return lookupRuntimeMask(identity, size, loaded, MonochromeCache.shared)
+    }
+
+    /** Same resolution policy as the public lookup, with an injectable bundle. */
+    internal fun lookupRuntimeMask(
+        identity: String?,
+        requestedSize: Int,
+        loaded: LawniconsBundle,
+        cache: MonochromeCache,
+    ): Bitmap? {
+        if (requestedSize <= 0) return null
+        val size = requestedSize.coerceIn(MIN_RUNTIME_SIZE, MAX_RUNTIME_SIZE)
+        return lookupMask(identity, size, loaded, cache)
     }
 
     /**
@@ -261,7 +279,10 @@ object LawniconsAssetSource {
         return try {
             val input = reader(asset) ?: return null
             source = input.use { BitmapFactory.decodeStream(it) } ?: return null
-            rasterize(BitmapDrawable(null, source), size)
+            rasterize(BitmapDrawable(null, source).apply {
+                isFilterBitmap = true
+                setAntiAlias(true)
+            }, size)
         } catch (_: Throwable) {
             null
         } finally {

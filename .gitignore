@@ -14,7 +14,17 @@
 .cxx
 local.properties
 # MonoIcon 附加忽略
-/external_resources/
+/external_resources/*
+!/external_resources/HyperOS4/
+/external_resources/HyperOS4/*
+!/external_resources/HyperOS4/BUILD_INTAKE.md
+!/external_resources/HyperOS4/builds/
+/external_resources/HyperOS4/builds/*
+!/external_resources/HyperOS4/builds/6144/
+/external_resources/HyperOS4/builds/6144/*
+!/external_resources/HyperOS4/builds/6144/manifest.json
+# 分析输入与产物（大体积厂商二进制），本地保留、不入库
+/tools/external_resources/
 *.log
 *.zip
 *.apk

@@ -69,7 +69,11 @@ object ThemedIconBuilder {
         val iconResult = ThemeManager.currentTheme.generateIcon(source, identity, IconContext.DESKTOP)
         val mask = iconResult.mask ?: return null
         // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
-        val safeMask = mask.copy(Bitmap.Config.ARGB_8888, false) ?: mask
+        // High-resolution Lawnicons masks only contain alpha. Keep their one
+        // byte/pixel storage in the per-bind recipe instead of quadrupling the
+        // cache cost; the renderer supplies the glyph colour in either format.
+        val copyConfig = if (mask.config == Bitmap.Config.ALPHA_8) Bitmap.Config.ALPHA_8 else Bitmap.Config.ARGB_8888
+        val safeMask = mask.copy(copyConfig, false) ?: mask
         return Recipe(safeMask, iconResult.color, iconResult.plate, iconResult.source)
     }
 

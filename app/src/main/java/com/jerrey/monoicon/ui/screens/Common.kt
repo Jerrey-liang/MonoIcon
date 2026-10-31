@@ -15,7 +15,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** Shared title and content spacing for every primary settings page. */
 internal object PageSpacing {
     /** Page gutter: the horizontal margin shared by the title and every card. */
-    val gutter = 16.dp
+    val gutter = 12.dp
 
     /** Inner padding of a card's own content, as used by `CardDefaults.insideMargin`. */
     val cardStart = 16.dp

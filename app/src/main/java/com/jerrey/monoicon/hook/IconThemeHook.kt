@@ -154,6 +154,9 @@ class IconThemeHook : XposedModule() {
         )
 
         if (pkg == "com.android.systemui") {
+            HookRegistry.install("HyperOs4SystemEvents", required = false) {
+                HyperOs4SystemEvents.install(this)
+            }
             if (!enabled) return
             installSystemUiHooks(cl)
             return
@@ -195,6 +198,9 @@ class IconThemeHook : XposedModule() {
         // Phase 4.0-C: HookRegistry — stable names, required/optional flags,
         // availability reporting. Same protective install behavior as before.
         HookRegistry.install("DesktopIcon", required = true) { installSetIconDrawable(cl) }
+        HookRegistry.install("LargeIconGeometry", required = false) {
+            LauncherLargeIconHooks.install(this, cl)
+        }
         HookRegistry.install("FolderPreview", required = true) { installFolderSetImageDrawable(cl) }
         HookRegistry.install("RawIconProvider", required = true) { installGetActivityIcon(cl) }
         HookRegistry.install("SmallFolder", required = true) { installFolderSmallIconDrawable(cl) }
@@ -267,10 +273,15 @@ class IconThemeHook : XposedModule() {
                     null
                 }
 
-                val result = if (replacementPair != null) {
+                val replacement = replacementPair?.first
+                    ?: (chain.getArg(0) as? ColoredMonochromeDrawable)
+                val result = if (replacement != null) {
                     // HyperOS 3 ShortcutIcon ignores its Bitmap parameter. Keep
                     // it unchanged; never expose the renderer's shared mask.
-                    chain.proceed(arrayOf(replacementPair.first, chain.getArg(1)))
+                    // BigShortcutIcon may opt out of roundedIcon(), so attach
+                    // its actual layout geometry here, before either path.
+                    val sized = LauncherLargeIconHooks.forView(chain.thisObject, replacement)
+                    chain.proceed(arrayOf(sized, chain.getArg(1)))
                 } else {
                     chain.proceed()
                 }
@@ -1140,6 +1151,13 @@ class IconThemeHook : XposedModule() {
                 identity, launcherIdentity.user, view.resources.displayMetrics.densityDpi,
                 view.resources.configuration.hashCode(),
             )
+            // Large icons are loaded through IconProvider.getBigIconDrawable,
+            // bypassing the normal RawIconProvider capture entirely.
+            if (LauncherLargeIconHooks.isLargeIcon(view)) {
+                LauncherLargeIconSource.capture(view.context, request) { info, raw ->
+                    extractEarlyIconColor(info, raw, "LargeIconRawAPK")
+                } ?: return null // Do not reuse another profile's component-keyed raw cache.
+            }
             LauncherIconRenderer.build(request, d)?.let { themed ->
                 return Pair(themed.drawable, themed.mask)
             }

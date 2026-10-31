@@ -632,7 +632,7 @@ class PixelMaskPipelineInstrumentedTest {
 
         assertNotNull(mask)
         assertTrue(Color.alpha(mask!!.getPixel(96, 96)) > 0)
-        assertTrue(mask.width == 192 && mask.height == 192)
+        assertTrue(mask.width == 640 && mask.height == 640)
     }
 
     @Test

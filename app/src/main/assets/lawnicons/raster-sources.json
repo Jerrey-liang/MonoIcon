@@ -1,0 +1,322 @@
+{
+  "upstreamVersion": "v2.18.0",
+  "commit": "74b428b747004046686cbe5e24218e958afe2eb9",
+  "sourceBase": "https://raw.githubusercontent.com/LawnchairLauncher/lawnicons/74b428b747004046686cbe5e24218e958afe2eb9/svgs",
+  "size": 768,
+  "density": 576,
+  "renderer": {
+    "sharp": "0.35.5",
+    "vips": "8.18.7",
+    "rsvg": "2.63.2"
+  },
+  "assets": {
+    "alipay": {
+      "svgSha256": "98d7f6d4d10bad2f884a6e6796924348f961078a8f743edd4cc81a8ab5282c09",
+      "pngSha256": "6dbf0edba1719c673e923e308068c4eba0e445c39c7ce2cbe498377c3c15fcf8"
+    },
+    "amap": {
+      "svgSha256": "36a2c08c468ce3bd99ef191a3aaa1f5d4385b5a189b49ae26dd8233c552e0562",
+      "pngSha256": "ca16ff5af354715586986bc45b4b75354f9c0b78615c9dfd03ee5168f338b698"
+    },
+    "ayugram": {
+      "svgSha256": "af604db56ced012323dadf6ed2df147dc12687306f7cdfde4ea256a7a3e037c5",
+      "pngSha256": "d89cc1f5f39e1ab832ff00348ecf904be13f38618505a05c2cf29c4a20d90be5"
+    },
+    "baidu_netdisk": {
+      "svgSha256": "e3132f5b34f3d216867f9adfb925610b6e60a18086be518624d23d4ba04a525b",
+      "pngSha256": "1773435a462359956d76f423bba581324d88dc47b20e0e3c3aaf049c7054c367"
+    },
+    "bilibili": {
+      "svgSha256": "992c5c5d25ba3283dc01c311dbeb437f51fe2fbe008812e450f4660474198860",
+      "pngSha256": "e774cf493c58c4c1bb711e2681ae04847858c5f437c1d8ec2ec3669587f2eefb"
+    },
+    "blue_archive": {
+      "svgSha256": "984a3bd9b3fb398fa6520bc73ceca135f0b1086be5c638a4efd46515716c5bfa",
+      "pngSha256": "92fa62fe3f6c73c69b586b7821f994fab849c81a663e6efddc5c1b8ea641460d"
+    },
+    "buff": {
+      "svgSha256": "18cee370f0574f75dd810fe361717f268f21f18a872a589da19a45f96d00d538",
+      "pngSha256": "8daf06ad80e8932d77360f8a6a9b11912aa538d31142cfa1bb73a5bf90879fb8"
+    },
+    "chatgpt": {
+      "svgSha256": "24e3381c47c2a87226d535edeadad6887b103fc33dd867b7a61b373309db053a",
+      "pngSha256": "10a885a4cc963cf9685035cadcfd3cea69e0b9f30c59c7fadf1971b0a7f58981"
+    },
+    "china_mobile": {
+      "svgSha256": "7fa0897e4c562a750198453002a8c0f4894836d40986988be1385ab2a93b63c7",
+      "pngSha256": "b27224f6ec55ef5679290584b69d072f6fb41007ebf373b94aa6f3179d72d620"
+    },
+    "codex": {
+      "svgSha256": "eabf8321a21b89c638d00f13f808c4428ed014245325a35bedf95b3cd44b63ed",
+      "pngSha256": "a2d10fdff67ca51f36ba9d29c766eda3b3d2b8c4115dd87bfa5c328b29e1edbb"
+    },
+    "coolapk": {
+      "svgSha256": "239fa1691f963ec1370e38336a89681cd31628638c04344d60230bad93bdd443",
+      "pngSha256": "b202758d1dafad224552264fdb97d73d8b184556abfdc101ef684688c02eb21d"
+    },
+    "deepseek": {
+      "svgSha256": "65b45f459d98e4c2d2dbdcb4a3aec8329b605bcb3188c741ba6a71278b94dfe9",
+      "pngSha256": "276c45676933c12ad7f7503a4fd0311e690cd2508351e5c9dbe26560677a6f16"
+    },
+    "ehviewer": {
+      "svgSha256": "8e0645145c34bc528d94fc3b81edf93869c61d65e4e30286319d88c5cb5a70e6",
+      "pngSha256": "adeb013816821a57ce33371f0da64e2ac5353dcb51d3b2c42ce97b6be651e1bf"
+    },
+    "ele_me": {
+      "svgSha256": "b7be84d75bdbcf92dfc8c62c7bae539bf7db4a2270bd3b516da803672079cfeb",
+      "pngSha256": "0bdfc4f192d62d8d55f11b3a0f41fadd26329a54e884d55ce4fb132cdb89356d"
+    },
+    "exteragram": {
+      "svgSha256": "de6467782d183f537eb53fcf802a43d2610a894bb914144320f5a200cd58a3d0",
+      "pngSha256": "4ae9c9251dcf40966b09443df799cd8c821f260f1bde46d4f92ccdd15560d70d"
+    },
+    "facebook": {
+      "svgSha256": "638058e9fc75c77778b481438b56fc0f9803dce375f9ff1712b0e1992e3c4fd6",
+      "pngSha256": "60641de3d3c02a497a8fdaf678562fa902c616c382a248a436e13934f98195bf"
+    },
+    "flclash": {
+      "svgSha256": "5131e402c1b1535c2242cc76a43758f2e403b0477ab9d978bbb5783653ee9393",
+      "pngSha256": "5937a7d503c30e7be5e4796d983d3676952aaefa5e96bb12c74b1163f2f7c7b2"
+    },
+    "gboard": {
+      "svgSha256": "a5a043383df5f1869fb8372a874b059cee903ebacc914fa1751b42e45dc21c22",
+      "pngSha256": "859576cc67b970c4aec0faa114f4b24fa00f51616c40ba520515eeb858122c47"
+    },
+    "generic_camera": {
+      "svgSha256": "7d5e797239a549ea3e0423d567c06d93e0508727c98e1c6886673e585bf61e20",
+      "pngSha256": "5a3ec4dc3e66b03d77c83d828915d0c1db0ee2f1ea101ab4ef4e0043ad7f2df9"
+    },
+    "generic_clock": {
+      "svgSha256": "180f59bfef3d42fb82e0694f583f8d9401741dc42356af8119b190993f7b9942",
+      "pngSha256": "33a732ee4d469102ae3346e3ad5eec2d999d783260f663f251d721e07782a8b1"
+    },
+    "generic_compass": {
+      "svgSha256": "a84a3e0ab501f77f035f52929b4475f6466bc609cda84710aa61344fec57c1d0",
+      "pngSha256": "339f749694ff930b98ab8023561a141d9d583a3901d5ca66c9c15532a1e18d2e"
+    },
+    "generic_dialer": {
+      "svgSha256": "72e4987da4fefc22b767aed6f31f8069f24ccc00185e0ce814ff24fcbe0f2558",
+      "pngSha256": "5296b981adcd3293881fde37b8bf17c2f0fe6207a046835f5e46e57de1f7756d"
+    },
+    "generic_download_arrow": {
+      "svgSha256": "1cb04c12f02786ee7747d86c6508cf327eac1d70c1fd2c2e077c726e6ae79874",
+      "pngSha256": "4700ed0f40cc59989d89750460030b3d31680e94d82e2b734abdf7b7bc273e65"
+    },
+    "generic_files": {
+      "svgSha256": "2c2f34e65c1ff3d6b748194cb93fca1ecc825b296c2c0827c9656db2fe81621d",
+      "pngSha256": "51b03dd4df00660518fc5243a32df5405bdd753d4d7f14e020d7c3941b843005"
+    },
+    "generic_gallery": {
+      "svgSha256": "88055b4e2efd9a1ee75522bc7f657b07cffa917dcdd400f1e48f3ed85a318d73",
+      "pngSha256": "23c58cd9c6d67ed78a97698ac9dc5951051622b164bcd2f886008830393b8f2b"
+    },
+    "generic_notes": {
+      "svgSha256": "e93243c3571b468aa9ff75501f5cf77fb01caf6f4c40d12c07e8191cfe41e3d8",
+      "pngSha256": "c05023491cbf52b15db9b6116efc7f20b7012d461228d3e948b3cec2d38faa65"
+    },
+    "generic_settings": {
+      "svgSha256": "73adfed10d5a99d798a618985cf71b1cfbd0b4ea98cbb75bce8e13f1ba4ab384",
+      "pngSha256": "b39f5722679386ecf3209a1221924f393cf6d5cadb33c76f2db932c9eb54a82f"
+    },
+    "generic_voice_recorder_waves": {
+      "svgSha256": "91f3c500e4000962870ea0774d8f898218662a1adfa0394bc6237f88d61b6463",
+      "pngSha256": "9f988cb2d608ae86270266f9268b729e173d49788aa152d9b104fb28f37169e1"
+    },
+    "geogebra_calculator_suite": {
+      "svgSha256": "afb236473fb54a456f960ba93bd03a67e28780843d57d6eba922441cbf98f31f",
+      "pngSha256": "ee03423b3cba768926d699080180b3769a01596885ae13d64af3ff4ac3246a45"
+    },
+    "getapps": {
+      "svgSha256": "808d1366459f6822acdec34642fc3b6e98951681f139f600edf54a8cb09fabe6",
+      "pngSha256": "9df3224e076673edb56d3ec9cb7a3934437842ea5b977133941aa0f11f3eed22"
+    },
+    "github": {
+      "svgSha256": "c20d688b9f23a436b989b4fca3c4c4be45aebdbf4ee72ca16107b31537311687",
+      "pngSha256": "f7468fdd74589b6641806967cc2b48573209f42feeb93cfcfb72ed0edfa2a3f2"
+    },
+    "gmail": {
+      "svgSha256": "6c8a6ff264f074eb2abe2569f4395acbc29abc7bc926240fa9994dcecc809bc9",
+      "pngSha256": "8575d9b1b91cdf4c851592ed5674636b1c5630804dbde15dfc74c3a212006b55"
+    },
+    "google": {
+      "svgSha256": "38aa0c4f19a3ae7b641b7b7eec500e81fa6b8814c483f06fa9172f10fc48c5b3",
+      "pngSha256": "21a0be02e564e45c992b08c9f20134a22dfbc49837891f427071fb66cc5a6805"
+    },
+    "google_authenticator": {
+      "svgSha256": "8f75c79b4e9c5815cd04c66325dee69ff25c1bcb05881f50f2f708e096a23a76",
+      "pngSha256": "8fe88acbf5388a799b94c6c9c7d688a2cc3e0e347f2f51667ae72ce758f69ec6"
+    },
+    "google_contacts": {
+      "svgSha256": "76f008b28b2c88d9ee3f315a991added41fd76d248f3ea77eb52ce850439700e",
+      "pngSha256": "a94565e999953df2e08373148c3f4bd4f09dec4ce0b34a0445776ed113860e30"
+    },
+    "google_drive": {
+      "svgSha256": "6f605bc43c341e580074ee46af1e07479371e180b2bdad4ebf56627594ebbff8",
+      "pngSha256": "d84cd8c59f3908107a02b5ed961b9eeeb80dc5ddd375c05f349fdb3c6faa9180"
+    },
+    "google_gemini": {
+      "svgSha256": "788e2f5ef454105cf74ace9e0a74bba8bb8710145d2e846f471bb0943c05b16b",
+      "pngSha256": "b0660f05df10964020876e74c15746a3ed0a5aab8080b5e290c0e14b597888c5"
+    },
+    "google_maps": {
+      "svgSha256": "66a29e84bf89635574f9535109527dbfffa35940253457653504d608f76f5091",
+      "pngSha256": "1acfa339cbb5a18e5f19bf57b2b62856b094a61433a0f0e3fba1e9aafaea2fb8"
+    },
+    "google_photos": {
+      "svgSha256": "15dcd9a32d3a03aa11cb532312817b91d9dca924e3c7577adc8dd38304af5fb9",
+      "pngSha256": "6d42dd4cf462d3c8cdc9c37d03b3174bd5d1212b7ccf9706747ad83337ed0e98"
+    },
+    "google_play_store": {
+      "svgSha256": "f41c8c2859dcef9db999c7d4526ff8af32791fcac7c6a51f227f249bb7351644",
+      "pngSha256": "55469cc3030c9d6a647bb950a4ce21b1ec8b66a0ac9c173d7196dde25c4d7a0a"
+    },
+    "idle_fish": {
+      "svgSha256": "756ad0b02942fb963fc533242ae29ed5b010551331a667f0b9d916dd5093dc25",
+      "pngSha256": "51f871ae759cef61fdc867a4d09696c09d47532e226ae179595e1d8d4c54d02f"
+    },
+    "instagram": {
+      "svgSha256": "b947be27c3ffe8799c9bb00d0cc87d6656bd3c9a17a76ef6d544f427bb0cdc1d",
+      "pngSha256": "73721f4abbc2a7c52047115290289fd1c7c19df478a079d49881186e7de1287b"
+    },
+    "jd": {
+      "svgSha256": "ee838cad05658f367d28654f11d621762de7233c172f9a3159b03df6e511e984",
+      "pngSha256": "6680e8c193b32092130988936045fe2408edef7f0bd3753a3259ccd5b3cca9f4"
+    },
+    "jmcomic2": {
+      "svgSha256": "2ffd2b3faa1d08bff7f6cbc45cf0cb30c549e9ea89899c81f19f68bec0dcba72",
+      "pngSha256": "f0e257aab3fb799d228b36c10e76ba354fc218ba4e23916f511c664d6f4558bd"
+    },
+    "kernelsu": {
+      "svgSha256": "33ded591e18eb27c1bd55ba6596e6baf0c50fb553f0f7793ad90a6a2c7e0efdd",
+      "pngSha256": "b64d32dfdab8808d60edd295988019b963412611371f55e8bb76baa6ee29d0cc"
+    },
+    "key_attestation": {
+      "svgSha256": "8d5c5036e7716506de271a97dad4fbdd4e44f2308b452e64c7c8de8504a5c952",
+      "pngSha256": "8284bfa5f17499e980047d65871ac353a325500dae2aa68838366b11d301d320"
+    },
+    "kugou_lite": {
+      "svgSha256": "f4301216b8128c3c0aaa81a4fa149a491b3036464f643a7c1508a6e280fcfd9b",
+      "pngSha256": "8183432ae7da1134d23fe7857911fa048a7e8f071a3bbffd6bf4ea72f919078e"
+    },
+    "line": {
+      "svgSha256": "08c2c2b93c0f9e3f3046222541665fc46a652df3dfe4d811fad9a3443a655541",
+      "pngSha256": "2ff3a3188bdd0611261c042ff7a0ac45c90981bb1ea8dc5dc21532bbd7364268"
+    },
+    "meituan": {
+      "svgSha256": "0c37ed1ef3dff13e7745e6f3b4c166f0150b746ad3ceb701de83e5f68c0ed7f6",
+      "pngSha256": "e4389c99fd5b13efcc9a7a11f3f85f78b5dab7e59eb2ca2b10716400f20337f5"
+    },
+    "messages": {
+      "svgSha256": "fc5609d718c2d1dd714aa7ff3cf3a0cf7c03a896043fbd9948e0dfc730ba55ac",
+      "pngSha256": "fc8acd33768b6251b31ff5bc39acfbd9004c4b1670f99f1e33115ab70766ee09"
+    },
+    "mi_health": {
+      "svgSha256": "9517a4b941fdcc9e4e564f75cfd44cad1d6fe9902568f9ff06610eb2cd361e6c",
+      "pngSha256": "71646dbdb8999f7bf815d50fa19820d1d859e52f324d67aa9e33ea59f014ae94"
+    },
+    "mi_remote": {
+      "svgSha256": "86bcc9e25e280fa1c979480f1f51df03d1f47698aa1726f51105b50ddf8934de",
+      "pngSha256": "f83a737e1a3667f0b3b6c879f8707574255377ba97f2c4bfbb2cd9e1717fd8c0"
+    },
+    "microsoft_authenticator": {
+      "svgSha256": "4b1e069c5de2a9ff61de08fc286bae4b8a15f00e0d619df05a9b96c6b381655f",
+      "pngSha256": "34e084477d1bd1c99fafe01458fd1e23c8d3f8235958fb15afe481d4379c9007"
+    },
+    "microsoft_edge": {
+      "svgSha256": "7461bb774b8d0905b422c650ccd07beef6a6afea70e9f957b9a1ff4466dee70a",
+      "pngSha256": "86deb364f6cb0ce03b77b71cc17c78626b65329e6dcbc10fb032a423abf1cf9d"
+    },
+    "miui_calculator": {
+      "svgSha256": "7e43d5e4aa96bd207026ad025a3b410e665e5c422794666583caecd4b9db2ea4",
+      "pngSha256": "c1f26e6ea9d2b169c969e0052a4871aaa9b8daffb22d4256f8700f7d58469e27"
+    },
+    "miui_themes_store": {
+      "svgSha256": "8655207ddfcee33b8ae15bec58c56b64adc1c804adbc66a7348499b2c51558fd",
+      "pngSha256": "4978bc04d48cd9160d53c284f541dfc264215bf3984452f2bfecc9548942189b"
+    },
+    "mt_manager": {
+      "svgSha256": "61805254989fc4a6dd3fda7eb5cd40d0d5edfe18b39bc8ccbf786d8b801da1f6",
+      "pngSha256": "de97a9157d7b604ae1177fdc07976265502c558ef98e3ca1c48f6d0e7f62fa17"
+    },
+    "music_search_google_shortcuts_launcher": {
+      "svgSha256": "4593d80c1d637cafd1a02ed85b3189b13625baf6961bf5de301dfb16b21d44ed",
+      "pngSha256": "71d5c81e89949caf03fa58415efe438269e0229ac794da04e544e96908a18a63"
+    },
+    "nekogram": {
+      "svgSha256": "1ac96a7d76d6c657f3d8f32d89f84e01d045a1a65139e918e2e898812f2ac5b8",
+      "pngSha256": "7a438a9857243fea18d55c639308ac3b326c593b2712d77d91029f0180a538b2"
+    },
+    "pixelify_gphotos": {
+      "svgSha256": "1fb513ecd2a3ed118a8479ebd2d15906a7d7b5c7b7ebb718b1a6d756aec177a5",
+      "pngSha256": "7e79cb63ec17ce7fc7fb4956743b9c032aba6a25b05f4bcdc571a02c26fe9d3a"
+    },
+    "qq": {
+      "svgSha256": "40b041020f025432d00cd509a7399b424e9e78dfb794b386df5af14d75558132",
+      "pngSha256": "41ffe0ab5a64697513c716d08c9659ccb055db3afb0d63d319fffd86a990cf8b"
+    },
+    "railway_12306": {
+      "svgSha256": "f994d8be0a2817321281250d6bab43bc4f04e1e7898cdf396c66b467e56631d9",
+      "pngSha256": "966357b9a011a292623604cf4cb438a42410aad0054d5eed837ad23de9cbf48d"
+    },
+    "scene5": {
+      "svgSha256": "7a079df06b14c13bd2f5637155561c3a86184fce64ac5ce18adc365e0c2a60eb",
+      "pngSha256": "4832cf114e38a55e628ae40b7d71cfff47004e356f44a58ada976283bbcef24b"
+    },
+    "small_monkey_search": {
+      "svgSha256": "39a355a5fa2a5d7f53b16cb0fba70cf3177f873387368b585f2a00be4c5dab5a",
+      "pngSha256": "0208556fb0123025dfdc184854f5ce7b5b280eb80c7f7da033707f251eb06bbf"
+    },
+    "steam": {
+      "svgSha256": "3e9616d616c1a0e1f3c09abb1e0030ed8fe973e935aa4b811e32bc37ec40febc",
+      "pngSha256": "678f2b383cc3e7d1ec0ea8be7cd4d491d464fc404dbee20f55ca0b4527e16bdd"
+    },
+    "taobao": {
+      "svgSha256": "e27c7acf7a73ef688c65ca0c141f7221e874905470df50ad6ed2ae2d4347d1c2",
+      "pngSha256": "4c74b9e239fb4ef82249aadc37502a1d7f4b96f9bad9064dd6347335277ff858"
+    },
+    "telegram": {
+      "svgSha256": "14775ae00c01870f5510176bdb6abbfee1f84644363c4fd8b2bb873e4f69e512",
+      "pngSha256": "5dab68a207ed17bc500110ce5610463e4156c2c8d1fc81a245d682baaff0e0fd"
+    },
+    "themed_icon_calendar_31": {
+      "svgSha256": "6fb5f7d4de065969644f9e9b4404b00c52e41138a795c99f9cce9221ea44f527",
+      "pngSha256": "3b50637bf2c68a2b33dfcd0ddf727418add996d66fb8caae4daf8868a32e4641"
+    },
+    "tim_qq": {
+      "svgSha256": "fe39c1c3985abd653e54cddfd768b9bec9199977a635fa479a8485ecc615070f",
+      "pngSha256": "d836bbcaa15a9ea13fa54d03e57bee0818c797d1dfb37f831e7c05eda9f24573"
+    },
+    "vsmart_calendar": {
+      "svgSha256": "5787c44f0cdc3e16626653412af4ccf18e0f42ca20ddb4efab0e60edd6b02574",
+      "pngSha256": "2184c67a587c300688c4ec0b246335f42c421c8544931ef59164661cc352c8cf"
+    },
+    "wechat": {
+      "svgSha256": "d759954005047bbd0a59237f771a1b6bdbdf3d110edfd2e212a67a2de998c136",
+      "pngSha256": "42cb5fbf335d2d7a2bdde4764dea2bcdd10f53bdcb6bb0afaa192f882c7f4d5b"
+    },
+    "whatsapp": {
+      "svgSha256": "aed40500a185484254fdd451939fbc16bcc576543cc185a6d39f7262cd559932",
+      "pngSha256": "813cc165bf2d6a8bad8635839397d4ab2f9d9a4c99cefe7f3771ae5e0dc6490b"
+    },
+    "wolframalpha": {
+      "svgSha256": "e3087abd72e98608c8e2b96d6f053220d376f74922cf9bca4ea060a847a2ca1c",
+      "pngSha256": "b24c4ae84326494f638abcf76584bda807125ad8e75f6be23ac76f61e8191713"
+    },
+    "x": {
+      "svgSha256": "700ab422042010d1aadfc10572f5427abc457de7407c53f37fa7b136ca8831b0",
+      "pngSha256": "f9ddd4b596f07248b08e82511e66afc77effacdf105a23abfe23722bb9136329"
+    },
+    "xiaomi_weather": {
+      "svgSha256": "d1e67c5c910ce605f2e2e95713937b847fba1867849e7f879c5ebc07992efc79",
+      "pngSha256": "fdfcb062118835253e34825a9cd40a362a704a5d8520959836cd31b39fba8274"
+    },
+    "xuexi_qiangguo": {
+      "svgSha256": "07ca3b00bbc1e9f477fa5e7193e61fab4579039f371d18a35c21c7aaea37f515",
+      "pngSha256": "1f30a10a50a3e4760374e6ac416024d739db8a5d8cc9c17c90b8e4e5804afedc"
+    },
+    "youtube": {
+      "svgSha256": "e7b95cfd55e1da701cf9f146086e57cfc7aece1587d537b3803556fbf768d66e",
+      "pngSha256": "a0027aa0be6e929fdf28a9fa730e9032313bd27d407cf91efc03b6c9e5531dc2"
+    }
+  }
+}

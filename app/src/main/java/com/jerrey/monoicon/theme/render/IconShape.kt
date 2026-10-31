@@ -10,12 +10,12 @@ import androidx.core.graphics.PathParser
 /**
  * Icon silhouette used by MonoIcon-rendered icons (Phase 9).
  *
- * - [SQUIRCLE]: no clipping — the framework/launcher mask decides the shape
+ * - [SQUIRCLE]: the framework/launcher mask decides the ordinary icon shape
  *   (HyperOS ships a **square** `config_icon_mask`, so today's output is
- *   whatever MIUI composed around our drawable).
+ *   whatever MIUI composed around our drawable). Large icons use a rounded rectangle.
  * - [CIRCLE]: the module clips its own drawable to a circle, which is the
- *   only way to obtain an AOSP-style circular icon on HyperOS (see
- *   [CircleIconShape]).
+ *   only way to obtain an AOSP-style circular icon on HyperOS. Rectangular
+ *   icons use a capsule with semicircular ends (see [CircleIconShape]).
  */
 enum class IconShape { SQUIRCLE, CIRCLE }
 
@@ -28,11 +28,9 @@ enum class IconShape { SQUIRCLE, CIRCLE }
  * `androidx.core.graphics.PathParser` for the module's own clip path — so the
  * MIUI-composed icons and MonoIcon's own drawables share one geometry.
  *
- * Geometry contract (matches MIUI `composeIconForDefaultIcon()`'s
- * `matrix.setScale(size / 100f, size / 100f)` and AOSP
- * `AdaptiveIconDrawable.updateMaskBoundsInternal()`'s
- * `mMaskMatrix.setScale(b.width() / MASK_SIZE, b.height() / MASK_SIZE)`):
- * the mask is stretched **non-uniformly** to the drawable bounds.
+ * Square icons retain the MIUI/AOSP unit mask. Rectangular bounds use a
+ * round rectangle with radius equal to half the short side, so extending
+ * an icon adds straight sides without stretching its circular ends.
  *
  * Being full-bleed (bounds exactly `0,0,100,100`) keeps MIUI's
  * `mIsFullMask` predicate (`bounds.contains(50f, 0f)`) true, so icons keep
@@ -119,6 +117,10 @@ object CircleIconShape {
     fun clipPath(shape: IconShape, bounds: Rect): Path? {
         if (shape != IconShape.CIRCLE) return null
         if (bounds.width() <= 0 || bounds.height() <= 0) return null
+        if (bounds.width() != bounds.height()) {
+            val radius = minOf(bounds.width(), bounds.height()) / 2f
+            return Path().apply { addRoundRect(RectF(bounds), radius, radius, Path.Direction.CW) }
+        }
         val unit = unitPath() ?: return null
         return try {
             val matrix = Matrix()

@@ -283,6 +283,140 @@ class CircleIconShapeInstrumentedTest {
         }
     }
 
+    @Test
+    fun rectangularCircleHasStraightSidesAndSemicircularEnds() {
+        for ((width, height) in listOf(480 to 240, 240 to 480)) {
+            val content = CircleIconShape.insetBounds(Rect(0, 0, width, height))
+            val region = Region().apply {
+                setPath(CircleIconShape.clipPath(IconShape.CIRCLE, content)!!, Region(0, 0, width, height))
+            }
+            // An ellipse misses this point near the straight side of a capsule.
+            if (width > height) {
+                assertTrue(region.contains(content.left + content.height() / 2 + 8, content.top + 2))
+                assertFalse(region.contains(content.left + 2, content.top + 2))
+                assertTrue(region.contains(content.left + 2, content.centerY()))
+            } else {
+                assertTrue(region.contains(content.left + 2, content.top + content.width() / 2 + 8))
+                assertFalse(region.contains(content.left + 2, content.top + 2))
+                assertTrue(region.contains(content.centerX(), content.top + 2))
+            }
+        }
+    }
+
+    @Test
+    fun largeCirclePlateRendersCapsuleSidesWithTransparentPadding() {
+        val mask = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        try {
+            for ((width, height) in listOf(480 to 240, 240 to 480)) {
+                val drawable = ColoredMonochromeDrawable(mask, 0, PLATE, IconShape.CIRCLE)
+                    .forLargeIcon(width, height)
+                val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                try {
+                    drawable.draw(Canvas(out))
+                    val content = CircleIconShape.insetBounds(Rect(0, 0, width, height))
+                    val x = if (width > height) content.left + content.height() / 2 + 8 else content.left + 2
+                    val y = if (width > height) content.top + 2 else content.top + content.width() / 2 + 8
+                    assertEquals("straight capsule side", 255, Color.alpha(out.getPixel(x, y)))
+                    assertEquals("outside circular end", 0, Color.alpha(out.getPixel(content.left + 2, content.top + 2)))
+                    assertEquals("AOSP padding", 0, Color.alpha(out.getPixel(width / 2, 1)))
+                } finally {
+                    out.recycle()
+                }
+            }
+        } finally {
+            mask.recycle()
+        }
+    }
+
+    @Test
+    fun largeGlyphKeepsItsAspectRatioInBothOrientationsAndAfterCloning() {
+        val mask = Bitmap.createBitmap(192, 192, Bitmap.Config.ARGB_8888)
+        Canvas(mask).drawRect(64f, 64f, 128f, 128f, Paint().apply { color = Color.WHITE })
+        try {
+            for (shape in IconShape.entries) {
+                for ((width, height) in listOf(480 to 240, 240 to 480, 480 to 480)) {
+                    val original = ColoredMonochromeDrawable(mask, GLYPH, 0, shape).forLargeIcon(width, height)
+                    val drawable = original.constantState.newDrawable()
+                    assertEquals(width, drawable.intrinsicWidth)
+                    assertEquals(height, drawable.intrinsicHeight)
+                    val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    try {
+                        drawable.setBounds(0, 0, width, height)
+                        drawable.draw(Canvas(out))
+                        var left = width
+                        var top = height
+                        var right = -1
+                        var bottom = -1
+                        for (y in 0 until height) for (x in 0 until width) {
+                            if (Color.alpha(out.getPixel(x, y)) > 127) {
+                                left = minOf(left, x); right = maxOf(right, x)
+                                top = minOf(top, y); bottom = maxOf(bottom, y)
+                            }
+                        }
+                        assertTrue("visible glyph", right > left && bottom > top)
+                        assertEquals("$shape ${width}x$height square glyph", right - left, bottom - top)
+                        assertEquals("centred x", width - 1, left + right)
+                        assertEquals("centred y", height - 1, top + bottom)
+                    } finally {
+                        out.recycle()
+                    }
+                }
+            }
+        } finally {
+            mask.recycle()
+        }
+    }
+
+    @Test
+    fun largeSquareAndRectanglesUseRoundedPlatesWithCircleDisabled() {
+        val mask = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        try {
+            for ((width, height) in listOf(480 to 240, 240 to 480, 480 to 480)) {
+                val drawable = ColoredMonochromeDrawable(mask, 0, PLATE, IconShape.SQUIRCLE)
+                    .forLargeIcon(width, height)
+                val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                try {
+                    drawable.draw(Canvas(out))
+                    assertEquals("rounded corner", 0, Color.alpha(out.getPixel(2, 2)))
+                    assertEquals("full plate", 255, Color.alpha(out.getPixel(width / 2, 2)))
+                    val shortSide = minOf(width, height)
+                    assertEquals("ordinary rounded rectangle, not capsule", 255,
+                        Color.alpha(out.getPixel(shortSide / 4, 2)))
+                } finally {
+                    out.recycle()
+                }
+            }
+        } finally {
+            mask.recycle()
+        }
+    }
+
+    @Test
+    fun alphaOnlyMasksRetainAntialiasedEdgesWhenTintedAtLargeBounds() {
+        val argb = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
+        Canvas(argb).drawCircle(64f, 64f, 37.3f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+        val alpha = requireNotNull(argb.copy(Bitmap.Config.ALPHA_8, false))
+        try {
+            val images = listOf(argb, alpha).map { mask ->
+                Bitmap.createBitmap(480, 240, Bitmap.Config.ARGB_8888).also { out ->
+                    ColoredMonochromeDrawable(mask, GLYPH, 0, IconShape.CIRCLE)
+                        .forLargeIcon(480, 240).draw(Canvas(out))
+                }
+            }
+            try {
+                assertTrue("alpha-only cache preserves rendered pixels", images[0].sameAs(images[1]))
+                val pixels = IntArray(480 * 240)
+                images[1].getPixels(pixels, 0, 480, 0, 0, 480, 240)
+                assertTrue("filtered edges retain fractional coverage", pixels.any { Color.alpha(it) in 1..254 })
+            } finally {
+                images.forEach(Bitmap::recycle)
+            }
+        } finally {
+            argb.recycle()
+            alpha.recycle()
+        }
+    }
+
     private fun renderAt(drawable: ColoredMonochromeDrawable, bounds: Rect): Bitmap =
         Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
             drawable.bounds = bounds

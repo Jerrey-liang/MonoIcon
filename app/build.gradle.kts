@@ -32,8 +32,8 @@ android {
         // AGSL runtime-shader path (API 33+) and we no longer ship a fallback.
         minSdk = 35
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.1.0"
+        versionCode = 4
+        versionName = "2.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -72,8 +72,9 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        // miuix-nav 0.9.4 publishes JVM 21 inline APIs, matching KernelSU.
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     buildFeatures {
@@ -107,10 +108,13 @@ android {
 }
 
 dependencies {
+    // Same ApplicationInfo predictive-back preference bridge used by KernelSU.
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
@@ -118,6 +122,8 @@ dependencies {
     // Miuix — MIUI/HyperOS-style Compose UI for the settings screen
     // (0.9.x: UI in miuix-ui, icons in miuix-icons)
     implementation(libs.miuix.ui)
+    implementation(libs.miuix.preference)
+    implementation(libs.miuix.nav)
     implementation(libs.miuix.icons)
     // miuix-blur: 液态玻璃底栏（与 LSPosed Manager 同引擎：图层录制 + 降采样金字塔模糊 + SDF 高光）
     implementation(libs.miuix.blur)

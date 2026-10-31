@@ -3,6 +3,7 @@ package com.jerrey.monoicon.ui
 import android.content.Context
 import android.content.Intent
 import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
+import com.jerrey.monoicon.hook.HyperOs4IconRefresh
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.logging.logw
@@ -47,7 +48,7 @@ fun restartScopedApps(context: Context, packages: List<String>): Boolean {
         }
     }
     logw(TAG, "killall unavailable for ${scope.joinToString()}")
-    return bringLauncherBack(context, scope)
+    return false
 }
 
 /**
@@ -63,6 +64,7 @@ private fun bringLauncherBack(context: Context, scope: List<String>): Boolean {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
         logi(TAG, "HOME intent sent")
+        HyperOs4IconRefresh.afterLauncherRestart(context)
         true
     } catch (t: Throwable) {
         loge(TAG, "HOME intent failed", t)

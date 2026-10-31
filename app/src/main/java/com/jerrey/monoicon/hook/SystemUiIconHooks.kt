@@ -213,7 +213,7 @@ internal object SystemUiIconHooks {
             }
     }
 
-    /** Master switch + the notification-icon escape hatch (Phase 11). */
+    /** Notification icons follow the module's master switch; the feature stays enabled. */
     private fun active(): Boolean =
         ConfigManager.isEnabled() && ConfigManager.isNotificationIconsEnabled()
 

@@ -1,316 +1,314 @@
+// Navigation adapted from KernelSU, GPL-3.0-or-later.
+// Source revision: 2fe188310309bd7a7c9b5a80beed6f14469c6cd2. See THIRD_PARTY_NOTICES.md.
 package com.jerrey.monoicon.ui.screens
 
-import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.SeekableTransitionState
-import androidx.compose.animation.core.rememberTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.AppStrings
 import com.jerrey.monoicon.ui.LocalStrings
-import com.jerrey.monoicon.ui.liquid.FrostedTopAppBar
+import com.jerrey.monoicon.ui.icons.MonoIcons
+import com.jerrey.monoicon.ui.liquid.BlurredBar
 import com.jerrey.monoicon.ui.liquid.LiquidGlassNavigationBar
+import com.jerrey.monoicon.ui.liquid.rememberBlurBackdrop
+import com.jerrey.monoicon.ui.settings.UiPreferences
+import com.jerrey.monoicon.ui.settings.rememberNavigationBadges
+import com.jerrey.monoicon.ui.settings.settingsText
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
-import kotlinx.coroutines.CancellationException
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.NavigationItem
-import top.yukonga.miuix.kmp.basic.Scaffold
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.icon.extended.Theme
-import top.yukonga.miuix.kmp.icon.extended.Home
-import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.nav.core.*
+import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
+import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.pagerGestureOverride
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
 
-/** Bottom navigation tabs, in bar order (概览 / 图标样式 / 模块设置). */
 private enum class MainTab(val icon: ImageVector) {
-    OVERVIEW(MiuixIcons.Regular.Home),
-    ICON_STYLE(MiuixIcons.Regular.Theme),
-    MODULE(MiuixIcons.Regular.Settings),
+    HOME(MonoIcons.Home),
+    ICON_STYLE(MonoIcons.IconStyle),
+    CONFIGURATION(MonoIcons.Configuration),
+    MODULE(MonoIcons.Settings);
+
+    fun label(strings: AppStrings): String = when (this) {
+        HOME -> strings.overview
+        ICON_STYLE -> strings.iconStyle
+        CONFIGURATION -> strings.configurationManagement
+        MODULE -> strings.moduleSettings
+    }
 }
 
-/** Bar label for a tab; derived here so the label order can never drift from the enum. */
-private fun MainTab.label(strings: AppStrings): String = when (this) {
-    MainTab.OVERVIEW -> strings.overview
-    MainTab.ICON_STYLE -> strings.iconStyle
-    MainTab.MODULE -> strings.moduleSettings
-}
+private enum class AppRoute : NavKey { MAIN, LOGS, ABOUT, THEME }
 
-private enum class Overlay { NONE, LOGS, ABOUT }
-
-private const val PAGE_TRANSITION_DURATION_MS = 300
-
-/** Direction belongs to the latest request, including interrupted transitions. */
-private data class PageMotion(
-    val page: Pair<MainTab, Overlay>,
-    val forward: Boolean,
+// These routes carry no arguments; save enum names across process recreation.
+private val RouteSaver = listSaver<NavBackStack, String>(
+    save = { stack -> stack.map { (it as AppRoute).name } },
+    restore = { names -> navBackStackOf(*names.map(AppRoute::valueOf).toTypedArray()) },
 )
 
-private fun movesForward(from: Pair<MainTab, Overlay>, to: Pair<MainTab, Overlay>): Boolean =
-    if (from.second != to.second) to.second != Overlay.NONE else to.first.ordinal > from.first.ordinal
-
 @Composable
-fun SettingsScreen(
-    variant: String,
-    onVariantChange: (String) -> Unit,
-) {
+fun SettingsScreen(variant: String, onVariantChange: (String) -> Unit) {
     val context = LocalContext.current
-    val layoutDirection = LocalLayoutDirection.current
-    var language by remember { mutableStateOf(AppLanguage.fromId(ConfigManager.getLanguageFromUi())) }
+    val activity = LocalActivity.current
+    var language by rememberSaveable { mutableStateOf(AppLanguage.fromId(ConfigManager.getLanguageFromUi())) }
     val strings = stringsFor(language, systemPrefersChinese(context))
-    val navigationItems = remember(strings) {
-        MainTab.entries.map { NavigationItem(icon = it.icon, label = it.label(strings)) }
-    }
+    val settings by UiPreferences.state.collectAsState()
+    val routes = rememberSaveable(saver = RouteSaver) { navBackStackOf(AppRoute.MAIN) }
+    fun open(route: AppRoute) { if (route !in routes) routes.add(route) }
+    fun back() { if (routes.size > 1) routes.removeAt(routes.lastIndex) }
+    val dismiss = if (settings.swipeDismiss) {
+        if (LocalLayoutDirection.current == LayoutDirection.Rtl) NavSwipeDirection.RightToLeft
+        else NavSwipeDirection.LeftToRight
+    } else NavSwipeDirection.None
 
     CompositionLocalProvider(LocalStrings provides strings) {
-        var tab by remember { mutableStateOf(MainTab.OVERVIEW) }
-        var overlay by remember { mutableStateOf(Overlay.NONE) }
-        // Both bars sample this page source from outside its recording subtree.
-        val backgroundColor = MiuixTheme.colorScheme.surface
-        val backdrop = rememberLayerBackdrop {
-            drawRect(backgroundColor)
-            drawContent()
-        }
-        val barBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            .let { inset -> if (inset != 0.dp) 8.dp + inset else 28.dp }
-
-        val page = tab to overlay
-        val motionState = remember { SeekableTransitionState(PageMotion(page, forward = true)) }
-        val pageTransition = rememberTransition(motionState, label = "Page transition")
-        var activeBackGesture by remember { mutableStateOf<Any?>(null) }
-
-        // One animation owner handles clicks, committed back and cancelled back.
-        // Resuming here also avoids animating from a cancelled gesture coroutine.
-        LaunchedEffect(page, activeBackGesture) {
-            if (activeBackGesture == null) {
-                val previousTarget = motionState.targetState
-                val target = if (previousTarget.page == page) previousTarget else {
-                    PageMotion(page, forward = movesForward(previousTarget.page, page))
-                }
-                motionState.animateTo(target)
-            }
-        }
-
-        PredictiveBackHandler(enabled = overlay != Overlay.NONE) { events ->
-            val origin = tab to overlay
-            // A gesture begun during a push can still commit/cancel normally;
-            // leave that in-flight animation intact rather than snapping it.
-            val gesture = if (!pageTransition.isRunning && motionState.currentState.page == origin) Any() else null
-            if (gesture != null) activeBackGesture = gesture
-            try {
-                events.collect { event ->
-                    if (gesture != null && activeBackGesture === gesture && (tab to overlay) == origin) {
-                        motionState.seekTo(event.progress, PageMotion(tab to Overlay.NONE, forward = false))
+        Scaffold { _ ->
+            NavDisplay(
+                backStack = routes,
+                effects = NavDisplayEffects(cornerClipRadius = rememberNavSystemCornerRadius()),
+                onBack = ::back,
+            ) {
+                entry<AppRoute>(swipeDismiss = dismiss) { route ->
+                    when (route) {
+                        AppRoute.MAIN -> MainPages(
+                            variant, onVariantChange, language, {
+                                language = it
+                                activity?.recreate()
+                            },
+                            isActive = routes.last() == AppRoute.MAIN,
+                            onOpenLogs = { open(AppRoute.LOGS) },
+                            onOpenAbout = { open(AppRoute.ABOUT) },
+                            onOpenTheme = { open(AppRoute.THEME) },
+                        )
+                        AppRoute.LOGS -> KernelPage(title = strings.logsTitle, onBack = ::back) {
+                            LogScreen(isActive = routes.last() == AppRoute.LOGS)
+                        }
+                        AppRoute.ABOUT -> AboutScreen(onBack = ::back)
+                        AppRoute.THEME -> KernelPage(
+                            title = settingsText("settings_theme"),
+                            onBack = ::back,
+                        ) { ThemeSettingsScreen() }
                     }
                 }
-                if ((tab to overlay) == origin) overlay = Overlay.NONE
-            } catch (_: CancellationException) {
-                // Keep the destination; the effect above restores the page.
+            }
+        }
+    }
+}
+
+/** KernelSU's MainPagerState semantics, including cancellation of interrupted taps. */
+private class MainPagerState(val pager: PagerState, private val scope: CoroutineScope) {
+    var selectedPage by mutableIntStateOf(pager.currentPage)
+        private set
+    private var navigating by mutableStateOf(false)
+    private var job: Job? = null
+
+    fun select(index: Int) {
+        if (index == selectedPage) return
+        job?.cancel()
+        selectedPage = index
+        navigating = true
+        job = scope.launch {
+            val currentJob = coroutineContext.job
+            try {
+                pager.springAnimateToPage(index)
             } finally {
-                if (gesture != null && activeBackGesture === gesture) activeBackGesture = null
+                if (job == currentJob) {
+                    navigating = false
+                    selectedPage = pager.currentPage
+                }
             }
         }
+    }
 
-        val title = when (overlay) {
-            Overlay.LOGS -> strings.logsTitle
-            Overlay.ABOUT -> strings.about
-            Overlay.NONE -> when (tab) {
-                MainTab.OVERVIEW -> "MonoIcon"
-                MainTab.MODULE -> strings.moduleSettings
-                MainTab.ICON_STYLE -> strings.iconStyle
-            }
-        }
+    fun syncPage() { if (!navigating) selectedPage = pager.currentPage }
+}
 
-        var barTitleVisible by remember(page) { mutableStateOf(false) }
-        var lastPrimaryBottomInset by remember { mutableStateOf(0.dp) }
+@Composable
+private fun MainPages(
+    variant: String,
+    onVariantChange: (String) -> Unit,
+    language: AppLanguage,
+    onLanguageChange: (AppLanguage) -> Unit,
+    isActive: Boolean,
+    onOpenLogs: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenTheme: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    val settings by UiPreferences.state.collectAsState()
+    val badges = rememberNavigationBadges()
+    val pager = rememberPagerState(pageCount = { MainTab.entries.size })
+    val scope = rememberCoroutineScope()
+    val mainState = remember(pager, scope) { MainPagerState(pager, scope) }
+    val surface = MiuixTheme.colorScheme.surface
+    val backdrop = rememberLayerBackdrop { drawRect(surface); drawContent() }
+    val barBackdrop = rememberBlurBackdrop(settings.enableBlur)
+    val items = remember(strings) {
+        MainTab.entries.map { NavigationItem(icon = it.icon, label = it.label(strings)) }
+    }
+    val pagerMode = PagerInterceptionMode.entries.getOrElse(settings.pagerGestureMode) { PagerInterceptionMode.CrossAxisInterceptor }
+    val intercept = pagerMode == PagerInterceptionMode.CrossAxisInterceptor
+    LaunchedEffect(pager.currentPage) { mainState.syncPage() }
+    BackHandler(enabled = isActive && mainState.selectedPage != 0) { mainState.select(0) }
 
-        Scaffold(
-            containerColor = backgroundColor,
-            // The bars own their system insets. Content starts below the top bar
-            // but scrolls behind it so the backdrop contains the actual page.
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            topBar = {
-                FrostedTopAppBar(
-                    title = if (barTitleVisible) title else "",
-                    backdrop = backdrop,
-                    modifier = Modifier.zIndex(1f),
-                    navigationIcon = {
-                        if (overlay != Overlay.NONE) {
-                            IconButton(onClick = { overlay = Overlay.NONE }) {
-                                Icon(
-                                    imageVector = MiuixIcons.Regular.Back,
-                                    contentDescription = strings.back,
-                                )
-                            }
-                        }
-                    },
-                )
-            },
-            // Never move this consumer inside layerBackdrop(backdrop): recording
-            // its own RenderNode would create a recursive drawing graph.
-            bottomBar = {
-                if (overlay == Overlay.NONE) {
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                        LiquidGlassNavigationBar(
-                            items = navigationItems,
-                            selectedIndex = tab.ordinal,
-                            onItemClick = { tab = MainTab.entries[it] },
-                            backdrop = backdrop,
-                            modifier = Modifier.padding(start = 28.dp, end = 28.dp, bottom = barBottomPadding),
+    Scaffold(
+        modifier = if (isActive) Modifier else Modifier.semantics { hideFromAccessibility() },
+        bottomBar = {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                if (settings.floatingBottomBar) {
+                    val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    LiquidGlassNavigationBar(
+                        items = items,
+                        selectedIndex = mainState.selectedPage,
+                        onItemClick = mainState::select,
+                        backdrop = backdrop,
+                        isBlurEnabled = settings.glassBottomBar,
+                        badges = badges,
+                        modifier = Modifier.padding(start = 28.dp, end = 28.dp, bottom = if (inset != 0.dp) 8.dp + inset else 28.dp),
+                    )
+                } else {
+                    BlurredBar(barBackdrop) {
+                        NavigationBar(
+                            color = if (barBackdrop != null) Color.Transparent else surface,
+                            content = {
+                                items.forEachIndexed { index, item ->
+                                    NavigationBarItem(
+                                        modifier = Modifier.weight(1f),
+                                        icon = item.icon,
+                                        label = item.label,
+                                        selected = mainState.selectedPage == index,
+                                        onClick = { mainState.select(index) },
+                                        badge = badges[index]?.let { count -> { Badge { Text(count.toString()) } } },
+                                    )
+                                }
+                            },
                         )
                     }
                 }
-            },
-        ) { padding ->
-            val primaryBottomInset = if (overlay == Overlay.NONE) {
-                padding.calculateBottomPadding()
-            } else {
-                lastPrimaryBottomInset
             }
-            SideEffect {
-                if (overlay == Overlay.NONE) lastPrimaryBottomInset = primaryBottomInset
+        },
+    ) { padding ->
+        Box(modifier = if (barBackdrop != null) Modifier.layerBackdrop(barBackdrop) else Modifier) {
+            HorizontalPager(
+                modifier = Modifier.fillMaxSize()
+                    .pagerGestureOverride(pagerState = pager, mode = pagerMode, enabled = isActive)
+                    .then(if (settings.floatingBottomBar && settings.glassBottomBar) Modifier.layerBackdrop(backdrop) else Modifier),
+                state = pager,
+                beyondViewportPageCount = 3,
+                overscrollEffect = null,
+                userScrollEnabled = isActive && !intercept,
+                pageNestedScrollConnection = if (intercept) PagerGestureNestedScrollConnection else
+                    PagerDefaults.pageNestedScrollConnection(pager, androidx.compose.foundation.gestures.Orientation.Horizontal),
+                flingBehavior = PagerDefaults.flingBehavior(pager, snapAnimationSpec = PagerNavigationSpringSpec),
+            ) { index ->
+                val tab = MainTab.entries[index]
+                val active = isActive && index == pager.settledPage
+                KernelPage(
+                    title = if (tab == MainTab.HOME) "MonoIcon" else tab.label(strings),
+                    actions = { if (tab != MainTab.MODULE) HomeTopBarActions() },
+                    bottomPadding = padding.calculateBottomPadding(),
+                    modifier = Modifier.testTag("main-page-$index").then(
+                        if (active) Modifier else Modifier.semantics { hideFromAccessibility() },
+                    ),
+                ) {
+                    when (tab) {
+                        MainTab.HOME -> OverviewScreen(onOpenLogs = onOpenLogs, onOpenAbout = onOpenAbout, isActive = active)
+                        MainTab.ICON_STYLE -> IconStyleScreen(variant, onVariantChange)
+                        MainTab.CONFIGURATION -> ConfigurationScreen(isActive = active)
+                        MainTab.MODULE -> ModuleSettingsScreen(
+                            language = language,
+                            onLanguageChange = onLanguageChange,
+                            onOpenLogs = onOpenLogs,
+                            onOpenAbout = onOpenAbout,
+                            onOpenTheme = onOpenTheme,
+                        )
+                    }
+                }
             }
+        }
+    }
+}
 
-            // Record the complete viewport, including the area behind both bars.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        start = padding.calculateStartPadding(layoutDirection),
-                        end = padding.calculateEndPadding(layoutDirection),
-                    )
-                    .clipToBounds()
-                    .layerBackdrop(backdrop),
-            ) {
-                pageTransition.AnimatedContent(
-                    modifier = Modifier.fillMaxSize(),
-                    contentKey = { it.page },
-                    transitionSpec = {
-                        val navigationSign = if (targetState.forward) 1 else -1
-                        val direction = navigationSign * if (layoutDirection == LayoutDirection.Ltr) 1 else -1
-                        val enter = slideInHorizontally(
-                            animationSpec = tween(PAGE_TRANSITION_DURATION_MS, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> direction * width },
-                        ) + fadeIn(tween(PAGE_TRANSITION_DURATION_MS, easing = FastOutSlowInEasing))
-                        val exit = slideOutHorizontally(
-                            animationSpec = tween(PAGE_TRANSITION_DURATION_MS, easing = FastOutSlowInEasing),
-                            targetOffsetX = { width -> -direction * width },
-                        ) + fadeOut(tween(PAGE_TRANSITION_DURATION_MS, easing = FastOutSlowInEasing))
-                        (enter togetherWith exit).using(null)
-                    },
-                ) { displayed ->
-                    val isPageActive = displayed.page == page && activeBackGesture == null
-                    // Each concurrently visible page retains its own scroll and
-                    // measured title, so entering a page never moves the old one.
-                    val scrollState = rememberScrollState()
-                    var titleBottomPx by remember { mutableStateOf(0) }
-                    val pageTitleVisible by remember {
-                        derivedStateOf { titleBottomPx > 0 && scrollState.value >= titleBottomPx }
-                    }
-                    val showPageTitle = pageTitleVisible
-                    SideEffect {
-                        if (displayed.page == page) barTitleVisible = showPageTitle
-                    }
-                    val bottomInset = if (displayed.page.second == Overlay.NONE) primaryBottomInset else 0.dp
-                    val pageInput = if (isPageActive) Modifier else {
-                        Modifier
-                            .semantics { hideFromAccessibility() }
-                            .pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-                                    }
-                                }
-                            }
-                    }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .then(pageInput)
-                            .verticalScroll(scrollState)
-                            .padding(
-                                top = padding.calculateTopPadding(),
-                                bottom = bottomInset + PageSpacing.gutter,
-                            ),
-                    ) {
-                        when (displayed.page.second) {
-                            Overlay.LOGS -> PageContent(
-                                title = strings.logsTitle,
-                                onTitleBottomPositioned = { titleBottomPx = it },
-                            ) { LogScreen(isActive = isPageActive) }
-
-                            Overlay.ABOUT -> PageContent(
-                                title = strings.about,
-                                onTitleBottomPositioned = { titleBottomPx = it },
-                            ) { AboutScreen() }
-
-                            Overlay.NONE -> when (displayed.page.first) {
-                                MainTab.OVERVIEW -> OverviewScreen(
-                                    onOpenLogs = { overlay = Overlay.LOGS },
-                                    onOpenAbout = { overlay = Overlay.ABOUT },
-                                    onTitleBottomPositioned = { titleBottomPx = it },
-                                    isActive = isPageActive,
-                                )
-
-                                MainTab.MODULE -> ModuleSettingsScreen(
-                                    language = language,
-                                    onLanguageChange = { language = it },
-                                    onTitleBottomPositioned = { titleBottomPx = it },
-                                )
-
-                                MainTab.ICON_STYLE -> IconStyleScreen(
-                                    variant = variant,
-                                    onVariantChange = onVariantChange,
-                                    onTitleBottomPositioned = { titleBottomPx = it },
-                                )
-                            }
+/** Same collapsing title, scroll effects and texture blur as KernelSU's Miuix pages. */
+@Composable
+internal fun KernelPage(
+    title: String,
+    modifier: Modifier = Modifier,
+    bottomPadding: Dp = 0.dp,
+    onBack: (() -> Unit)? = null,
+    actions: @Composable () -> Unit = {},
+    content: @Composable () -> Unit,
+) {
+    val settings by UiPreferences.state.collectAsState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val backdrop = rememberBlurBackdrop(settings.enableBlur)
+    val strings = LocalStrings.current
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            BlurredBar(backdrop) {
+                TopAppBar(
+                    title = title,
+                    color = if (backdrop != null) Color.Transparent else MiuixTheme.colorScheme.surface,
+                    scrollBehavior = scrollBehavior,
+                    actions = { actions() },
+                    navigationIcon = {
+                        if (onBack != null) IconButton(onClick = onBack) {
+                            Icon(MiuixIcons.Regular.Back, strings.back)
                         }
-                    }
+                    },
+                )
+            }
+        },
+        popupHost = {},
+        contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
+    ) { padding ->
+        Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().scrollEndHaptic().overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection),
+                contentPadding = padding,
+                overscrollEffect = null,
+            ) {
+                item {
+                    Column { content() }
+                    Spacer(Modifier.height(bottomPadding + if (onBack != null)
+                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp else 12.dp))
                 }
             }
         }

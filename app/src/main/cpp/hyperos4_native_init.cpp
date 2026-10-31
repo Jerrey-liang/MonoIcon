@@ -47,9 +47,10 @@
 // the process immediately. If the launcher stops starting, native_init provably
 // ran; with the variable unset the payload never exits.
 //
-// Scope of this file: entry and observation only. It proves and reports that
-// MonoIcon native code runs inside the HyperOS 4 launcher. Icon hooks are added
-// on top of this once the entry is confirmed on a device.
+// Scope: loader lifecycle, process identity and startup dispatch. The verified
+// transaction stays in hyperos4_palette_install.cpp. A child loading its Dart
+// image completes the first transaction before that load returns; later updates
+// belong to the background worker. The spawner never applies icon patches.
 //
 // Reference: wxxsfxyzm/MiuiBackGestureHook (miui-home-hyos-native/) and
 // zilewang7/HyperOS4SmallWindowInputFilter, which use the same LSPosed
@@ -58,12 +59,14 @@
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <link.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include "hyperos4_paths.h"
 
 namespace {
 
@@ -168,9 +171,11 @@ void AppendText(char* buffer, size_t capacity, const char* text) {
 void WriteStatusFile(const char* phase) {
     // Full paths are spelled out: these are separate string literals, not one
     // concatenated literal, so adjacent-literal joining does not apply.
+    char launcherPath[192];
+    monoicon::hyos::LauncherFilePath(launcherPath, sizeof(launcherPath), kStatusFileName);
+    const bool child = getuid() != 0 && __atomic_load_n(&monoicon_hyos_status.in_launcher_child, __ATOMIC_ACQUIRE) != 0;
     const char* candidates[] = {
-        "/data/user/0/com.miui.home/files/monoicon_hyos_init.txt",
-        "/data/data/com.miui.home/files/monoicon_hyos_init.txt",
+        child ? launcherPath : "/data/local/tmp/monoicon_hyos_init_spawner.txt",
         "/data/local/tmp/monoicon_hyos_init.txt",
     };
     char body[512] = {};
@@ -317,18 +322,19 @@ void OnLibraryLoaded(const char* name, void* handle);
 // Lives in hyperos4_hook_backend.cpp. All hooking goes through the LSPosed hook
 // primitive; this module never writes machine code itself.
 extern "C" void monoicon_hyos_hook_backend_init(const void* entries);
-extern "C" void monoicon_hyos_install_canary_hook();
-// B-1 loader-timing observation. These only record timestamps; they never load,
-// unload, patch or reorder anything.
-extern "C" uint32_t monoicon_hyos_observe_libapp_visible();
-extern "C" uint32_t monoicon_hyos_observe_libapp_handle();
-extern "C" uint32_t monoicon_hyos_observe_libapp_hook();
-extern "C" void monoicon_hyos_observe_finalize();
-// Lives in hyperos4_palette_install.cpp. The palette transaction validates the
-// mapped 6144 images against embedded snapshots and installs the eight scalar
-// substitutions plus the foreground veneer. Self-guarded: it installs once per
-// process and refuses to touch the HYOS spawner's shared pages.
+// The profile engine validates all mapped identities before installing code.
 extern "C" uint32_t monoicon_hyos_palette_install();
+extern "C" uint32_t monoicon_hyos_palette_startup();
+
+bool DartImageMapped() {
+    bool mapped = false;
+    dl_iterate_phdr([](dl_phdr_info* info, size_t, void* state) {
+        if (!IsDartLibraryPath(info->dlpi_name)) return 0;
+        *static_cast<bool*>(state) = true;
+        return 1;
+    }, &mapped);
+    return mapped;
+}
 
 void HandleLauncherLibrary(void* handle) {
     __atomic_fetch_add(&monoicon_hyos_status.launcher_library_seen, 1u,
@@ -355,10 +361,9 @@ void HandleLauncherLibrary(void* handle) {
         Logf(ANDROID_LOG_WARN, "could not resolve %s: %s", kLauncherEntrySymbol,
              dlerror());
     }
-    // The palette transaction self-guards and only acts in the launcher child;
-    // calling it here covers child processes whose first matching load is the
-    // launcher image rather than the Dart snapshot.
-    monoicon_hyos_palette_install();
+    // A child can inherit a preloaded Dart image. Apply before the newly loaded
+    // launcher entry runs. Otherwise the Dart callback owns the first pass.
+    if (IsLauncherChildProcess() && DartImageMapped()) monoicon_hyos_palette_startup();
     NextSequence();
     WriteStatusFile("launcher-library");
 }
@@ -367,21 +372,9 @@ void HandleDartLibrary(void* handle) {
     __atomic_fetch_add(&monoicon_hyos_status.dart_library_seen, 1u,
                        __ATOMIC_RELAXED);
     Logf(ANDROID_LOG_INFO, "Dart snapshot image loaded (handle=%p)", handle);
-    // B-1 (observation only): libapp.so is now visible and a handle exists. Record
-    // both moments, then record when the Dart-image scan actually starts, so the
-    // current install point can be compared with the earliest observable moment.
-    // Nothing here changes control flow or the hook target.
-    monoicon_hyos_observe_libapp_visible();
-    if (handle != nullptr) monoicon_hyos_observe_libapp_handle();
-    monoicon_hyos_observe_libapp_hook();
-    // The canary is armed only once the Dart image exists, because its address is
-    // resolved from that image.
-    monoicon_hyos_install_canary_hook();
-    // Derived deltas are filled in after the hook attempt, when t_dart_base exists.
-    monoicon_hyos_observe_finalize();
-    // The production palette transaction. It only acts in the launcher child
-    // (private COW pages) and validates the 6144 image before any write.
-    monoicon_hyos_palette_install();
+    // This callback precedes return from loading libapp.so: do not let Dart's
+    // first icon requests outrun the initial verified transaction.
+    monoicon_hyos_palette_startup();
     NextSequence();
     WriteStatusFile("dart-library");
 }
@@ -390,14 +383,17 @@ void OnLibraryLoaded(const char* name, void* handle) {
     if (name == nullptr || handle == nullptr) return;
     RefreshProcessIdentity();
     if (!IsLauncherProcessFamily()) return;
-
     if (IsLauncherLibraryPath(name)) {
         HandleLauncherLibrary(handle);
         return;
     }
     if (IsDartLibraryPath(name)) {
         HandleDartLibrary(handle);
+        return;
     }
+    // Late/inherited image discovery may happen on an application thread. Use
+    // the worker there; never patch synchronously from an arbitrary Dart call.
+    if (IsLauncherChildProcess() && DartImageMapped()) monoicon_hyos_palette_install();
 }
 
 // The spawner may dlopen the launcher images before LSPosed calls native_init,
@@ -405,18 +401,7 @@ void OnLibraryLoaded(const char* name, void* handle) {
 // with RTLD_NOLOAD so nothing new is loaded merely because it is listed.
 void BackfillLoadedLibrary(const char* name) {
     if (name == nullptr) return;
-    // B-1 (observation only): the earliest moment this payload can observe anything is
-    // native_init itself, so check whether libapp.so is already in the loaded-image
-    // list before attempting the RTLD_NOLOAD lookup. This does not load anything.
-    if (IsDartLibraryPath(name)) {
-        monoicon_hyos_observe_libapp_visible();
-    }
     void* handle = dlopen(name, RTLD_NOW | RTLD_NOLOAD);
-    // Observation only: a successful RTLD_NOLOAD means a handle already existed, so
-    // record when that first became true for libapp.so.
-    if (handle != nullptr && IsDartLibraryPath(name)) {
-        monoicon_hyos_observe_libapp_handle();
-    }
     if (handle == nullptr) return;
     Logf(ANDROID_LOG_INFO, "backfilling already-loaded image: %s", name);
     if (IsLauncherLibraryPath(name)) {
@@ -479,12 +464,11 @@ native_init(const NativeAPIEntries* entries) {
     // to use it. Failing here leaves the launcher completely untouched.
     monoicon_hyos_hook_backend_init(entries);
 
-    // B-1 (observation only): record whether libapp.so is already visible at the
-    // earliest point this payload runs. Purely a timestamp; nothing is loaded.
-    monoicon_hyos_observe_libapp_visible();
-
     BackfillLoadedLibrary(kLauncherLibrary);
     BackfillLoadedLibrary(kDartLibrary);
+    // RTLD_NOLOAD may fail to resolve a basename across namespaces even though
+    // dl_iterate_phdr can see it. native_init itself is still a startup entry.
+    if (launcherChild && DartImageMapped()) monoicon_hyos_palette_startup();
 
     Log(ANDROID_LOG_INFO,
         "MonoIcon native_init armed the HYOS library callback");

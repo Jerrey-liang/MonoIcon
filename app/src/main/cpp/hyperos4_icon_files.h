@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include "hyperos4_profile.h"
 
 // The hook primitive is provided by LSPosed's native_init API. Call this only
 // after that API is available; the implementation rejects non-launcher children.
@@ -14,3 +15,4 @@ extern "C" void monoicon_hyos_protect_code_pages(const uintptr_t* pages, size_t 
 
 // The native configuration owner supplies this process-local, atomic gate.
 extern "C" bool monoicon_hyos_icons_enabled();
+extern "C" const monoicon::profile::Profile* monoicon_hyos_active_profile();

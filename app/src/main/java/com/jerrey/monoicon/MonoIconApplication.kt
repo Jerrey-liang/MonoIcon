@@ -7,6 +7,8 @@ import com.jerrey.monoicon.logging.LogStore
 import com.jerrey.monoicon.logging.LogcatLogger
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.ui.settings.PredictiveBackPreference
+import com.jerrey.monoicon.ui.settings.UiPreferences
 
 /**
  * Process entry point for the MonoIcon settings UI (Phase 14).
@@ -25,6 +27,9 @@ class MonoIconApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        UiPreferences.init(this)
+        PredictiveBackPreference.apply(this, UiPreferences.state.value.predictiveBack)
 
         // The hook process turns this on for itself in IconThemeHook, but that
         // code never runs here — without this line the settings process would

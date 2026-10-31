@@ -5,10 +5,12 @@ import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Canvas
 import android.graphics.ColorFilter
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -36,9 +38,9 @@ import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
  * When [plateColor] is transparent (engine unavailable), only the glyph
  * is drawn at full bounds (the pre-6.6 behavior).
  *
- * The drawable is built as `AdaptiveIconDrawable(ColorDrawable(bg), glyph)`
- * so the HyperOS hooks and animation compatibility paths still receive
- * an AdaptiveIconDrawable outer type.
+ * Ordinary square icons use an internal AdaptiveIconDrawable composite.
+ * Large tiles draw the plate and glyph separately, preserving the glyph's
+ * proportions and keeping capsule ends circular at every target size.
  *
  * ## [ConstantState] support
  * HyperOS [FolderPreviewIconView.refreshIconDrawable] copies the
@@ -59,12 +61,21 @@ import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
  * the current bounds, so it survives rescaling and the folder preview clones
  * created through [getConstantState].
  */
-class ColoredMonochromeDrawable(
+class ColoredMonochromeDrawable private constructor(
     mask: Bitmap,
     color: Int,
-    plateColor: Int = 0,
-    shape: IconShape = IconShape.SQUIRCLE,
+    plateColor: Int,
+    shape: IconShape,
+    private val largeIconWidth: Int,
+    private val largeIconHeight: Int,
 ) : Drawable() {
+
+    constructor(
+        mask: Bitmap,
+        color: Int,
+        plateColor: Int = 0,
+        shape: IconShape = IconShape.SQUIRCLE,
+    ) : this(mask, color, plateColor, shape, 0, 0)
 
     /** The source mask (retained for ConstantState copy). */
     private val sourceMask: Bitmap = mask
@@ -77,6 +88,14 @@ class ColoredMonochromeDrawable(
     @Volatile private var paletteObserved = false
     private var alphaValue: Int = 255
     private var composite: AdaptiveIconDrawable
+    private val platePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val plateRect = RectF()
+    private val glyphRect = RectF()
+    private val largeClip = Path()
+    private var largeGeometryBounds: Rect? = null
+    private var largeRadius = 0f
+    private var glyphTint: Int? = null
 
     /** Cached circle clip for the current bounds (null = no clipping). */
     @Volatile private var clipPath: Path? = null
@@ -94,6 +113,10 @@ class ColoredMonochromeDrawable(
         refreshDynamicColors()
         val target = bounds
         if (target.width() <= 0 || target.height() <= 0) return
+        if (largeIconWidth > 0 || target.width() != target.height()) {
+            drawLargeIcon(canvas, target)
+            return
+        }
         val content = contentBoundsFor(target)
         composite.bounds = content
         val clip = clipPathFor(target, content)
@@ -107,6 +130,57 @@ class ColoredMonochromeDrawable(
             } finally {
                 canvas.restoreToCount(save)
             }
+        }
+    }
+
+    /**
+     * Large tiles have an independent plate and a centred, uniformly scaled
+     * glyph. Passing a rectangular viewport through AdaptiveIconDrawable
+     * would stretch both its framework mask and the square foreground.
+     */
+    private fun drawLargeIcon(canvas: Canvas, target: Rect) {
+        if (largeGeometryBounds != target) {
+            val content = if (sourceShape == IconShape.CIRCLE) CircleIconShape.insetBounds(target) else target
+            if (content.isEmpty) return
+            plateRect.set(content)
+            val shortSide = minOf(plateRect.width(), plateRect.height())
+            largeRadius = shortSide * if (sourceShape == IconShape.CIRCLE) 0.5f else 0.25f
+            val scale = minOf(plateRect.width() / sourceMask.width, plateRect.height() / sourceMask.height)
+            val halfWidth = sourceMask.width * scale / 2f
+            val halfHeight = sourceMask.height * scale / 2f
+            glyphRect.set(
+                plateRect.centerX() - halfWidth, plateRect.centerY() - halfHeight,
+                plateRect.centerX() + halfWidth, plateRect.centerY() + halfHeight,
+            )
+            largeClip.rewind()
+            largeClip.addRoundRect(plateRect, largeRadius, largeRadius, Path.Direction.CW)
+            largeGeometryBounds = Rect(target)
+        }
+        platePaint.color = currentPlateColor
+        platePaint.alpha = (Color.alpha(currentPlateColor) * alphaValue + 127) / 255
+        canvas.drawRoundRect(plateRect, largeRadius, largeRadius, platePaint)
+        if (glyphTint != currentColor) {
+            glyphPaint.colorFilter = BlendModeColorFilter(currentColor, BlendMode.SRC_IN)
+            glyphTint = currentColor
+        }
+        glyphPaint.alpha = alphaValue
+        val save = canvas.save()
+        try {
+            canvas.clipPath(largeClip)
+            canvas.drawBitmap(sourceMask, null, glyphRect, glyphPaint)
+        } finally {
+            canvas.restoreToCount(save)
+        }
+    }
+
+    /** Preserve the tile's aspect ratio through launcher bitmap conversion and clones. */
+    fun forLargeIcon(width: Int, height: Int): ColoredMonochromeDrawable {
+        require(width > 0 && height > 0)
+        return ColoredMonochromeDrawable(
+            sourceMask, sourceColor, sourcePlateColor, sourceShape, width, height,
+        ).also {
+            it.setBounds(0, 0, width, height)
+            it.alpha = alphaValue
         }
     }
 
@@ -192,12 +266,12 @@ class ColoredMonochromeDrawable(
         // no-op — the baked color controls all rendering
     }
 
-    override fun getIntrinsicWidth(): Int = sourceMask.width
+    override fun getIntrinsicWidth(): Int = largeIconWidth.takeIf { it > 0 } ?: sourceMask.width
 
-    override fun getIntrinsicHeight(): Int = sourceMask.height
+    override fun getIntrinsicHeight(): Int = largeIconHeight.takeIf { it > 0 } ?: sourceMask.height
 
     override fun getConstantState(): ConstantState =
-        ColoredMonoState(sourceMask, sourceColor, sourcePlateColor, sourceShape)
+        ColoredMonoState(sourceMask, sourceColor, sourcePlateColor, sourceShape, largeIconWidth, largeIconHeight)
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
@@ -249,8 +323,10 @@ class ColoredMonochromeDrawable(
         private val color: Int,
         private val plateColor: Int,
         private val shape: IconShape,
+        private val width: Int,
+        private val height: Int,
     ) : ConstantState() {
-        override fun newDrawable(): Drawable = ColoredMonochromeDrawable(mask, color, plateColor, shape)
+        override fun newDrawable(): Drawable = ColoredMonochromeDrawable(mask, color, plateColor, shape, width, height)
         override fun getChangingConfigurations(): Int = 0
     }
 }

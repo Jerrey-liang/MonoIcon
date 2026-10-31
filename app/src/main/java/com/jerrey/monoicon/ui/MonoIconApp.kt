@@ -2,6 +2,13 @@ package com.jerrey.monoicon.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import com.jerrey.monoicon.ui.settings.AppUpdateChecker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import com.jerrey.monoicon.ui.settings.rememberUiSettings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,14 +22,17 @@ import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
 /**
  * Root composable for the MonoIcon configuration UI.
  *
- * Owns the one piece of state the theme needs: the selected colour variant.
- * `ConfigManager` reads it once and exposes no observable, so the value is held
- * here and passed down as a normal Compose parameter — when the user picks a
- * different variant on the icon-style page the theme regenerates, and the UI
- * and the icon pipeline stay on the same variant.
+ * Keeps icon rendering preferences in ConfigManager and observes the manager's
+ * separate theme, scale and update preferences, as in KernelSU.
  */
 @Composable
 fun MonoIconApp() {
+    val settings = rememberUiSettings()
+    val context = LocalContext.current
+    LaunchedEffect(settings.checkUpdate) {
+        if (settings.checkUpdate) AppUpdateChecker.check(context)
+    }
+    val systemDensity = LocalDensity.current
     var variant by remember { mutableStateOf(ConfigManager.getVariantIdFromUi()) }
     val seedColor = PixelMonetColorEngine.getSeedColor()
 
@@ -31,9 +41,11 @@ fun MonoIconApp() {
         paletteStyle = paletteStyleForVariant(variant),
         darkTheme = isSystemInDarkTheme(),
     ) {
-        SettingsScreen(
-            variant = variant,
-            onVariantChange = { variant = it },
-        )
+        CompositionLocalProvider(LocalDensity provides Density(systemDensity.density * settings.pageScale, systemDensity.fontScale)) {
+            SettingsScreen(
+                variant = variant,
+                onVariantChange = { variant = it },
+            )
+        }
     }
 }
