@@ -66,7 +66,26 @@ def read_profile(path: Path) -> dict:
             "functions must contain 1..256 records")
     require(isinstance(profile.get("patches"), list) and 1 <= len(profile["patches"]) <= 256,
             "patches must contain 1..256 records")
+    system_match_report(profile)
     return profile
+
+
+def system_match_report(profile: dict, actual: str | None = None) -> str:
+    match = profile.get("match")
+    require(isinstance(match, dict), "match must be an object")
+    if "systemVersions" not in match:
+        return "System compatibility is undeclared; MonoIcon requires explicit manual approval on the target build."
+    versions = match["systemVersions"]
+    require(isinstance(versions, list) and 1 <= len(versions) <= 128,
+            "systemVersions must contain 1..128 exact system version strings")
+    require(all(isinstance(version, str) and 0 < len(version.encode("utf-8")) <= 512
+                and all(ord(c) >= 32 and ord(c) != 127 for c in version) for version in versions),
+            "invalid systemVersions entry")
+    require(len(set(versions)) == len(versions), "duplicate systemVersions entry")
+    if actual is not None:
+        require(actual in versions, f"system version mismatch: {actual!r}")
+        return f"Target system version matches the declared list exactly: {actual}"
+    return "Declared system versions (target not checked): " + ", ".join(versions)
 
 
 def load_library(image: dict, apk: zipfile.ZipFile | None, library_dir: Path | None) -> bytes:
@@ -186,9 +205,11 @@ def main() -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--apk", type=Path, help="launcher APK to inspect")
     source.add_argument("--lib-dir", type=Path, help="directory containing extracted arm64 .so files")
+    parser.add_argument("--system-version", help="exact target ro.build.version.incremental value to check")
     args = parser.parse_args()
     try:
         profile = read_profile(args.profile)
+        system_report = system_match_report(profile, args.system_version)
         if args.apk:
             with zipfile.ZipFile(args.apk) as archive:
                 reports = verify(profile, apk=archive)
@@ -196,6 +217,7 @@ def main() -> int:
             reports = verify(profile, library_dir=args.lib_dir)
         print(f"Profile {profile['id']}: binary evidence verified")
         print("\n".join(reports))
+        print(system_report)
         print("This does not verify runtime behavior. Import still runs MonoIcon's native schema validator.")
         return 0
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, struct.error,

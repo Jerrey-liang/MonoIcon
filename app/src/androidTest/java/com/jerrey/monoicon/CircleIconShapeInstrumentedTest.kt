@@ -397,6 +397,9 @@ class CircleIconShapeInstrumentedTest {
         Canvas(argb).drawCircle(64f, 64f, 37.3f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
         val alpha = requireNotNull(argb.copy(Bitmap.Config.ALPHA_8, false))
         try {
+            for (y in 0 until argb.height) for (x in 0 until argb.width) {
+                assertEquals("source coverage at $x,$y", Color.alpha(argb.getPixel(x, y)), Color.alpha(alpha.getPixel(x, y)))
+            }
             val images = listOf(argb, alpha).map { mask ->
                 Bitmap.createBitmap(480, 240, Bitmap.Config.ARGB_8888).also { out ->
                     ColoredMonochromeDrawable(mask, GLYPH, 0, IconShape.CIRCLE)
@@ -404,10 +407,46 @@ class CircleIconShapeInstrumentedTest {
                 }
             }
             try {
-                assertTrue("alpha-only cache preserves rendered pixels", images[0].sameAs(images[1]))
-                val pixels = IntArray(480 * 240)
-                images[1].getPixels(pixels, 0, 480, 0, 0, 480, 240)
-                assertTrue("filtered edges retain fractional coverage", pixels.any { Color.alpha(it) in 1..254 })
+                val pixels = images.map { bitmap -> IntArray(480 * 240).also {
+                    bitmap.getPixels(it, 0, 480, 0, 0, 480, 240)
+                } }
+                var transparent = 0
+                var solid = 0
+                var fractional = 0
+                for (i in pixels[0].indices) {
+                    val expected = pixels[0][i]
+                    val actual = pixels[1][i]
+                    val expectedAlpha = Color.alpha(expected)
+                    val actualAlpha = Color.alpha(actual)
+                    val location = "${i % 480},${i / 480}"
+                    if (expectedAlpha !in 1..254 && actualAlpha !in 1..254) {
+                        assertEquals("transparent and solid coverage at $location", expected, actual)
+                    } else {
+                        // Skia's A8 coverage and RGBA samplers may round an
+                        // interpolated edge to adjacent 8-bit values, including
+                        // 1/0 and 254/255. One side may therefore reach an
+                        // endpoint while the other still has fractional coverage.
+                        // Both-endpoint comparisons above remain exact.
+                        assertTrue("edge coverage differs by more than one LSB at $location: $expectedAlpha/$actualAlpha",
+                            kotlin.math.abs(expectedAlpha - actualAlpha) <= 1)
+                    }
+                    if (expectedAlpha > 0) assertEquals("ARGB mask tint at $location", GLYPH and 0x00ffffff, expected and 0x00ffffff)
+                    if (actualAlpha > 0) assertEquals("alpha-only mask tint at $location", GLYPH and 0x00ffffff, actual and 0x00ffffff)
+                    when (actualAlpha) {
+                        0 -> transparent++
+                        255 -> solid++
+                        else -> fractional++
+                    }
+                }
+                assertTrue("transparent exterior remains present", transparent > 0)
+                assertTrue("solid glyph interior remains opaque", solid > 0)
+                assertTrue("filtered edges retain fractional coverage", fractional > 0)
+                images.forEach { bitmap ->
+                    assertEquals("glyph centre retains its full tint", GLYPH, bitmap.getPixel(240, 120))
+                    for ((x, y) in listOf(0 to 0, 479 to 0, 0 to 239, 479 to 239)) {
+                        assertEquals("exterior remains exactly transparent at $x,$y", 0, bitmap.getPixel(x, y))
+                    }
+                }
             } finally {
                 images.forEach(Bitmap::recycle)
             }

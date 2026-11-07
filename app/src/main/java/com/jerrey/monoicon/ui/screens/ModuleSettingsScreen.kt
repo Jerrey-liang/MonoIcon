@@ -12,6 +12,7 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.safety.LauncherSafety
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.settings.AppUpdateChecker
@@ -32,6 +34,8 @@ import com.jerrey.monoicon.ui.settings.UiPreferences
 import com.jerrey.monoicon.ui.settings.rememberUiSettings
 import com.jerrey.monoicon.ui.settings.settingsText
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
@@ -55,6 +59,20 @@ fun ModuleSettingsScreen(
     val scope = rememberCoroutineScope()
     val settings = rememberUiSettings()
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
+    var safetyBlocked by remember { mutableStateOf(ConfigManager.isSafetyBlockedFromUi()) }
+    var safetyBusy by remember { mutableStateOf(false) }
+    var safetyError by remember { mutableStateOf(false) }
+    val chinese = strings.masterSwitch == com.jerrey.monoicon.ui.stringsFor(AppLanguage.CHINESE, true).masterSwitch
+    DisposableEffect(Unit) {
+        val listener: (String?) -> Unit = {
+            scope.launch {
+                enabled = ConfigManager.isEnabledFromUi()
+                safetyBlocked = ConfigManager.isSafetyBlockedFromUi()
+            }
+        }
+        ConfigManager.addOnConfigChangedListener(listener)
+        onDispose { ConfigManager.removeOnConfigChangedListener(listener) }
+    }
     var restartHint by rememberSaveable { mutableStateOf(false) }
     var showSendLogDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -95,15 +113,43 @@ fun ModuleSettingsScreen(
         Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
             SwitchPreference(
                 title = strings.masterSwitch,
-                summary = strings.masterSwitchSummary,
+                summary = if (safetyBlocked) {
+                    if (chinese) "安全模式已自动停用模块：检测到桌面短命重启。重新开启主开关并重启作用域可重试。"
+                    else "Safety mode disabled the module after an early launcher restart. Enable the master switch and restart the scope to retry."
+                } else strings.masterSwitchSummary,
                 startAction = { SettingsIcon(Icons.Rounded.PowerSettingsNew) },
                 checked = enabled,
+                enabled = !safetyBusy,
                 onCheckedChange = { value ->
-                    enabled = value
-                    restartHint = true
-                    ConfigManager.setEnabled(value)
-                    logi("MonoIcon.Settings", "master switch=$value")
+                    safetyBusy = true
+                    safetyError = false
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                if (value) LauncherSafety.enable(context) else ConfigManager.setEnabled(false)
+                            }
+                            restartHint = true
+                            logi("MonoIcon.Settings", "master switch=$value")
+                        } catch (_: Exception) {
+                            safetyError = true
+                        } finally {
+                            enabled = ConfigManager.isEnabledFromUi()
+                            safetyBlocked = ConfigManager.isSafetyBlockedFromUi()
+                            safetyBusy = false
+                        }
+                    }
                 },
+            )
+            Text(
+                text = if (chinese) "启动保护始终开启：启用后桌面未能存活 30 秒，将在下次启动时自动停用模块。"
+                    else "Startup protection is always on: if the launcher exits within 30 seconds of activation, the module is disabled on the next start.",
+                style = MiuixTheme.textStyles.footnote1,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
+            )
+            if (safetyError) Text(
+                text = if (chinese) "无法安全恢复，请授予 MonoIcon root 权限后重试。" else "Unable to retry safely. Grant MonoIcon root access and try again.",
+                color = MiuixTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
             )
         }
         Card(modifier = Modifier.padding(vertical = 12.dp).fillMaxWidth()) {

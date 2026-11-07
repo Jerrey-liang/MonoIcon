@@ -28,16 +28,43 @@ internal object ProfileRepository {
         val environment: String,
         val reason: String,
         val candidates: Map<String, String> = emptyMap(),
+        /** Compatible legacy profiles which still need confirmation for this build. */
+        val manualApprovalRequired: Set<String> = emptySet(),
     )
 
     fun selected(context: Context): String? = context.getSharedPreferences("hyperos4-profiles", Context.MODE_PRIVATE)
         .getString("selected", null)
 
-    @Synchronized fun select(context: Context, id: String?) {
-        require(id == null || catalog(context).profiles.any { it.id == id }) { "Profile no longer exists" }
-        check(context.getSharedPreferences("hyperos4-profiles", Context.MODE_PRIVATE).edit().putString("selected", id).commit())
+    @Synchronized fun select(context: Context, id: String?, acknowledgeUnverifiedSystem: Boolean = false, expectedDigest: String? = null) {
+        val profile = id?.let { requested -> catalog(context).profiles.singleOrNull { it.id == requested } }
+        require(id == null || profile != null) { "Profile no longer exists" }
+        require(expectedDigest == null || profile?.digest == expectedDigest) { "Profile changed; review it again before enabling" }
+        val preferences = context.getSharedPreferences("hyperos4-profiles", Context.MODE_PRIVATE)
+        val editor = preferences.edit().putString("selected", id)
+        if (profile != null && profile.match.systemVersions == null) {
+            val approval = approvalValue(profile)
+            require(acknowledgeUnverifiedSystem || preferences.getString("approval.$id", null) == approval) {
+                "Profile does not declare verified system versions; manual confirmation is required"
+            }
+            editor.putString("approval.$id", approval)
+        }
+        check(editor.commit())
         invalidate()
     }
+
+    /** Also published beside a legacy native Profile so a stale commit cannot survive an OTA. */
+    fun systemApprovalToken(): String = systemApprovalToken(
+        ProfileNative.systemProperty("ro.build.fingerprint"),
+        ProfileNative.systemProperty(ProfileMatch.SYSTEM_VERSION_PROPERTY),
+        Build.VERSION.SDK_INT,
+    )
+
+    internal fun systemApprovalToken(fingerprint: String, incremental: String, sdk: Int): String {
+        require(fingerprint.isNotEmpty() && incremental.isNotEmpty() && sdk > 0) { "System identity is unavailable" }
+        return sha256("$fingerprint\n$incremental\n$sdk".toByteArray(Charsets.UTF_8))
+    }
+
+    private fun approvalValue(profile: CompatibilityProfile) = "${profile.digest}:${systemApprovalToken()}"
 
     @Synchronized fun invalidate() { cachedKey = null; cachedResolution = null }
 
@@ -65,7 +92,8 @@ internal object ProfileRepository {
         return CompatibilityProfile(
             root.getString("id"), root.getString("name"), number(root.get("revision")).toInt(), official, source.copyOf(), sha256(source),
             ProfileMatch(match.getJSONArray("versionCodes").strings().map(String::toLong).toSet(),
-                match.getJSONArray("versionNames").strings().toSet(), number(match.get("sdkMin")).toInt(), number(match.get("sdkMax")).toInt(), properties),
+                match.getJSONArray("versionNames").strings().toSet(), number(match.get("sdkMin")).toInt(), number(match.get("sdkMax")).toInt(), properties,
+                match.optJSONArray("systemVersions")?.strings()?.toSet()),
             root.getJSONArray("images").objects().map { ProfileImage(it.getString("library"), number(it.get("size")), it.getString("sha256")) },
             ProfileIconRules(icons.getJSONArray("names").strings(), aliases.keys().asSequence().associateWith(aliases::getString),
                 icons.optJSONArray("largeIconPrefixes")?.strings().orEmpty(),
@@ -101,6 +129,8 @@ internal object ProfileRepository {
         val stream = target.startWrite()
         try { stream.write(source); target.finishWrite(stream) }
         catch (failure: Throwable) { target.failWrite(stream); throw failure }
+        // Importing/replacing a legacy file is never an implicit approval.
+        check(context.getSharedPreferences("hyperos4-profiles", Context.MODE_PRIVATE).edit().remove("approval.${p.id}").commit())
         invalidate()
         return p
     }
@@ -109,6 +139,7 @@ internal object ProfileRepository {
         val p = catalog(context).profiles.single { it.id == id }
         require(!p.official) { "Official Profiles cannot be deleted" }
         check(File(directory(context), "$id.json").delete())
+        check(context.getSharedPreferences("hyperos4-profiles", Context.MODE_PRIVATE).edit().remove("approval.$id").commit())
         if (selected(context) == id) select(context, null)
         invalidate()
     }
@@ -123,12 +154,18 @@ internal object ProfileRepository {
         val info = runCatching { context.packageManager.getPackageInfo(PACKAGE, PackageManager.PackageInfoFlags.of(0)) }.getOrNull()
             ?: return Resolution(null, null, "", "Launcher package is not installed")
         val launcher = info.applicationInfo ?: return Resolution(null, null, "", "Launcher metadata unavailable")
-        val properties = catalog.profiles.flatMap { it.match.properties.keys }.distinct().associateWith(ProfileNative::systemProperty)
+        val properties = (catalog.profiles.flatMap { it.match.properties.keys } + ProfileMatch.SYSTEM_VERSION_PROPERTY)
+            .distinct().associateWith(ProfileNative::systemProperty)
         val env = ProfileEnvironment(info.longVersionCode, info.versionName.orEmpty(), Build.VERSION.SDK_INT,
             "arm64-v8a" in Build.SUPPORTED_ABIS, launcher.flags and ApplicationInfo.FLAG_HAS_CODE != 0, !launcher.splitSourceDirs.isNullOrEmpty(), properties)
         val description = "${env.versionName} (${env.versionCode}) · SDK ${env.sdk}\n" + properties.entries.joinToString("\n") { "${it.key}=${it.value}" }
         val selection = selected(context)
-        val key = "${info.lastUpdateTime}|${launcher.sourceDir}|${launcher.nativeLibraryDir}|$env|$selection|${catalog.profiles.map { it.digest }}"
+        val preferences = context.getSharedPreferences("hyperos4-profiles", Context.MODE_PRIVATE)
+        val systemToken = runCatching(::systemApprovalToken).getOrNull()
+        val approvedDigests = catalog.profiles.filter { p ->
+            systemToken != null && preferences.getString("approval.${p.id}", null) == "${p.digest}:$systemToken"
+        }.map { it.digest }.toSet()
+        val key = "${info.lastUpdateTime}|${launcher.sourceDir}|${launcher.nativeLibraryDir}|$env|$selection|$systemToken|$approvedDigests|${catalog.profiles.map { it.digest }}"
         if (key == cachedKey) return checkNotNull(cachedResolution)
         val reasons = mutableMapOf<String, String>()
         val matches = catalog.profiles.filter { p ->
@@ -136,15 +173,17 @@ internal object ProfileRepository {
             reasons[p.id] = mismatch ?: "Compatible"
             mismatch == null
         }
-        val profile = ProfileSelection.choose(matches, selection)
+        val manualApprovalRequired = matches.filter { it.match.systemVersions == null && it.digest !in approvedDigests }.map { it.id }.toSet()
+        manualApprovalRequired.forEach { reasons[it] = "System compatibility is unverified; enable this Profile manually after confirmation" }
+        val profile = ProfileSelection.choose(matches, selection, approvedDigests)
         val reason = when {
             profile != null -> "Compatible: ${profile.name} · r${profile.revision}"
             selection != null -> reasons[selection] ?: "Selected Profile is missing or invalid"
-            matches.size > 1 -> "Multiple compatible Profiles; choose one explicitly"
+            matches.count { it.match.systemVersions != null } > 1 -> "Multiple compatible Profiles; choose one explicitly"
             env.hasCode -> "Launcher uses the existing Java hooks"
             else -> "No compatible Profile\n" + reasons.entries.joinToString("\n") { "${it.key}: ${it.value}" }
         }
-        return Resolution(profile, launcher, description, (listOf(reason) + catalog.errors).joinToString("\n"), reasons).also {
+        return Resolution(profile, launcher, description, (listOf(reason) + catalog.errors).joinToString("\n"), reasons, manualApprovalRequired).also {
             cachedKey = key; cachedResolution = it
         }
     }

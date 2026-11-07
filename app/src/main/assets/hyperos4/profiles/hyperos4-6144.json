@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "hyperos4-6144",
   "name": "HyperOS 4 · Launcher 6144",
-  "revision": 7,
+  "revision": 9,
   "match": {
     "package": "com.miui.home",
     "versionCodes": [
@@ -13,6 +13,9 @@
     ],
     "sdkMin": 37,
     "sdkMax": 37,
+    "systemVersions": [
+      "OS4.0.0.3.XAACNXM"
+    ],
     "properties": [
       {
         "name": "ro.build.version.incremental",
@@ -712,7 +715,8 @@
       "nativeGeometryBridge": {
         "function": "FuncBridge.invoke_method @ 0x64ae9c; full native snapshot, borrowed UTF-8 pointer/length, nullable owned input Bundle, owned output Bundle or null",
         "caller": "0x4c3a40..0x4c3b58: getCellWidth with null input, drop returned Bundle once",
-        "cApi": "libhyper_os_bundle_public.so existing DT_NEEDED; Bundle_get_f64 returns native tag64/double struct, Bundle_get_f32 tag32/float struct; tag low bit 0 means present. Verified wrappers @ 0xa53470 and 0xa53588. Bundle_drop called once per owned result.",
+        "cApi": "libhyper_os_schema_public.so existing DT_NEEDED; Bundle_get_f64 returns native tag64/double struct, Bundle_get_f32 tag32/float struct; tag low bit 0 means present. Verified wrappers @ 0xa53470 and 0xa53588. Bundle_drop called once per owned result.",
+        "importResolution": "Resolve the launcher's bound R_AARCH64_JUMP_SLOT imports by name from its SHA-256-verified ELF: Bundle_get_f64 @ 0xe652f0, Bundle_get_f32 @ 0xe63660, Bundle_drop @ 0xe62458. These ELF virtual addresses are evidence, not hardcoded runtime offsets. Read each bound pointer through the safe runtime reader and require dladdr to identify the exact symbol in the unique loaded libhyper_os_schema_public.so. Do not dlopen a dependency through the injected module's different linker namespace.",
         "thread": "One dedicated pthread, started only by background PaletteWorker after full Profile validation and after synchronous loader startup completes; never invoke on Dart UI, transaction or loader threads. Missing handler returns null. A blocked invocation cannot spawn more workers.",
         "protocol": "MONOICON_GEOMETRY 1 pid profileDigest nonce32 followed by six finite scalars in response; request and response atomic in launcher DE, stale nonce/PID/digest rejected; snapshot all six values twice and require agreement.",
         "queries": "getCellWidth(result,portrait_cell_width,landscape_cell_width) and getCellHeight(result): native f64. getIconScales(portrait_icon_scale,landscape_icon_scale): native f32. No Android provider exposes all three raw handlers."

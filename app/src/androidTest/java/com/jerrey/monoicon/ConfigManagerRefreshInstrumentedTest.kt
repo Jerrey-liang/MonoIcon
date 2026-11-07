@@ -26,13 +26,13 @@ class ConfigManagerRefreshInstrumentedTest {
     private val providerCalls = AtomicInteger()
     private val saved = mutableMapOf<String, Any?>()
     private val timestampFields = listOf(
-        "lastRefreshMs", "lastLawniconsRefreshMs", "lastCircleRefreshMs", "lastNotificationIconsRefreshMs",
+        "lastRefreshMs", "lastLawniconsRefreshMs", "lastCircleRefreshMs",
     )
     private val cachedDefaults = mapOf(
         "cachedEnabled" to true,
+        "hookSafetyBlocked" to false,
         "cachedLawniconsEnabled" to true,
         "cachedCircleIconsEnabled" to false,
-        "cachedNotificationIconsEnabled" to true,
     )
 
     @Before
@@ -63,7 +63,7 @@ class ConfigManagerRefreshInstrumentedTest {
             saved[name] = cached.get()
             cached.set(default)
         }
-        mapOf("lastLawniconsValue" to true, "lastCircleValue" to false, "lastNotificationIconsValue" to true)
+        mapOf("lastLawniconsValue" to true, "lastCircleValue" to false)
             .forEach { (name, default) ->
                 val previous = field(name)
                 saved[name] = previous.get(null)
@@ -88,7 +88,6 @@ class ConfigManagerRefreshInstrumentedTest {
             ConfigManager::isEnabled to true,
             ConfigManager::isLawniconsEnabled to true,
             ConfigManager::isCircleIconsEnabled to false,
-            ConfigManager::isNotificationIconsEnabled to true,
         )
         val executor = Executors.newFixedThreadPool(8)
         try {
@@ -109,6 +108,42 @@ class ConfigManagerRefreshInstrumentedTest {
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun safetyLatchOverridesEnabledPreferencesAndCacheRefresh() {
+        values["enabled"] = true
+        values["safety_blocked"] = true
+        expire("lastRefreshMs")
+        assertFalse(ConfigManager.isEnabled())
+        values["safety_blocked"] = false
+        expire("lastRefreshMs")
+        assertTrue(ConfigManager.isEnabled())
+        ConfigManager.disableForHooks()
+        expire("lastRefreshMs")
+        assertFalse("a blocked process requires a new process, not a preference refresh", ConfigManager.isEnabled())
+    }
+
+    @Test
+    fun remoteFailureRetainsPreviouslyObservedSafetyDisable() {
+        values["safety_blocked"] = true
+        assertFalse(ConfigManager.isEnabled())
+        val unavailable: () -> SharedPreferences? = { error("Binder unavailable") }
+        field("remotePrefsProvider").set(null, unavailable)
+        expire("lastRefreshMs")
+        assertFalse(ConfigManager.isEnabled())
+        val missing: () -> SharedPreferences? = { null }
+        field("remotePrefsProvider").set(null, missing)
+        expire("lastRefreshMs")
+        assertFalse(ConfigManager.isEnabled())
+    }
+
+    @Test
+    fun notificationIconsIgnoreLegacyOptOutWithoutReadingRemotePreferences() {
+        values["notification_icons"] = false
+        providerCalls.set(0)
+        repeat(32) { assertTrue(ConfigManager.isNotificationIconsEnabled()) }
+        assertEquals(0, providerCalls.get())
     }
 
     @Test

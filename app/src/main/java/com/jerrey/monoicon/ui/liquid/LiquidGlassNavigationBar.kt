@@ -1,4 +1,4 @@
-// KernelSU revision 2fe188310309bd7a7c9b5a80beed6f14469c6cd2; see THIRD_PARTY_NOTICES.md.
+// KernelSU revision 2fe188310309bd7a7c9b5a80beed6f14469c6cd2; see docs/THIRD_PARTY_NOTICES.md.
 // Adapted from compose-miuix-ui example (IosLiquidGlassNavigationBar) — Apache 2.0.
 
 package com.jerrey.monoicon.ui.liquid

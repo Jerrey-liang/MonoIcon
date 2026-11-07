@@ -26,6 +26,7 @@ class ConfigManagerInitInstrumentedTest {
         // First call may already have happened if another test ran first, so
         // assert the invariant "one registration per process" instead of "1".
         val before = ConfigManager.uiInitRegistrationCount()
+        val enabledBefore = ConfigManager.isEnabledFromUi()
         ConfigManager.init(context)
         ConfigManager.init(context)
         ConfigManager.init(context)
@@ -38,7 +39,7 @@ class ConfigManagerInitInstrumentedTest {
         )
 
         // The fallback preferences must still be usable for the UI readers.
-        assertTrue(ConfigManager.isEnabledFromUi())
+        assertEquals("initialization preserves the user's enabled setting", enabledBefore, ConfigManager.isEnabledFromUi())
         assertFalse(ConfigManager.getVariantIdFromUi().isBlank())
     }
 }

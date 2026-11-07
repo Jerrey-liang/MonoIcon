@@ -2,6 +2,7 @@
 #include "profile_json.h"
 #include "profile_sha256.h"
 #include "hyperos4_large_icon_paths.h"
+#include "hyperos4_elf_imports.h"
 
 #include <algorithm>
 #include <array>
@@ -77,12 +78,13 @@ void Mutant(const p::Json& original, const std::string& name, const std::functio
 
 void TestMigration(const p::Profile& profile) {
     Check(profile.id == "hyperos4-6144", "official profile id");
-    Check(profile.revision == 7, "official revision");
+    Check(profile.revision == 9, "official revision");
     Check(profile.refresh.action == "com.xiaomi.market.ACTION_HD_ICON_UPDATE" &&
           profile.refresh.packageExtra == "packageName", "verified package refresh transport");
     Check(profile.match.versionCodes == std::vector<std::string>{"801026144"}, "6144 version code");
     Check(profile.match.versionNames == std::vector<std::string>{"RELEASE-8.01.02.6144-260818-08251107-R"}, "6144 version name");
     Check(profile.match.sdkMin == 37 && profile.match.sdkMax == 37, "verified SDK range");
+    Check(profile.match.systemVersions == std::vector<std::string>{"OS4.0.0.3.XAACNXM"}, "verified exact system version");
     Check(profile.images.size() == 2, "both launcher images migrated");
     Check(profile.functions.size() == 38, "rendering, refresh and native scalar geometry ABI snapshots");
     Check(profile.patches.size() == 28, "migration and folder entry/MAML preview fixes");
@@ -257,6 +259,15 @@ void TestInvalidProfiles(const p::Json& json) {
     p::Profile legacyProfile; std::string legacyError;
     Check(p::Parse(Encode(legacy), legacyProfile, legacyError) && legacyProfile.refresh.action.empty(),
           "legacy profiles without refresh remain readable");
+    legacy.object["match"].object.erase("systemVersions");
+    Check(p::Parse(Encode(legacy), legacyProfile, legacyError) && legacyProfile.match.systemVersions.empty(),
+          "legacy profiles without system versions remain readable for manual approval");
+    Mutant(json,"empty system versions rejected",[](p::Json& j) { j.object["match"].object["systemVersions"].array.clear(); });
+    Mutant(json,"null system versions rejected",[](p::Json& j) { j.object["match"].object["systemVersions"] = p::Json{}; });
+    Mutant(json,"scalar system versions rejected",[](p::Json& j) { j.object["match"].object["systemVersions"] = String("OS4.0.0.3.XAACNXM"); });
+    Mutant(json,"empty system version rejected",[](p::Json& j) { j.object["match"].object["systemVersions"].array[0] = String(""); });
+    Mutant(json,"duplicate system version rejected",[](p::Json& j) { auto& versions = j.object["match"].object["systemVersions"].array; versions.push_back(versions[0]); });
+    Mutant(json,"numeric system version rejected",[](p::Json& j) { j.object["match"].object["systemVersions"].array[0] = Number("4"); });
     Mutant(json,"unknown schema",[](p::Json& j) { j.object["schema"] = Number("2"); });
     Mutant(json,"unknown safety field",[](p::Json& j) { j.object["unsafeSkipValidation"] = Number("1"); });
     Mutant(json,"schema exponent is not an integer",[](p::Json& j) { j.object["schema"] = Number("1e0"); });
@@ -361,6 +372,102 @@ void TestLargeIconPaths() {
     Check(h::LargeIconRelativePath(base + "/2x1", paths).empty(), "missing PNG has no synthetic resource directory");
 }
 
+void TestImportedFunctions() {
+    std::vector<uint8_t> bytes(4096);
+    auto put = [&](size_t at, uint64_t value) {
+        for (unsigned i = 0; i < 8; ++i) bytes[at + i] = static_cast<uint8_t>(value >> (8 * i));
+    };
+    const std::array<const char*, 3> names{"Bundle_get_f64", "Bundle_get_f32", "Bundle_drop"};
+    constexpr char dependency[] = "libhyper_os_schema_public.so";
+    const std::array<std::array<uint64_t, 2>, 9> dynamic{{
+        {{1, 1}}, {{5, 0x300}}, {{10, 256}}, {{6, 0x500}}, {{11, 24}},
+        {{23, 0x700}}, {{2, 72}}, {{20, 7}}, {{0, 0}},
+    }};
+    for (size_t i = 0; i < dynamic.size(); ++i) {
+        put(0x100 + i * 16, dynamic[i][0]); put(0x108 + i * 16, dynamic[i][1]);
+    }
+    std::memcpy(bytes.data() + 0x301, dependency, sizeof(dependency));
+    for (size_t i = 0; i < names.size(); ++i) {
+        const uint64_t name = 64 + i * 32, symbol = 0x500 + (i + 1) * 24;
+        std::memcpy(bytes.data() + 0x300 + name, names[i], std::strlen(names[i]) + 1);
+        put(symbol, name); bytes[symbol + 4] = 0x12;
+        put(0x700 + i * 24, 0x900 + i * 8);
+        put(0x708 + i * 24, (uint64_t(i + 1) << 32) | 1026);
+    }
+    const auto original = bytes;
+    bool allowWritable = true;
+    auto read = [&](uint64_t address, void* output, size_t size, uint32_t flags) {
+        if (address > bytes.size() || size > bytes.size() - address ||
+            (flags == 6 && (!allowWritable || address < 0x900 || address + size > 0x918))) return false;
+        std::memcpy(output, bytes.data() + address, size);
+        return true;
+    };
+    std::array<uint64_t, 3> slots{};
+    auto parse = [&](uint64_t size = 144) {
+        return monoicon::hyos::ReadImportedFunctionSlots(0x100, size, dependency, names, read, slots);
+    };
+    Check(parse() && slots == std::array<uint64_t, 3>{0x900, 0x908, 0x910}, "ELF imports resolved by name without fixed offsets");
+    auto reject = [&](const char* reason, const std::function<void()>& mutate) {
+        bytes = original; slots = {1, 2, 3}; mutate();
+        Check(!parse() && slots == std::array<uint64_t, 3>{1, 2, 3}, reason);
+    };
+    reject("missing expected DT_NEEDED is rejected", [&] { bytes[0x301] = 'x'; });
+    reject("duplicate dynamic field is rejected", [&] { put(0x110, 10); });
+    reject("out-of-image string table is rejected", [&] { put(0x118, 4090); });
+    reject("oversized string table is bounded", [&] { put(0x128, 2 * 1024 * 1024 + 1); });
+    reject("unsupported symbol record size is rejected", [&] { put(0x148, 16); });
+    reject("REL instead of RELA is rejected", [&] { put(0x178, 17); });
+    reject("unbounded relocation table is rejected", [&] { put(0x168, 16385 * 24); });
+    reject("missing required jump slot is rejected", [&] { put(0x708, (uint64_t(1) << 32) | 1025); });
+    reject("symbol index is bounded", [&] { put(0x708, (uint64_t(65536) << 32) | 1026); });
+    reject("nonfunction import is rejected", [&] { bytes[0x51c] = 0x11; });
+    reject("defined rather than imported symbol is rejected", [&] { bytes[0x51e] = 1; });
+    reject("jump-slot addend is rejected", [&] { put(0x710, 8); });
+    reject("unaligned jump slot is rejected", [&] { put(0x700, 0x901); });
+    reject("duplicate slot ownership is rejected", [&] { put(0x718, 0x900); });
+    reject("slot outside writable PT_LOAD is rejected", [&] { put(0x700, 0x800); });
+    bytes = original;
+    allowWritable = false;
+    Check(!parse(), "reader PT_LOAD protection check is enforced");
+    allowWritable = true;
+    Check(!parse(128), "unterminated dynamic table is rejected");
+    Check(!parse(65552), "dynamic table scan is bounded");
+}
+
+void TestOriginalGeometryImports(const p::Profile& profile, const char* path) {
+    std::ifstream input(path, std::ios::binary);
+    const std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    const auto& spec = profile.images[profile.functions[profile.icons.geometryBridge].image];
+    p::Sha256 hash; hash.update(bytes.data(), bytes.size());
+    const bool matching = bytes.size() == spec.fileSize && hash.finish() == spec.sha256;
+    Check(matching, "optional original launcher ELF matches profile SHA-256");
+    if (!matching || bytes.size() < 64) return;
+    auto word = [&](size_t at) {
+        uint64_t value = 0;
+        if (at > bytes.size() || bytes.size() - at < 8) return value;
+        for (unsigned i = 0; i < 8; ++i) value |= uint64_t(bytes[at + i]) << (i * 8);
+        return value;
+    };
+    const uint64_t phoff = word(32);
+    const unsigned phnum = bytes[56] | (unsigned(bytes[57]) << 8);
+    uint64_t dynamicAddress = 0, dynamicSize = 0;
+    for (unsigned i = 0; i < phnum; ++i) {
+        const size_t at = static_cast<size_t>(phoff + uint64_t(i) * 56);
+        if (at > bytes.size() || bytes.size() - at < 56) return;
+        if (static_cast<uint32_t>(word(at)) == 2) { dynamicAddress = word(at + 16); dynamicSize = word(at + 32); }
+    }
+    auto read = [&](uint64_t address, void* out, size_t size, uint32_t flags) {
+        uint64_t offset = 0;
+        if (!p::FileOffset(spec, address, size, offset, flags) || offset > bytes.size() || size > bytes.size() - offset) return false;
+        std::memcpy(out, bytes.data() + offset, size); return true;
+    };
+    std::array<uint64_t, 3> slots{};
+    Check(monoicon::hyos::ReadImportedFunctionSlots(dynamicAddress, dynamicSize,
+        "libhyper_os_schema_public.so", {"Bundle_get_f64", "Bundle_get_f32", "Bundle_drop"}, read, slots) &&
+        slots == std::array<uint64_t, 3>{0xe652f0, 0xe63660, 0xe62458},
+        "original 6144 import parser agrees with independently inspected ELF relocations");
+}
+
 void TestScalarsAndNames() {
     for (auto value : {0u,0x0000ffffu,0xffff0000u,0xffffffffu,0x80000000u}) {
         const uint32_t low = p::Resolve({p::ValueKind::BackgroundLow,30},0,value,0,0);
@@ -394,7 +501,7 @@ void TestHashes() {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) { std::cerr << "usage: hyperos4_profile_test <official-profile.json>\n"; return 2; }
+    if (argc < 2 || argc > 3) { std::cerr << "usage: hyperos4_profile_test <official-profile.json> [original-launcher.so]\n"; return 2; }
     std::ifstream file(argv[1],std::ios::binary);
     if (!file) { std::cerr << "Cannot read profile: " << argv[1] << '\n'; return 2; }
     const std::string source{std::istreambuf_iterator<char>(file),std::istreambuf_iterator<char>()};
@@ -406,6 +513,8 @@ int main(int argc, char** argv) {
     TestInvalidProfiles(json);
     TestScalarsAndNames();
     TestLargeIconPaths();
+    TestImportedFunctions();
+    if (argc == 3) TestOriginalGeometryImports(profile, argv[2]);
     TestHashes();
     std::cout << (failures ? "FAIL " : "PASS ") << checks << " checks; " << failures << " failures\n";
     return failures ? 1 : 0;

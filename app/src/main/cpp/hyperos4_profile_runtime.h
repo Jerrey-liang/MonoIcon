@@ -1,5 +1,6 @@
 #pragma once
 #include "hyperos4_profile.h"
+#include <array>
 #include <sys/types.h>
 
 namespace monoicon::profile {
@@ -8,6 +9,8 @@ struct MappedImage {
     std::string path;
     uint64_t fileOffset{}, inode{}, device{};
     std::vector<uint8_t> header;
+    // Found by name in the same file descriptor whose entire ELF was hashed.
+    std::array<uint64_t, 3> geometryImportSlots{};
 };
 // Discovery and all allocations happen before parking threads. Validation below
 // uses preallocated storage, raw syscalls and bounded stack buffers only.
@@ -18,6 +21,7 @@ public:
     bool validate(const Profile& profile, const std::vector<uint32_t>& current, uint32_t& checked);
     bool readMemory(uintptr_t address, void* output, size_t size) const;
     bool readWord(uintptr_t address, uint32_t& word) const;
+    bool geometryImports(size_t image, std::array<uintptr_t, 3>& addresses) const;
     uintptr_t address(const Profile& p, const Patch& patch) const { return images[p.functions[patch.function].image].bias + patch.address; }
     std::vector<MappedImage> images;
 private:

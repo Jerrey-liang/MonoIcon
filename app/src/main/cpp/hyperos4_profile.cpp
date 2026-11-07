@@ -126,12 +126,15 @@ bool Parse(const std::string& json, Profile& result, std::string& error) {
             !std::all_of(p.refresh.packageExtra.begin(), p.refresh.packageExtra.end(), identifier)) return fail("invalid refresh action or packageExtra");
     }
     const auto& m = root.at("match");
-    if (!Keys(m, {"package", "versionCodes", "versionNames", "sdkMin", "sdkMax", "properties"}) ||
+    if (!Keys(m, {"package", "versionCodes", "versionNames", "sdkMin", "sdkMax", "properties", "systemVersions"}) ||
         !Text(m.at("package"), p.match.package) || p.match.package != "com.miui.home" ||
         !Strings(m.at("versionCodes"), p.match.versionCodes) || !Strings(m.at("versionNames"), p.match.versionNames) ||
         !Uint32(m.at("sdkMin"), p.match.sdkMin) || !Uint32(m.at("sdkMax"), p.match.sdkMax) ||
         p.match.sdkMin < 35 || p.match.sdkMax < p.match.sdkMin || p.match.sdkMax > 10000 ||
         !Array(m.at("properties"), 1, 32)) return fail("invalid match constraints (package, versions, SDK or properties)");
+    if (m.object.count("systemVersions") && !Strings(m.at("systemVersions"), p.match.systemVersions)) {
+        return fail("systemVersions must contain 1..128 unique nonempty exact system versions");
+    }
     for (const auto& code : p.match.versionCodes) {
         Json j; j.type = Json::String; j.text = code; uint64_t n;
         if (!Uint(j, n, INT64_MAX) || !n || std::to_string(n) != code) return fail("versionCodes must be canonical decimal strings");

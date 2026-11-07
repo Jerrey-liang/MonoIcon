@@ -53,13 +53,14 @@ internal object HyperOs4SystemEvents {
         if (Application.getProcessName() != "com.android.systemui") return
         if (registered.get()) return
         val info = runCatching { context.packageManager.getPackageInfo("com.miui.home", PackageManager.PackageInfoFlags.of(0)) }.getOrNull() ?: return
+        if (!registered.compareAndSet(false, true)) return
+        val app = context.applicationContext ?: context
+        // Both launcher generations need the protected safety-status wakeup.
+        info.applicationInfo?.let { HyperOs4LauncherMonitor.start(app, it.uid) }
         // SystemUI only detects the native generation. The app owns profile
         // selection and ELF inspection after the protected wakeup broadcast.
         if (info.applicationInfo?.flags?.and(ApplicationInfo.FLAG_HAS_CODE) != 0 ||
             "arm64-v8a" !in Build.SUPPORTED_ABIS) return
-        if (!registered.compareAndSet(false, true)) return
-        val app = context.applicationContext ?: context
-        info.applicationInfo?.let { HyperOs4LauncherMonitor.start(app, it.uid) }
         val handler = Handler(Looper.getMainLooper())
         val refresh = Runnable {
             if (ConfigManager.isEnabled()) runCatching {
@@ -99,7 +100,10 @@ class HyperOs4RefreshReceiver : BroadcastReceiver() {
         val restart = intent.action == HyperOs4LauncherMonitor.ACTION_RESTARTED
         // A startup delivery must not replace a pending wallpaper/package export.
         val jobId = if (restart) JOB_ID + 1 else JOB_ID
-        val extras = PersistableBundle().apply { putBoolean("launcher_restart", restart) }
+        val extras = PersistableBundle().apply {
+            putBoolean("launcher_restart", restart)
+            putInt("launcher_pid", if (restart) intent.getIntExtra("launcher_pid", 0) else 0)
+        }
         val urgent = JobInfo.Builder(jobId, component).setExtras(extras).setExpedited(true).build()
         if (scheduler.schedule(urgent) != JobScheduler.RESULT_SUCCESS) {
             scheduler.schedule(JobInfo.Builder(jobId, component).setExtras(extras).setOverrideDeadline(0).build())
@@ -114,6 +118,13 @@ class HyperOs4RefreshJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         Thread({
             val completed = runCatching {
+                if (com.jerrey.monoicon.safety.LauncherSafety.synchronizeStartup(applicationContext, params.extras.getInt("launcher_pid"))) {
+                    // Persist the disabled native commit too; the startup latch
+                    // already prevents hooks even if publication is unavailable.
+                    HyperOs4PalettePublisher.flushBeforeRestart(applicationContext)
+                    return@runCatching true
+                }
+                if (ProfileRepository.nativeLauncher(applicationContext) == null) return@runCatching true
                 if (params.extras.getBoolean("launcher_restart")) {
                     // A transient boot-time metadata/binder failure must not
                     // replace a valid published Profile with a revoked commit.

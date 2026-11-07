@@ -620,19 +620,30 @@ class PixelMaskPipelineInstrumentedTest {
 
     @Test
     fun lawniconsRealBundleLookupHitsCoveredPackage() {
-        // Uses the real module APK assets when available (build ships the
-        // bundle); skips gracefully when the tier cannot initialise.
+        // This build always ships the bundle. Verify its real lookup and reader,
+        // not a coordinate left over from the old 192px runtime mask size.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         LawniconsAssetSource.init(context)
         val mask = LawniconsAssetSource.lookupMask(
             "com.tencent.mobileqq/com.tencent.mobileqq.activity.SplashActivity",
             192,
         )
-        org.junit.Assume.assumeTrue("Lawnicons bundle not available in this build", mask != null)
-
-        assertNotNull(mask)
-        assertTrue(Color.alpha(mask!!.getPixel(96, 96)) > 0)
-        assertTrue(mask.width == 640 && mask.height == 640)
+        assertNotNull("bundled QQ asset must be available", mask)
+        assertEquals(640, mask!!.width)
+        assertEquals(640, mask.height)
+        // The actual QQ artwork is an outline; its centre is transparent.
+        // Check the complete known asset below instead of guessing a solid pixel.
+        assertEquals("Lawnicons keeps transparent outer padding", 0, Color.alpha(mask.getPixel(0, 0)))
+        assertTrue("the result contains a usable glyph", AospMonochromeMaskStrategy.hasUsableGlyph(mask))
+        val expected = LawniconsAssetSource.lookupMask(
+            "com.tencent.mobileqq", 640, mapOf("com.tencent.mobileqq" to "qq"), emptyMap(),
+        ) { context.assets.open("lawnicons/masks/$it.png") }
+        assertNotNull("QQ PNG is packaged independently of the index", expected)
+        try {
+            assertTrue("real bundle lookup resolves the packaged QQ glyph", mask.sameAs(expected))
+        } finally {
+            expected?.recycle()
+        }
     }
 
     @Test

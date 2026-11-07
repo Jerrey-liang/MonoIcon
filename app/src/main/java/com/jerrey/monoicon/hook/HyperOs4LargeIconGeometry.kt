@@ -3,6 +3,8 @@ package com.jerrey.monoicon.hook
 import android.content.Context
 import android.os.Looper
 import com.jerrey.monoicon.profile.CompatibilityProfile
+import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.logging.logw
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -26,6 +28,8 @@ import java.util.concurrent.TimeUnit
 internal object HyperOs4LargeIconGeometry {
     private val HEX_32 = Regex("[a-f0-9]{32}")
     private val HEX_64 = Regex("[a-f0-9]{64}")
+    private val diagnostics = HyperOs4LargeIconDiagnostics()
+    private var lastGeometrySignature: String? = null
 
     data class Size(val width: Double, val height: Double)
 
@@ -46,9 +50,10 @@ internal object HyperOs4LargeIconGeometry {
     /** Read on a worker; a launcher still initializing must not stall publication. */
     @Synchronized
     fun read(context: Context, profile: CompatibilityProfile, launcherUid: Int): Geometry? {
-        if (Looper.myLooper() == Looper.getMainLooper()) return null
-        if (profile.icons.geometryBridge == null || launcherUid < 0 || !HEX_64.matches(profile.digest)) return null
-        if (context.resources.configuration.smallestScreenWidthDp !in 1..599) return null
+        if (Looper.myLooper() == Looper.getMainLooper()) return unavailable("main-thread")
+        if (profile.icons.geometryBridge == null) return unavailable("profile-bridge-missing")
+        if (launcherUid < 0 || !HEX_64.matches(profile.digest)) return unavailable("invalid-request-identity")
+        if (context.resources.configuration.smallestScreenWidthDp !in 1..599) return unavailable("unsupported-screen-width")
         val nonce = UUID.randomUUID().toString().replace("-", "")
         var output: File? = null
         var process: Process? = null
@@ -59,27 +64,27 @@ internal object HyperOs4LargeIconGeometry {
                 systemProperty("persist.sys.multi_display_type"),
                 systemProperty("persist.sys.muiltdisplay_type"),
             )
-            if (!supported) return null
+            if (!supported) return unavailable("unsupported-device-layout")
             val directory = HyperOs4Storage.directory(launcherUid)
             val script = """
                 directory=${quote(directory)}
                 [ -d "${'$'}directory" ] && [ ! -L "${'$'}directory" ] || exit 2
-                pid=${'$'}(pidof com.miui.home 2>/dev/null) || exit 2
-                case "${'$'}pid" in ''|*[!0-9]*) exit 2 ;; esac
+                pid=${'$'}(pidof com.miui.home 2>/dev/null) || exit 4
+                case "${'$'}pid" in ''|*[!0-9]*) exit 4 ;; esac
                 request="${'$'}directory/monoicon_geometry.request"
                 response="${'$'}directory/monoicon_geometry.response"
                 stage="${'$'}request.$nonce.new"
                 trap 'rm -f "${'$'}stage"' EXIT
-                [ ! -e "${'$'}stage" ] && [ ! -L "${'$'}stage" ] || exit 2
-                printf 'MONOICON_GEOMETRY 1 %s ${profile.digest} $nonce\n' "${'$'}pid" > "${'$'}stage" || exit 2
-                chmod 600 "${'$'}stage" && chown $launcherUid:$launcherUid "${'$'}stage" && restorecon "${'$'}stage" && mv -f "${'$'}stage" "${'$'}request" || exit 2
+                [ ! -e "${'$'}stage" ] && [ ! -L "${'$'}stage" ] || exit 5
+                printf 'MONOICON_GEOMETRY 1 %s ${profile.digest} $nonce\n' "${'$'}pid" > "${'$'}stage" || exit 5
+                chmod 600 "${'$'}stage" && chown $launcherUid:$launcherUid "${'$'}stage" && restorecon "${'$'}stage" && mv -f "${'$'}stage" "${'$'}request" || exit 5
                 count=0
                 while [ "${'$'}count" -lt 30 ]; do
                     if [ -f "${'$'}response" ] && [ ! -L "${'$'}response" ]; then
                         line=${'$'}(head -c 768 "${'$'}response")
                         case "${'$'}line" in
                             "MONOICON_GEOMETRY 1 ${'$'}pid ${profile.digest} $nonce "*)
-                                [ "${'$'}(pidof com.miui.home 2>/dev/null)" = "${'$'}pid" ] || exit 2
+                                [ "${'$'}(pidof com.miui.home 2>/dev/null)" = "${'$'}pid" ] || exit 6
                                 printf 'MONOICON_GEOMETRY_PID %s\n%s\n' "${'$'}pid" "${'$'}line"
                                 exit 0 ;;
                         esac
@@ -92,17 +97,32 @@ internal object HyperOs4LargeIconGeometry {
             val file = File.createTempFile("hyperos4-geometry-", ".txt", context.cacheDir).also { output = it }
             val child = ProcessBuilder("su", "-M", "-c", script).redirectOutput(file)
                 .redirectError(File("/dev/null")).start().also { process = it }
-            if (!child.waitFor(5, TimeUnit.SECONDS) || child.exitValue() != 0 || file.length() > 900) return null
+            if (!child.waitFor(5, TimeUnit.SECONDS)) return unavailable("root-process-timeout")
+            if (child.exitValue() != 0) return unavailable(when (child.exitValue()) {
+                2 -> "storage-unavailable"
+                3 -> "response-timeout"
+                4 -> "launcher-pid-unavailable"
+                5 -> "request-write-failed"
+                6 -> "launcher-restarted"
+                else -> "root-process-failed"
+            }, "exit=${child.exitValue()}")
+            if (file.length() > 900) return unavailable("response-too-large")
             val text = file.readText()
             val header = text.substringBefore('\n').split(' ')
-            if (header.size != 2 || header[0] != "MONOICON_GEOMETRY_PID") return null
-            val pid = header[1].toIntOrNull()?.takeIf { it > 0 } ?: return null
-            parseResponse(text.substringAfter('\n'), pid, profile.digest, nonce)
+            if (header.size != 2 || header[0] != "MONOICON_GEOMETRY_PID") return unavailable("invalid-response-header")
+            val pid = header[1].toIntOrNull()?.takeIf { it > 0 } ?: return unavailable("invalid-response-pid")
+            val geometry = parseResponse(text.substringAfter('\n'), pid, profile.digest, nonce)
+                ?: return unavailable("invalid-response-metrics", "pid=$pid")
+            if (lastGeometrySignature != geometry.signature) {
+                lastGeometrySignature = geometry.signature
+                logi("MonoIcon.HyperOS4", "large icon geometry: cell=${geometry.cellWidth}x${geometry.cellHeight} icon=${geometry.normalIconSize}")
+            }
+            geometry
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
-            null
-        } catch (_: Exception) {
-            null
+            unavailable("interrupted")
+        } catch (failure: Exception) {
+            unavailable("read-exception", failure.javaClass.simpleName)
         } finally {
             if (process?.isAlive == true) process.destroyForcibly()
             process?.inputStream?.close()
@@ -110,6 +130,11 @@ internal object HyperOs4LargeIconGeometry {
             process?.outputStream?.close()
             output?.delete()
         }
+    }
+
+    private fun unavailable(reason: String, detail: String = ""): Geometry? {
+        diagnostics.report("geometry-$reason", detail)
+        return null
     }
 
     /** Reject stale, mismatched, malformed or nonfinite native responses. */
@@ -179,4 +204,16 @@ internal object HyperOs4LargeIconGeometry {
     private fun sameMetric(first: Double, second: Double): Boolean =
         first.isFinite() && second.isFinite() &&
             kotlin.math.abs(first - second) <= maxOf(1.0, kotlin.math.abs(first)) * 1e-6
+}
+
+/** Repeated publications report each failure stage once per process, with a hard cap. */
+internal class HyperOs4LargeIconDiagnostics {
+    private val reported = mutableSetOf<String>()
+
+    @Synchronized
+    fun report(reason: String, detail: String = "") {
+        if (reported.size < 24 && reported.add(reason)) {
+            logw("MonoIcon.HyperOS4", "large icon input unavailable: $reason ${detail.take(160)}".trimEnd())
+        }
+    }
 }

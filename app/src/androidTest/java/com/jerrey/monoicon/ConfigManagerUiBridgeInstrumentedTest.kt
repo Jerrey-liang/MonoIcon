@@ -67,7 +67,8 @@ class ConfigManagerUiBridgeInstrumentedTest {
 
         assertFalse(ConfigManager.isEnabled())
         assertFalse(ConfigManager.isLawniconsEnabled())
-        assertFalse(ConfigManager.isNotificationIconsEnabled())
+        assertTrue("legacy notification opt-out no longer disables app icons", ConfigManager.isNotificationIconsEnabled())
+        assertTrue(ConfigManager.isNotificationIconsEnabledFromUi())
         assertEquals(IconShape.CIRCLE, ConfigManager.iconShape())
         assertEquals("expressive", ConfigManager.getVariantId())
         assertEquals("test_theme", ConfigManager.getThemeId())
@@ -78,6 +79,18 @@ class ConfigManagerUiBridgeInstrumentedTest {
         field("remotePrefsProvider").set(null, hookProvider)
         assertEquals("vibrant", ConfigManager.getVariantId())
         assertEquals("expressive", ConfigManager.getVariantIdFromUi())
+    }
+
+    @Test
+    fun ordinaryMasterSwitchCannotClearPersistentSafetyLatch() {
+        field("uiRemotePrefs").set(null, remote)
+        ConfigManager.setSafetyBlocked(true)
+        assertTrue(local.getBoolean("safety_blocked", false))
+        assertTrue(remote.getBoolean("safety_blocked", false))
+        ConfigManager.setEnabled(true)
+        assertFalse(ConfigManager.isEnabledFromUi())
+        ConfigManager.setSafetyBlocked(false)
+        assertTrue(ConfigManager.isEnabledFromUi())
     }
 
     @Test
@@ -108,7 +121,7 @@ class ConfigManagerUiBridgeInstrumentedTest {
         assertFalse(local.getBoolean("enabled", true))
         assertTrue(local.getBoolean("circle_icons", false))
         assertFalse(local.getBoolean("lawnicons_enabled", true))
-        assertFalse(local.getBoolean("notification_icons", true))
+        assertTrue("legacy setter migrates notification icons to enabled", local.getBoolean("notification_icons", false))
         assertEquals("test_theme", local.getString("theme_id", null))
         assertEquals("zh", local.getString("ui_language", null))
     }
@@ -130,6 +143,8 @@ class ConfigManagerUiBridgeInstrumentedTest {
         assertFalse("existing framework values take precedence over an old local mirror", local.getBoolean("circle_icons", true))
         assertEquals("local_theme", remote.getString("theme_id", null))
         assertTrue(local.getStringSet("pending_remote_keys", emptySet())!!.isEmpty())
+        assertTrue(local.getBoolean("notification_icons", false))
+        assertTrue(remote.getBoolean("notification_icons", false))
     }
 
     @Test

@@ -45,9 +45,8 @@ internal object HyperOs4PalettePublisher {
     private var lastSaved: String? = null // includes commits awaiting launcher restart
     private var lastSavedRevision = -1L
     private var preparedLargeSignature = HyperOs4LargeIconInputs.EMPTY.signature
-    private var geometryRetryKey: String? = null
-    private var geometryRetryCount = 0
-    private var geometryRetryPending: Long? = null
+    private val geometryRetries = HyperOs4GeometryRetries()
+    private var publicationDeferredForGeometry = false
     private val mutableStatus = MutableStateFlow("Profile configuration has not been published")
     val status = mutableStatus.asStateFlow()
 
@@ -76,9 +75,7 @@ internal object HyperOs4PalettePublisher {
                     val colors = PixelMonetColorEngine.getIconColors()
                     val config = HyperOs4Config(ConfigManager.isEnabledFromUi() && resolution.profile != null, colors.background,
                         colors.foreground, ConfigManager.isCircleIconsEnabledFromUi(), ConfigManager.isLawniconsEnabledFromUi())
-                    val awaitingGeometry = config.enabled && resolution.profile?.icons?.geometryBridge != null &&
-                        preparedLargeSignature == HyperOs4LargeIconInputs.EMPTY.signature && lastPublished == lastSaved &&
-                        (geometryRetryCount < 3 || geometryRetryPending != null)
+                    val awaitingGeometry = geometryRetries.pending != null || publicationDeferredForGeometry
                     lastSavedRevision == iconRevision.get() && lastSaved == publicationKey(config, resolution.profile, preparedLargeSignature) && !awaitingGeometry
                 }, 250, TimeUnit.MILLISECONDS).get(30, TimeUnit.SECONDS)
             }
@@ -153,6 +150,8 @@ internal object HyperOs4PalettePublisher {
         worker.schedule({
             if (generation.get() != requested) return@schedule
             try {
+                com.jerrey.monoicon.safety.LauncherSafety.synchronize(app)
+                if (generation.get() != requested) return@schedule
                 val launcher = ProfileRepository.nativeLauncher(app) ?: return@schedule
                 val resolution = ProfileRepository.resolve(app)
                 val profile = resolution.profile
@@ -168,13 +167,20 @@ internal object HyperOs4PalettePublisher {
                 )
                 val largeIcons = if (config.enabled) HyperOs4LargeIconInputs.read(app, profile, launcher.uid)
                     else HyperOs4LargeIconInputs.EMPTY
-                geometryRetryPending = null
+                if (generation.get() != requested) return@schedule
+                geometryRetries.readCompleted()
+                publicationDeferredForGeometry = false
                 preparedLargeSignature = largeIcons.signature
                 val content = publicationKey(config, profile, largeIcons.signature)
                 val revision = iconRevision.get()
+                val unavailable = config.enabled && profile?.icons?.geometryBridge != null && largeIcons.geometry == null
+                val retryKey = "$content:$revision"
                 if (generation.get() != requested) return@schedule
-                if (content == lastPublished && revision == lastIconRevision) {
-                    retryGeometry(app, requested, content, config.enabled && profile?.icons?.geometryBridge != null && largeIcons.geometry == null)
+                if ((content == lastPublished && revision == lastIconRevision) ||
+                    (content == lastSaved && revision == lastSavedRevision)) {
+                    // A commit awaiting a late ACK still owns its immutable PNGs.
+                    // Retrying geometry must not keep replacing that generation.
+                    retryGeometry(app, requested, retryKey, unavailable)
                     return@schedule
                 }
                 val icons = if (config.enabled) File(app.cacheDir, "hyperos4-export-$requested") else null
@@ -185,16 +191,23 @@ internal object HyperOs4PalettePublisher {
                         check(exported.components > 0 && exported.files > 0) { "No usable icons were exported; retaining the previous generation" }
                         logi(TAG, "rendered ${exported.components} components (${exported.files} PNG aliases) with MonoIcon")
                     }
-                    if (generation.get() != requested || !publishFile(app, launcher, config, icons, revision, profile, content)) return@schedule
+                    if (generation.get() != requested) return@schedule
+                    when (publishFile(app, launcher, config, icons, revision, profile, content, unavailable)) {
+                        Publication.FAILED -> return@schedule
+                        Publication.RETAINED -> publicationDeferredForGeometry = true
+                        Publication.APPLIED -> {
+                            lastPublished = content
+                            lastIconRevision = revision
+                            logi(TAG, "native configuration published: enabled=${config.enabled} circle=${config.circle} lawnicons=${config.lawnicons}")
+                        }
+                        Publication.SAVED -> Unit
+                    }
                 } finally {
                     icons?.deleteRecursively()
                 }
-                lastPublished = content
-                lastIconRevision = revision
-                retryGeometry(app, requested, content, config.enabled && profile?.icons?.geometryBridge != null && largeIcons.geometry == null)
+                retryGeometry(app, requested, retryKey, unavailable)
                 // The independent refresh owner also handles late native ACKs
                 // and the new PID after a launcher restart.
-                logi(TAG, "native configuration published: enabled=${config.enabled} circle=${config.circle} lawnicons=${config.lawnicons}")
             } catch (t: Throwable) {
                 // ScheduledThreadPoolExecutor otherwise silently consumes Errors.
                 mutableStatus.value = "Publish failed: ${t.message}"
@@ -203,25 +216,23 @@ internal object HyperOs4PalettePublisher {
         }, 200, TimeUnit.MILLISECONDS)
     }
 
-    private fun retryGeometry(app: Context, requested: Long, content: String, unavailable: Boolean) {
-        if (!unavailable) { geometryRetryKey = null; geometryRetryCount = 0; geometryRetryPending = null; return }
-        if (geometryRetryKey != content) { geometryRetryKey = content; geometryRetryCount = 0 }
-        if (geometryRetryCount >= 3) return
-        geometryRetryCount++
-        geometryRetryPending = requested
-        // First publication starts the verified native worker. Keep one bounded
-        // retry chain, tied to this exact request and acknowledged publication.
+    private fun retryGeometry(app: Context, requested: Long, key: String, unavailable: Boolean) {
+        if (!geometryRetries.schedule(requested, key, unavailable)) return
+        // A saved commit may be acknowledged after publishFile's short wait.
+        // Give its native worker the same bounded retries as an immediate ACK.
+        // The request token cancels retries superseded by a settings change.
         worker.schedule({
-            if (generation.get() == requested && lastPublished == content) publish(app)
-            else if (geometryRetryPending == requested) geometryRetryPending = null
+            if (geometryRetries.consume(requested, generation.get())) publish(app)
         }, 1, TimeUnit.SECONDS)
     }
 
     private fun publicationKey(config: HyperOs4Config, profile: CompatibilityProfile?, largeSignature: String): String =
         config.encode() + (profile?.digest ?: ProfileRepository.REVOKED_DIGEST) + largeSignature
 
+    private enum class Publication { APPLIED, SAVED, RETAINED, FAILED }
+
     private fun publishFile(app: Context, launcher: ApplicationInfo, config: HyperOs4Config, icons: File?, revision: Long,
-                            profile: CompatibilityProfile?, publication: String): Boolean {
+                            profile: CompatibilityProfile?, publication: String, preserveLargeIcons: Boolean): Publication {
         // dataDir may be /data/data, an app-isolated tmpfs in our mount namespace.
         // An su child inherits it: mkdir there can succeed in an invisible directory.
         // /data/user can be overmounted too; su -M below uses the global namespace.
@@ -245,6 +256,36 @@ internal object HyperOs4PalettePublisher {
         val profileStage = File(profileRoot, "$digest.json.new")
         val active = File(directory, "monoicon_profile.active")
         val activeStage = File(directory, "monoicon_profile.active.new")
+        // Check the committed batch in the same root transaction. This also
+        // protects a valid large-icon generation after the module app restarts.
+        // Disabling or changing Profile still commits without this guard.
+        val preserveLarge = if (!preserveLargeIcons) "" else """
+            if [ "${'$'}oldMagic" = MONOICON ] && [ "${'$'}oldVersion" = 3 ] && [ "${'$'}oldEnabled" = 1 ] &&
+                [ "${'$'}previousProfile" = ${quote(digest)} ] && [ "${'$'}{#previousGeneration}" -eq 34 ]; then
+                case "${'$'}previousGeneration" in g-*)
+                    case "${'$'}{previousGeneration#g-}" in *[!0-9a-f]*) ;; *)
+                        previousIcons=${quote(iconRoot.path)}/"${'$'}previousGeneration"
+                        if [ -d "${'$'}previousIcons" ] && [ ! -L "${'$'}previousIcons" ] &&
+                            [ -s "${'$'}previousIcons/.large-icons" ] && [ ! -L "${'$'}previousIcons/.large-icons" ] &&
+                            [ "${'$'}(cat "${'$'}previousIcons/.ready" 2>/dev/null)" = "${'$'}previousGeneration" ]; then
+                            exit 11
+                        fi ;;
+                    esac ;;
+                esac
+            fi
+        """.trimIndent()
+        val systemReceipt = if (profile?.match?.systemVersions == null && profile != null) {
+            val token = ProfileRepository.systemApprovalToken()
+            val target = File(profileRoot, "$digest.system")
+            val stage = File(profileRoot, "$digest.system.new")
+            """
+                printf '%s' ${quote(token)} > ${quote(stage.path)}
+                chown ${launcher.uid}:${launcher.uid} ${quote(stage.path)}
+                chmod 600 ${quote(stage.path)}
+                restorecon ${quote(stage.path)}
+                mv -f ${quote(stage.path)} ${quote(target.path)}
+            """.trimIndent()
+        } else ""
         val switchProfile = if (profile == null) "" else """
             phase=profile
             mkdir -p ${quote(profileRoot.path)}
@@ -256,6 +297,7 @@ internal object HyperOs4PalettePublisher {
             restorecon -R ${quote(profileRoot.path)}
             mv -f ${quote(profileStage.path)} ${quote(profileTarget.path)}
             cmp -s ${quote(profileSource.path)} ${quote(profileTarget.path)}
+            $systemReceipt
             printf '%s' ${quote(digest)} > ${quote(activeStage.path)}
             chown ${launcher.uid}:${launcher.uid} ${quote(activeStage.path)}
             chmod 600 ${quote(activeStage.path)}
@@ -290,6 +332,7 @@ internal object HyperOs4PalettePublisher {
                 read -r oldMagic oldVersion oldEnabled oldBackground oldForeground oldCircle oldLawnicons previousGeneration previousProfile < ${quote(destination.path)} || true
             fi
             $switchProfile
+            $preserveLarge
             $switchIcons
             phase=configuration
             printf '%s' ${quote(content)} > ${quote(staging.path)}
@@ -328,7 +371,11 @@ internal object HyperOs4PalettePublisher {
             if (!process.waitFor(15, TimeUnit.SECONDS)) {
                 mutableStatus.value = "Publish timed out; root access is required"
                 logw(TAG, "native configuration publish timed out; root access is required on HyperOS 4")
-                false
+                Publication.FAILED
+            } else if (process.exitValue() == 11) {
+                mutableStatus.value = "Large icon geometry is unavailable; keeping the previous icon generation. Try again after the launcher is ready."
+                logw(TAG, mutableStatus.value)
+                Publication.RETAINED
             } else if (process.exitValue() == 10) {
                 lastSaved = publication
                 lastSavedRevision = revision
@@ -336,18 +383,18 @@ internal object HyperOs4PalettePublisher {
                 mutableStatus.value = "Saved; restart launcher to apply Profile. Native acknowledgement pending.\n$native"
                 logw(TAG, mutableStatus.value)
                 HyperOs4IconRefresh.schedule(app, launcher, profile, content, config.enabled, refreshStatus)
-                false
+                Publication.SAVED
             } else if (process.exitValue() != 0) {
                 val reason = runCatching { output.readLines().takeLast(3).joinToString("; ").take(600) }.getOrDefault("")
                 mutableStatus.value = "Publish failed (root exit=${process.exitValue()}): $reason"
                 logw(TAG, "native configuration was not published (root exit=${process.exitValue()}): $reason")
-                false
+                Publication.FAILED
             } else {
                 lastSaved = publication
                 lastSavedRevision = revision
                 refreshStatus("Applied: ${profile?.name ?: "disabled"} · ${digest.take(12)}")
                 HyperOs4IconRefresh.schedule(app, launcher, profile, content, config.enabled, refreshStatus)
-                true
+                Publication.APPLIED
             }
         } finally {
             if (process.isAlive) process.destroyForcibly()
@@ -359,4 +406,37 @@ internal object HyperOs4PalettePublisher {
     }
 
     private fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+}
+
+/** One finite retry chain for a desired configuration/revision, independent of ACK timing. */
+internal class HyperOs4GeometryRetries {
+    private var key: String? = null
+    var attempts: Int = 0
+        private set
+    var pending: Long? = null
+        private set
+
+    fun readCompleted() { pending = null }
+
+    fun schedule(requested: Long, content: String, unavailable: Boolean): Boolean {
+        if (!unavailable) {
+            key = null
+            attempts = 0
+            pending = null
+            return false
+        }
+        if (key != content) { key = content; attempts = 0 }
+        if (attempts >= 3) return false
+        attempts++
+        pending = requested
+        return true
+    }
+
+    fun consume(requested: Long, current: Long): Boolean {
+        if (pending != requested) return false
+        if (requested != current) { pending = null; return false }
+        // Keep flushBeforeRestart waiting during publish()'s coalescing delay
+        // and the next read, not just until the timer fires.
+        return true
+    }
 }

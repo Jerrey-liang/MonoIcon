@@ -41,7 +41,6 @@ private const val TAG = "MonoIcon.Hook"
 private const val TAG_COLOR = "MonoIcon.Color"
 private const val TAG_MASK = "MonoIcon.Mask"
 private const val TAG_FOLDER = "MonoIcon.FolderLifecycle"
-private const val MODULE_VERSION = "2.0.1"
 
 /** Boot timestamp for relative timing logs (ms since boot approx). */
 private val bootTimeNs: Long = System.nanoTime()
@@ -111,7 +110,7 @@ class IconThemeHook : XposedModule() {
             // Phase 3.18-A: 热路径日志默认关闭；debug 构建自动开启便于验证
             LogcatLogger.setDebugEnabled(BuildConfig.DEBUG)
             val pid = Process.myPid()
-            android.util.Log.i(TAG, "═══ MonoIcon v$MODULE_VERSION loaded — PID=$pid SDK=${Build.VERSION.SDK_INT} debugLog=${BuildConfig.DEBUG} ═══")
+            android.util.Log.i(TAG, "═══ MonoIcon v${BuildConfig.VERSION_NAME} loaded — PID=$pid SDK=${Build.VERSION.SDK_INT} debugLog=${BuildConfig.DEBUG} ═══")
         } catch (_: Throwable) { /* never crash */ }
     }
 
@@ -134,6 +133,7 @@ class IconThemeHook : XposedModule() {
         // folders / recents) and SystemUI (notification app icons). Each gets its own
         // hook set; neither installs the other's hooks.
         if (pkg != "com.miui.home" && pkg != "com.android.systemui") return
+        if (pkg == "com.miui.home" && (!isLauncherMainProcess || !param.isFirstPackage)) return
 
         // The no-DEX launcher is handled by onPackageReady; its Java icon classes
         // do not exist. Preserve the legacy and SystemUI hook paths below.
@@ -144,6 +144,12 @@ class IconThemeHook : XposedModule() {
         // Phase 4.1: load configuration before installing hooks — a disabled
         // module installs nothing and leaves the host process untouched.
         ConfigManager.initForHooks(this)
+        if (pkg == "com.miui.home" && ConfigManager.isEnabled() &&
+            !com.jerrey.monoicon.safety.LauncherSafetyNative.begin()) {
+            ConfigManager.disableForHooks()
+            android.util.Log.w(TAG, "Startup safety blocked MonoIcon; launcher hooks will not be installed")
+            return
+        }
         // Phase 5: initialize ThemeManager (reads theme_id from remote prefs)
         ThemeManager.initForHooks(this)
         val enabled = ConfigManager.isEnabled()

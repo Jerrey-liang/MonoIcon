@@ -39,13 +39,15 @@ import java.util.concurrent.atomic.AtomicLong
  * [REFRESH_INTERVAL_MS]. A settings change takes effect within one refresh
  * interval — no launcher restart required.
  *
- * Failures default to `enabled = true` (never silently disable processing).
+ * Ordinary preference failures retain the default; the startup safety latch
+ * always takes precedence over the master switch.
  */
 object ConfigManager {
 
     private const val TAG = "MonoIcon.Config"
     private const val PREFS_NAME = "monoicon_config"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_SAFETY_BLOCKED = "safety_blocked"
     private const val KEY_THEME_ID = "theme_id"
     private const val KEY_VARIANT_ID = "variant_id"
     private const val KEY_LAWNICONS_ENABLED = "lawnicons_enabled"
@@ -54,7 +56,7 @@ object ConfigManager {
     private const val KEY_LANGUAGE = "ui_language"
     private const val KEY_PENDING_REMOTE = "pending_remote_keys"
     private val uiKeys = setOf(
-        KEY_ENABLED, KEY_THEME_ID, KEY_VARIANT_ID, KEY_LAWNICONS_ENABLED,
+        KEY_ENABLED, KEY_SAFETY_BLOCKED, KEY_THEME_ID, KEY_VARIANT_ID, KEY_LAWNICONS_ENABLED,
         KEY_CIRCLE_ICONS, KEY_NOTIFICATION_ICONS, KEY_LANGUAGE,
     )
 
@@ -275,7 +277,15 @@ object ConfigManager {
     fun setLanguage(languageId: String) = writeUiPreference(KEY_LANGUAGE, languageId)
 
     /** Reads the toggle (UI side; falls back to shared prefs). */
-    fun isEnabledFromUi(): Boolean = readUiBoolean(KEY_ENABLED, true)
+    fun isEnabledFromUi(): Boolean = !isSafetyBlockedFromUi() && readUiBoolean(KEY_ENABLED, true)
+
+    fun isSafetyBlockedFromUi(): Boolean = readUiBoolean(KEY_SAFETY_BLOCKED, false)
+
+    /** Only the safety bridge clears this after committing an explicit retry token. */
+    internal fun setSafetyBlocked(blocked: Boolean) {
+        writeUiPreference(KEY_SAFETY_BLOCKED, blocked)
+        if (blocked) setEnabled(false)
+    }
 
     /** Writes the toggle via the framework remote preferences. Falls back to module shared prefs. */
     fun setEnabled(enabled: Boolean) = writeUiPreference(KEY_ENABLED, enabled)
@@ -285,6 +295,9 @@ object ConfigManager {
     @Volatile
     private var remotePrefsProvider: (() -> SharedPreferences?)? = null
     private val cachedEnabled = AtomicBoolean(true)
+    private val hookSafetyBlocked = AtomicBoolean(false)
+
+    internal fun disableForHooks() { hookSafetyBlocked.set(true) }
     private val lastRefreshMs = AtomicLong(0L)
 
     // ── Lawnicons bundle toggle (Phase 8) ──────────────────────────────
@@ -332,6 +345,7 @@ object ConfigManager {
      * once per [REFRESH_INTERVAL_MS]. Pure memory read on the fast path.
      */
     fun isEnabled(): Boolean {
+        if (hookSafetyBlocked.get()) return false
         if (remotePrefsProvider == null) return isEnabledFromUi()
         if (claimRefresh(lastRefreshMs)) {
             cachedEnabled.set(readRemote())
@@ -353,9 +367,11 @@ object ConfigManager {
     }
 
     private fun readRemote(): Boolean = try {
-        remotePrefsProvider?.invoke()?.getBoolean(KEY_ENABLED, true) ?: true
+        remotePrefsProvider?.invoke()?.let {
+            !it.getBoolean(KEY_SAFETY_BLOCKED, false) && it.getBoolean(KEY_ENABLED, true)
+        } ?: cachedEnabled.get()
     } catch (t: Throwable) {
-        true
+        cachedEnabled.get()
     }
 
     // ── Theme ID (Phase 5) ─────────────────────────────────────────────

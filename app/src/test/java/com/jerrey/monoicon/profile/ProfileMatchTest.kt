@@ -76,4 +76,14 @@ class ProfileMatchTest {
         assertNotNull(multiple.mismatch(matching.copy(properties = matching.properties - "ro.product.device")))
         assertNotNull(multiple.mismatch(matching.copy(properties = matching.properties + ("ro.product.device" to "another"))))
     }
+
+    @Test fun declaredSystemVersionsAreExactEvenWhenLauncherAndPrefixMatch() {
+        val declared = match.copy(systemVersions = setOf("OS4.0.0.3.XAACNXM", "OS4.0.0.4.XAACNXM"))
+        assertNull(declared.mismatch(environment))
+        assertNull(declared.mismatch(environment.copy(properties = mapOf("ro.build.version.incremental" to "OS4.0.0.4.XAACNXM"))))
+        for (version in listOf("OS4.0.0.5.XAACNXM", "OS4.0.0.3.XAACNXM-extra", "os4.0.0.3.XAACNXM", "")) {
+            assertNotNull(declared.mismatch(environment.copy(properties = mapOf("ro.build.version.incremental" to version))))
+        }
+        assertNotNull(declared.mismatch(environment.copy(properties = emptyMap())))
+    }
 }

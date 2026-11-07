@@ -1,6 +1,7 @@
 #include "hyperos4_profile_runtime.h"
 #include "profile_sha256.h"
 #include "hyperos4_paths.h"
+#include "hyperos4_elf_imports.h"
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -19,6 +20,16 @@
 namespace monoicon::profile {
 namespace {
 struct File { int fd; explicit File(int value) : fd(value) {} ~File() { if (fd >= 0) close(fd); } };
+std::string SystemProperty(const char* name) {
+    std::string result;
+    if (const auto* property = __system_property_find(name)) {
+        // Read-only build fingerprints may exceed the legacy PROP_VALUE_MAX.
+        __system_property_read_callback(property, [](void* cookie, const char*, const char* value, uint32_t) {
+            *static_cast<std::string*>(cookie) = value;
+        }, &result);
+    }
+    return result;
+}
 bool ReadAt(int fd, uint64_t offset, void* output, size_t size) {
     if (offset > INT64_MAX || size > INT64_MAX - offset) return false;
     auto* p = static_cast<uint8_t*>(output);
@@ -76,7 +87,7 @@ bool ApkOffset(int fd, uint64_t fileSize, const Image& spec, uint64_t& entryOffs
     }
     return found && pos == directory.size();
 }
-bool DiskImage(const Image& spec, MappedImage& image, std::string& error) {
+bool DiskImage(const Image& spec, MappedImage& image, std::string& error, bool geometry) {
     const size_t bang = image.path.find('!');
     const bool apk = bang != std::string::npos;
     if (apk) {
@@ -115,6 +126,27 @@ bool DiskImage(const Image& spec, MappedImage& image, std::string& error) {
             s.flags != ph.p_flags || s.alignment != ph.p_align || image.bias > UINTPTR_MAX - s.address - s.memorySize) { error = "ELF segment layout mismatch"; return false; }
     }
     if (count != spec.segments.size()) { error = "missing ELF segment"; return false; }
+    if (geometry) {
+        uint64_t dynamicAddress = 0, dynamicSize = 0;
+        unsigned dynamicCount = 0;
+        for (size_t i = 0; i < eh.e_phnum; ++i) {
+            Elf64_Phdr ph{}; memcpy(&ph, image.header.data() + eh.e_phoff + i * sizeof(ph), sizeof(ph));
+            if (ph.p_type != PT_DYNAMIC) continue;
+            ++dynamicCount; dynamicAddress = ph.p_vaddr; dynamicSize = ph.p_filesz;
+        }
+        auto read = [&](uint64_t address, void* output, size_t size, uint32_t flags) {
+            uint64_t offset = 0;
+            return FileOffset(spec, address, size, offset, flags) && offset <= UINT64_MAX - image.fileOffset &&
+                ReadAt(input.fd, image.fileOffset + offset, output, size);
+        };
+        if (dynamicCount == 1) {
+            // Failure disables only geometry: ordinary icons keep their already
+            // verified profile. No import address or system-library offset is fixed.
+            monoicon::hyos::ReadImportedFunctionSlots(dynamicAddress, dynamicSize,
+                "libhyper_os_schema_public.so", {"Bundle_get_f64", "Bundle_get_f32", "Bundle_drop"},
+                read, image.geometryImportSlots);
+        }
+    }
     return true;
 }
 struct Probe { const Profile* profile; std::vector<MappedImage>* images; bool duplicate = false; };
@@ -226,7 +258,9 @@ bool Runtime::discover(const Profile& profile, std::string& error) {
         if (!images[i].bias) { error = "image-missing: " + profile.images[i].library; return false; }
     }
     for (size_t i = 0; i < images.size(); ++i) {
-        if (!DiskImage(profile.images[i], images[i], error)) return false;
+        const bool geometry = profile.icons.geometryBridge < profile.functions.size() &&
+            profile.functions[profile.icons.geometryBridge].image == i;
+        if (!DiskImage(profile.images[i], images[i], error, geometry)) return false;
     }
     if (memory_ < 0) memory_ = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
     if (memory_ < 0 && pipeRead_ < 0) {
@@ -245,6 +279,18 @@ bool Runtime::discover(const Profile& profile, std::string& error) {
     return true;
 }
 bool Runtime::readWord(uintptr_t address, uint32_t& word) const { return readMemory(address, &word, sizeof(word)); }
+bool Runtime::geometryImports(size_t index, std::array<uintptr_t, 3>& addresses) const {
+    if (index >= images.size()) return false;
+    const auto& image = images[index];
+    std::array<uintptr_t, 3> found{};
+    for (size_t i = 0; i < found.size(); ++i) {
+        const uint64_t slot = image.geometryImportSlots[i];
+        if (!slot || slot > UINTPTR_MAX - image.bias ||
+            !readMemory(image.bias + slot, &found[i], sizeof(found[i])) || !found[i]) return false;
+    }
+    addresses = found;
+    return true;
+}
 bool Runtime::validate(const Profile& p, const std::vector<uint32_t>& current, uint32_t& checked) {
     checked = 0;
     if (images.size() != p.images.size() || current.size() != p.patches.size() || maps_.empty()) return false;
@@ -309,15 +355,44 @@ bool LoadProfile(const char* digest, Profile& profile, std::string& error) {
     if (!ReadAt(input.fd,0,source.data(),source.size())) { error = "profile read failed"; return false; }
     Sha256 hash; hash.update(source.data(),source.size());
     if (hash.finish() != digest) { error = "profile content digest mismatch"; return false; }
-    return Parse(source,profile,error) && MatchSystem(profile,error);
+    if (!Parse(source,profile,error) || !MatchSystem(profile,error)) return false;
+    if (profile.match.systemVersions.empty()) {
+        // This check must run in the launcher: a previous published commit may
+        // outlive an app upgrade or OTA and be loaded before the module UI runs.
+        const auto fingerprint = SystemProperty("ro.build.fingerprint");
+        const auto incremental = SystemProperty("ro.build.version.incremental");
+        const auto sdk = SystemProperty("ro.build.version.sdk");
+        if (fingerprint.empty() || incremental.empty() || sdk.empty()) {
+            error = "system identity unavailable for legacy Profile approval"; return false;
+        }
+        const std::string identity = fingerprint + '\n' + incremental + '\n' + std::to_string(strtoul(sdk.c_str(),nullptr,10));
+        Sha256 approvalHash; approvalHash.update(identity.data(),identity.size());
+        const std::string expected = approvalHash.finish();
+        snprintf(name,sizeof(name),"monoicon_profiles/%s.system",digest);
+        monoicon::hyos::LauncherFilePath(path,sizeof(path),name);
+        File approval(open(path,O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
+        char actual[64]; struct stat approvalStat{};
+        if (approval.fd < 0 || fstat(approval.fd,&approvalStat) || !S_ISREG(approvalStat.st_mode) ||
+            approvalStat.st_size != 64 || !ReadAt(approval.fd,0,actual,sizeof(actual)) ||
+            memcmp(actual,expected.data(),sizeof(actual)) != 0) {
+            error = "legacy Profile requires manual approval for this system build"; return false;
+        }
+    }
+    return true;
 }
 bool MatchSystem(const Profile& p, std::string& error) {
     char sdk[PROP_VALUE_MAX]{}; __system_property_get("ro.build.version.sdk",sdk);
     char* end = nullptr; const unsigned long value = strtoul(sdk,&end,10);
     if (!sdk[0] || !end || *end || value < p.match.sdkMin || value > p.match.sdkMax) { error = "Android SDK outside profile range"; return false; }
+    if (!p.match.systemVersions.empty()) {
+        const auto incremental = SystemProperty("ro.build.version.incremental");
+        if (std::find(p.match.systemVersions.begin(),p.match.systemVersions.end(),incremental) == p.match.systemVersions.end()) {
+            error = "system version mismatch: " + incremental; return false;
+        }
+    }
     for (const auto& property : p.match.properties) {
-        char value[PROP_VALUE_MAX]{}; __system_property_get(property.name.c_str(),value);
-        if (std::none_of(property.prefixes.begin(),property.prefixes.end(),[&](const std::string& prefix) { return strncmp(value,prefix.c_str(),prefix.size()) == 0; })) {
+        const auto value = SystemProperty(property.name.c_str());
+        if (std::none_of(property.prefixes.begin(),property.prefixes.end(),[&](const std::string& prefix) { return value.rfind(prefix,0) == 0; })) {
             error = "system property mismatch: " + property.name + "=" + value; return false;
         }
     }

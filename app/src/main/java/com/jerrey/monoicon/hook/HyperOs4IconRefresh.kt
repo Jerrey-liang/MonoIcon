@@ -68,12 +68,16 @@ internal object HyperOs4IconRefresh {
         val primary = HyperOs4Storage.directory(launcher.uid)
         val legacy = HyperOs4Storage.legacyDirectory(launcher.uid)
         val output = File.createTempFile("hyperos4-boot-", ".txt", context.cacheDir)
+        val verifyApproval = if (profile.match.systemVersions != null) "" else """
+            [ "${'$'}(cat "${'$'}directory/monoicon_profiles/${profile.digest}.system" 2>/dev/null)" = '${ProfileRepository.systemApprovalToken()}' ] || exit 2
+        """.trimIndent()
         val script = """
             directory=${quote(primary)}
             if [ ! -e "${'$'}directory/monoicon_palette.txt" ] && [ ! -L "${'$'}directory/monoicon_palette.txt" ]; then
                 directory=${quote(legacy)}
             fi
             file="${'$'}directory/monoicon_palette.txt"
+            $verifyApproval
             [ -f "${'$'}file" ] && [ ! -L "${'$'}file" ] || exit 2
             printf '%s\n' "${'$'}directory"
             head -c 256 "${'$'}file"
@@ -292,7 +296,12 @@ internal object HyperOs4IconRefresh {
                     processName=${'$'}(tr '\000' '\n' < "/proc/${'$'}pid/cmdline" | head -n 1)
                     if [ "${'$'}processName" != com.miui.home ]; then result superseded; exit 20; fi
                     if ! same_process || ! native_ready; then result superseded; exit 20; fi
-                    if ! kill "${'$'}pid"; then result restart_failed; exit 13; fi
+                    ${com.jerrey.monoicon.safety.LauncherSafety.expectedRestartScript(pending.launcherUid)}
+                    if [ "${'$'}?" -ne 0 ]; then result restart_failed; exit 13; fi
+                    if ! kill "${'$'}pid"; then
+                        rm -f ${quote(HyperOs4Storage.directory(pending.launcherUid) + "/monoicon_safety_expected.txt")}
+                        result restart_failed; exit 13
+                    fi
                     if ! mark_applied; then result marker_failed; exit 12; fi
                     result disabled_restart_requested
                 else

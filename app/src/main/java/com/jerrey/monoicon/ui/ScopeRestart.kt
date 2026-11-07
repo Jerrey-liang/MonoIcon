@@ -7,6 +7,7 @@ import com.jerrey.monoicon.hook.HyperOs4IconRefresh
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.logging.logw
+import com.jerrey.monoicon.safety.LauncherSafety
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "MonoIcon.ScopeRestart"
@@ -28,23 +29,29 @@ fun restartScopedApps(context: Context, packages: List<String>): Boolean {
     if (scope.isEmpty()) return false
     if ("com.miui.home" in scope && !HyperOs4PalettePublisher.flushBeforeRestart(context)) return false
 
-    val killAll = scope.joinToString("; ") { "killall $it" }
-    val commands = listOf(
-        "su -c '$killAll'",
-        "su -c '$killAll'; $killAll",
-        killAll,
-    )
-    for (cmd in commands) {
+    val allowed = scope.filter { it in listOf("com.miui.home", "com.android.systemui") }
+    if (allowed.size != scope.size) return false
+    val prepare = if ("com.miui.home" in scope) {
+        LauncherSafety.expectedRestartScript(LauncherSafety.launcherUid(context) ?: return false)
+    } else "true"
+    val killAll = scope.joinToString("\n") {
+        if (it == "com.miui.home") "killall $it || { [ -z \"${'$'}expected\" ] || rm -f \"${'$'}expected\"; exit 1; }"
+        else "killall $it || exit 1"
+    }
+    val script = "$prepare\n[ ${'$'}? -eq 0 ] || exit 1\n$killAll"
+    for (cmd in listOf(arrayOf("su", "-M", "-c", script), arrayOf("su", "-c", script))) {
         try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            val finished = process.waitFor(10, TimeUnit.SECONDS)
-            if (finished && process.exitValue() == 0) {
-                logi(TAG, "restarted ${scope.joinToString()} via: ${cmd.take(40)}…")
+            val process = ProcessBuilder(*cmd).redirectOutput(java.io.File("/dev/null"))
+                .redirectError(java.io.File("/dev/null")).start()
+            val success = try { process.waitFor(10, TimeUnit.SECONDS) && process.exitValue() == 0 }
+                finally { if (process.isAlive) process.destroyForcibly() }
+            if (success) {
+                logi(TAG, "restarted ${scope.joinToString()}")
                 bringLauncherBack(context, scope)
                 return true
             }
         } catch (t: Throwable) {
-            loge(TAG, "restart attempt failed: ${cmd.take(40)}…", t)
+            loge(TAG, "restart attempt failed", t)
         }
     }
     logw(TAG, "killall unavailable for ${scope.joinToString()}")

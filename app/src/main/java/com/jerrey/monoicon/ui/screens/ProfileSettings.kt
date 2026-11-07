@@ -57,6 +57,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 internal fun ProfileSettings(isActive: Boolean = true) {
     val context = LocalContext.current.applicationContext
     val strings = LocalStrings.current
+    val chinese = strings.languageSystem == "跟随系统"
     val scope = rememberCoroutineScope()
     var profiles by remember { mutableStateOf<List<CompatibilityProfile>>(emptyList()) }
     var selected by remember { mutableStateOf<String?>(null) }
@@ -68,6 +69,8 @@ internal fun ProfileSettings(isActive: Boolean = true) {
     // Keep the pending document across recreation while Android's picker is open.
     var exportProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmProfileDigest by rememberSaveable { mutableStateOf<String?>(null) }
     val publishStatus by HyperOs4PalettePublisher.status.collectAsState()
 
     suspend fun refresh() {
@@ -91,8 +94,11 @@ internal fun ProfileSettings(isActive: Boolean = true) {
                     action()
                     HyperOs4PalettePublisher.profileChanged(context)
                 }
-                message = strings.profileRestart
                 refresh()
+                message = if (resolution?.profile == null && resolution?.manualApprovalRequired?.isNotEmpty() == true) {
+                    if (chinese) "Profile 已载入。未声明适配系统的配置需要手动启用。"
+                    else "Profile loaded. Profiles without a verified system version require manual activation."
+                } else strings.profileRestart
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -100,6 +106,16 @@ internal fun ProfileSettings(isActive: Boolean = true) {
             } finally {
                 working = false
             }
+        }
+    }
+
+    fun requestSelection(id: String?) {
+        val profile = profiles.find { it.id == id }
+        if (profile != null && profile.id in resolution?.manualApprovalRequired.orEmpty()) {
+            confirmProfileId = profile.id
+            confirmProfileDigest = profile.digest
+        } else {
+            change { ProfileRepository.select(context, id) }
         }
     }
 
@@ -159,7 +175,7 @@ internal fun ProfileSettings(isActive: Boolean = true) {
             enabled = !busy,
             onSelectedIndexChange = { index ->
                 val id = if (index == 0) null else profiles.getOrNull(index - 1)?.id
-                change { ProfileRepository.select(context, id) }
+                requestSelection(id)
             },
         )
         ArrowPreference(
@@ -178,10 +194,24 @@ internal fun ProfileSettings(isActive: Boolean = true) {
                 summary = buildString {
                     append("${profile.id} · r${profile.revision} · ")
                     append(if (profile.official) strings.profileOfficial else strings.profileCustom)
+                    append(if (chinese) "\n适配系统：" else "\nVerified system versions: ")
+                    append(profile.match.systemVersions?.joinToString() ?: if (chinese) "未声明，需手动启用" else "Not declared; manual activation required")
                     resolution?.candidates?.get(profile.id)?.takeIf(String::isNotBlank)?.let { append("\n$it") }
                 },
                 startAction = { ProfilePreferenceIcon(Icons.Rounded.Description, profile.name) },
             )
+            // Also expose an action for a previously selected Profile whose approval
+            // expired after a system update; reselecting the same dropdown item may
+            // not emit a selection event.
+            if (profile.id in resolution?.manualApprovalRequired.orEmpty()) {
+                ArrowPreference(
+                    title = if (chinese) "手动启用此 Profile" else "Activate this Profile manually",
+                    summary = if (chinese) "未声明适配系统，请确认后启用" else "No verified system version was declared; confirmation is required",
+                    startAction = { ProfilePreferenceIcon(Icons.Rounded.Info, profile.name) },
+                    enabled = !busy,
+                    onClick = { requestSelection(profile.id) },
+                )
+            }
             ArrowPreference(
                 title = strings.profileExport,
                 startAction = { ProfilePreferenceIcon(Icons.Rounded.Save, strings.profileExport) },
@@ -239,6 +269,50 @@ internal fun ProfileSettings(isActive: Boolean = true) {
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
+    }
+
+    val confirming = profiles.find { it.id == confirmProfileId && it.digest == confirmProfileDigest }
+        ?.takeIf { it.id in resolution?.manualApprovalRequired.orEmpty() }
+    WindowDialog(
+        show = confirming != null,
+        title = if (chinese) "手动启用 Profile" else "Activate Profile manually",
+        onDismissRequest = { confirmProfileId = null; confirmProfileDigest = null },
+    ) {
+        Column {
+            Text(text = if (chinese) {
+                "“${confirming?.name.orEmpty()}”没有声明适配的系统版本。即使桌面版本相同，不同系统也可能导致桌面反复崩溃。\n\n" +
+                    "确认后仅在当前系统上启用此配置；系统或配置变化后需重新确认。"
+            } else {
+                "“${confirming?.name.orEmpty()}” does not declare a verified system version. The same launcher version can still repeatedly crash on a different system build.\n\n" +
+                    "Confirmation activates this Profile for the current system only. A changed system or Profile requires confirmation again."
+            })
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.padding(top = 12.dp),
+            ) {
+                TextButton(
+                    text = settingsText("cancel"),
+                    onClick = { confirmProfileId = null; confirmProfileDigest = null },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(20.dp))
+                TextButton(
+                    text = if (chinese) "确认启用" else "Confirm activation",
+                    onClick = {
+                        val approved = confirming
+                        confirmProfileId = null
+                        confirmProfileDigest = null
+                        if (approved != null) change {
+                            ProfileRepository.select(context, approved.id,
+                                acknowledgeUnverifiedSystem = true, expectedDigest = approved.digest)
+                        }
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                )
+            }
+        }
     }
 
     val deleting = profiles.find { it.id == deleteProfileId && !it.official }

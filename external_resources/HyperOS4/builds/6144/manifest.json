@@ -889,65 +889,54 @@
     "environment.device": {
       "status": "verified_in_repository",
       "sources": [
-        "README.md: Compatibility / current test environment",
-        "docs/hyperos4.md: opening baseline statement"
+        "docs/HyperOS4 profile编写指南.md#baseline"
       ],
       "method": "Recorded test environment; not inferred from ELF notes."
     },
     "environment.os": {
       "status": "verified_in_repository",
       "sources": [
-        "README.md: Compatibility / current test environment",
-        "docs/hyperos4.md: opening baseline statement"
+        "docs/HyperOS4 profile编写指南.md#baseline"
       ],
       "method": "Recorded test environment; not inferred from ELF notes."
     },
     "environment.android": {
       "status": "verified_in_repository",
       "sources": [
-        "README.md: Compatibility / current test environment",
-        "docs/hyperos4.md: opening baseline statement"
+        "docs/HyperOS4 profile编写指南.md#baseline"
       ],
       "method": "Recorded test environment; not inferred from ELF notes."
     },
     "launcher.package_name": {
       "status": "verified_in_repository",
       "sources": [
-        "docs/hyperos4.md",
-        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md"
+        "docs/HyperOS4 profile编写指南.md#baseline"
       ],
       "method": "Recorded launcher package/version identity."
     },
     "launcher.version_name": {
       "status": "verified_in_repository",
       "sources": [
-        "docs/hyperos4.md",
-        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md"
+        "docs/HyperOS4 profile编写指南.md#baseline"
       ],
       "method": "Recorded launcher package/version identity."
     },
     "launcher.version_code": {
       "status": "verified_in_repository",
       "sources": [
-        "docs/hyperos4.md",
-        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md"
+        "docs/HyperOS4 profile编写指南.md#baseline"
       ],
       "method": "Recorded launcher package/version identity."
     },
     "apk.sha256": {
       "status": "verified_from_local_apk",
       "source": "external_resources/HyperOS4/MiuiHome_6144.apk",
-      "method": "SHA256 over all APK bytes",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json"
-      ]
+      "method": "SHA256 over all APK bytes"
     },
     "apk.size": {
       "status": "verified_from_local_apk",
       "source": "external_resources/HyperOS4/MiuiHome_6144.apk",
-      "method": "Filesystem byte length",
-      "corroborating_sources": []
+      "method": "Filesystem byte length"
     },
     "libraries.libapp.so.sha256": {
       "status": "verified_from_local_apk",
@@ -955,11 +944,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp.so.size": {
       "status": "verified_from_local_apk",
@@ -967,11 +952,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp.so.elf": {
       "status": "verified_from_local_apk",
@@ -979,11 +960,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp.so.program_headers": {
       "status": "verified_from_local_apk",
@@ -999,11 +976,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp.so.section_headers": {
       "status": "verified_from_local_apk",
@@ -1027,12 +1000,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp.so"
       },
-      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
-        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
-      ]
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes."
     },
     "libraries.libapp.so.android_note": {
       "status": "not_observed_in_notes",
@@ -1040,12 +1008,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp.so"
       },
-      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
-        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
-      ]
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes."
     },
     "libraries.libapp.so.path": {
       "status": "verified_from_local_apk",
@@ -1061,11 +1024,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp_launcher.so.size": {
       "status": "verified_from_local_apk",
@@ -1073,11 +1032,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp_launcher.so.elf": {
       "status": "verified_from_local_apk",
@@ -1085,11 +1040,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp_launcher.so.program_headers": {
       "status": "verified_from_local_apk",
@@ -1105,11 +1056,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
       },
-      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json"
-      ]
+      "method": "tools/launcher_inspector.py: parse_elf; hashes cover exact file bytes, executable hashes cover PT_LOAD p_filesz bytes only."
     },
     "libraries.libapp_launcher.so.section_headers": {
       "status": "verified_from_local_apk",
@@ -1133,12 +1080,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
       },
-      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
-        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
-      ]
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes."
     },
     "libraries.libapp_launcher.so.android_note": {
       "status": "verified_from_local_apk",
@@ -1146,12 +1088,7 @@
         "path": "external_resources/HyperOS4/MiuiHome_6144.apk",
         "apk_entry": "lib/arm64-v8a/libapp_launcher.so"
       },
-      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes.",
-      "corroborating_sources": [
-        "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-        "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
-        "app/src/main/cpp/hyperos4_functions_6144_inc.h"
-      ]
+      "method": "Parse PT_NOTE and SHT_NOTE; retain original name, type and descriptor bytes."
     },
     "libraries.libapp_launcher.so.path": {
       "status": "verified_from_local_apk",
@@ -1162,120 +1099,43 @@
       "method": "Exact ZIP entry name."
     }
   },
-  "recorded_validation": {
-    "status": "verified_baseline_recorded_in_repository",
-    "sources": [
-      "README.md",
-      "docs/hyperos4.md"
-    ],
-    "date": "2026-10-16",
-    "scope": "Only the recorded 22041211AC / OS4.0.0.3.XAACNXM / Android 17 / 6144 environment. No new device test or Hook ABI assessment is performed by intake."
-  },
   "identity_limits": [
-    "This manifest is an offline evidence archive, not runtime configuration; existing validation and callback order are unchanged.",
+    "This manifest describes binary identity. It is not a runtime Profile or an assessment of compatibility.",
     "Matching GNU Build ID, Android Note or executable-segment SHA256 alone cannot prove Hook ABI compatibility.",
     "Android Note abi_api=35 and r27d/13750724 describe native build metadata; they do not identify the running Android OS version.",
-    "A null GNU Build ID means none was observed in this input PT_NOTE/SHT_NOTE data; it is not an invented identifier.",
-    "Sources under external_resources/HyperOS4 other than this manifest and BUILD_INTAKE.md are local ignored evidence and may be absent from a fresh checkout."
+    "A null GNU Build ID means none was observed in this input PT_NOTE/SHT_NOTE data.",
+    "Raw APK/ELF inputs are not distributed with this manifest. Collection instructions and the supported environment are documented in docs/HyperOS4 profile编写指南.md."
   ],
   "artifacts": [
     {
-      "path": "app/src/main/cpp/hyperos4_functions_6144_inc.h",
-      "kind": "function_snapshots",
-      "description": "6144 function byte snapshots used by palette validation.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
+      "path": "app/src/main/assets/hyperos4/profiles/hyperos4-6144.json",
+      "kind": "runtime_profile",
+      "description": "Official Profile containing binary identities, complete function snapshots and patch definitions."
     },
     {
-      "path": "app/src/main/cpp/hyperos4_dynamic_icons_6144.h",
-      "kind": "function_snapshots_and_patch_constants",
-      "description": "6144 async icon-source snapshots and branch constants.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
+      "path": "app/src/main/cpp/hyperos4_profile.cpp",
+      "kind": "profile_parser",
+      "description": "Runtime Profile format and validation rules."
     },
     {
-      "path": "app/src/main/cpp/hyperos4_observer_original.inc",
-      "kind": "function_snapshot",
-      "description": "Original launcher observer function bytes.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
-    },
-    {
-      "path": "app/src/main/cpp/hyperos4_observer_code.h",
-      "kind": "observer_patch_constants_and_emitter",
-      "description": "Pinned observer location, continuation and veneer emitter; includes original snapshot.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
+      "path": "app/src/main/cpp/hyperos4_profile_runtime.cpp",
+      "kind": "runtime_identity_validation",
+      "description": "Image discovery, identity checks and instruction access."
     },
     {
       "path": "app/src/main/cpp/hyperos4_palette_install.cpp",
-      "kind": "patch_table_and_validation",
-      "description": "kInstructionPatches, Matches and ValidateImages; transaction and rollback remain unchanged.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
+      "kind": "palette_transaction",
+      "description": "Profile application, rollback and configuration acknowledgement."
     },
     {
-      "path": "app/src/main/cpp/hyperos4_hook_backend.cpp",
-      "kind": "canary_identity_and_abi_evidence",
-      "description": "Pinned RVA, 32-byte anchor signature, first-word check and existing register/ABI evidence.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
+      "path": "tools/launcher_inspector.py",
+      "kind": "identity_collector",
+      "description": "Offline collection and comparison of APK and ELF identities."
     },
     {
-      "path": "app/src/main/cpp/hyperos4_native_init.cpp",
-      "kind": "native_entry_and_callback_sequence",
-      "description": "Existing process-family checks, native_init, loaded-library callbacks and RTLD_NOLOAD replay.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
-    },
-    {
-      "path": "tools/generate_hyperos4_dynamic_icons.py",
-      "kind": "snapshot_generator",
-      "description": "Generator pins the full libapp.so SHA256 before producing existing 6144 snapshots.",
-      "status": "present_in_workspace",
-      "availability": "tracked"
-    },
-    {
-      "path": "external_resources/HyperOS4/analysis/port6144/generate_6144_tables.py",
-      "kind": "historical_snapshot_generator",
-      "description": "Existing generator referenced by the tracked 6144 headers; not rerun during intake.",
-      "status": "present_in_workspace",
-      "availability": "local_ignored"
-    },
-    {
-      "path": "external_resources/HyperOS4/analysis/port6144/verify_6144_patches.py",
-      "kind": "historical_patch_verifier",
-      "description": "Existing verification of 6144 identities and patch evidence.",
-      "status": "present_in_workspace",
-      "availability": "local_ignored"
-    },
-    {
-      "path": "external_resources/HyperOS4/analysis/port6144/verify_6144_evidence.json",
-      "kind": "historical_verification_result",
-      "description": "Recorded APK/ELF hashes and instruction verification results.",
-      "status": "present_in_workspace",
-      "availability": "local_ignored"
-    },
-    {
-      "path": "external_resources/HyperOS4/analysis/port6144/elf_facts_6144.json",
-      "kind": "historical_elf_facts",
-      "description": "Recorded segment mappings, sizes and note offsets.",
-      "status": "present_in_workspace",
-      "availability": "local_ignored"
-    },
-    {
-      "path": "external_resources/HyperOS4/report/HOOK_POINTS_6144.md",
-      "kind": "historical_analysis_report",
-      "description": "Recorded identity and existing hook-point analysis.",
-      "status": "present_in_workspace",
-      "availability": "local_ignored"
-    },
-    {
-      "path": "external_resources/HyperOS4/report/NATIVE_LAUNCHER_INJECTION_6144.md",
-      "kind": "historical_analysis_report",
-      "description": "Section 4 records the 6144 ELF baseline and addressing evidence.",
-      "status": "present_in_workspace",
-      "availability": "local_ignored"
+      "path": "tools/verify_hyperos4_profile.py",
+      "kind": "profile_verifier",
+      "description": "Verification of Profile evidence against supplied binary inputs."
     }
   ]
 }

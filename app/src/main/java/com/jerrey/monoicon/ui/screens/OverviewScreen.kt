@@ -29,11 +29,13 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,6 +93,12 @@ fun OverviewScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var status by remember { mutableStateOf(XposedState.UNAVAILABLE) }
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
+    val scope = rememberCoroutineScope()
+    DisposableEffect(Unit) {
+        val listener: (String?) -> Unit = { scope.launch { enabled = ConfigManager.isEnabledFromUi() } }
+        ConfigManager.addOnConfigChangedListener(listener)
+        onDispose { ConfigManager.removeOnConfigChangedListener(listener) }
+    }
     var systemInfo by remember { mutableStateOf(HomeSystemInfo()) }
     var scopeApps by remember { mutableStateOf<List<ScopeApp>>(emptyList()) }
     var showScope by remember { mutableStateOf(false) }

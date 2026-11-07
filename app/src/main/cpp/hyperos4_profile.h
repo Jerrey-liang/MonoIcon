@@ -34,6 +34,8 @@ struct Property { std::string name; std::vector<std::string> prefixes; };
 struct Match {
     std::string package;
     std::vector<std::string> versionCodes, versionNames;
+    // Empty means legacy metadata: app and native loader require explicit approval.
+    std::vector<std::string> systemVersions;
     uint32_t sdkMin{}, sdkMax{};
     std::vector<Property> properties;
 };

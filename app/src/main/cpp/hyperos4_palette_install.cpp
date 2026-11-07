@@ -27,6 +27,7 @@
 #include "hyperos4_icon_files.h"
 #include "hyperos4_paths.h"
 #include "hyperos4_geometry_bridge.h"
+#include "launcher_safety.h"
 
 namespace monoicon::hyos {
 
@@ -59,6 +60,7 @@ enum PaletteResult : uint32_t {
     kResultDisabled = 12,
     kResultProfileInvalid = 13,
     kResultRestartRequired = 14,
+    kResultSafetyBlocked = 15,
 };
 
 struct PaletteStatus {
@@ -613,6 +615,15 @@ bool PaletteStep(PaletteWorkerState& state) {
     do {
         PaletteConfig next;
         uint32_t result = ReadPalette(next);
+        // This runs before profile loading, native icon hooks or code writes.
+        // A native abort cannot run cleanup, so the next process detects the
+        // pending checkpoint and permanently stops here until explicit retry.
+        if (result == kResultNone && next.enabled && !safety::Begin()) {
+            gIconsEnabled.store(false, std::memory_order_release);
+            gProfileError = "launcher safety mode: short-lived restart or protection unavailable";
+            Fail(kResultSafetyBlocked, "safety-blocked");
+            return false;
+        }
         if (result == kResultNone && !profileReady) {
             if (!profile::LoadProfile(next.profileDigest, gProfile, gProfileError)) result = kResultProfileInvalid;
             else if (failedImageDigest == next.profileDigest) {
@@ -690,8 +701,7 @@ bool PaletteStep(PaletteWorkerState& state) {
         }
         if (haveApplied && std::strcmp(applied.payload, next.payload) == 0) {
             if (!state.startup && next.enabled && next.version >= 2 && gProfile.icons.geometryBridge < gProfile.functions.size()) {
-                const auto& bridge = gProfile.functions[gProfile.icons.geometryBridge];
-                monoicon_hyos_start_geometry_bridge(gRuntime.images[bridge.image].bias + bridge.address, gProfileDigest.c_str());
+                monoicon_hyos_start_geometry_bridge(&gRuntime, &gProfile, gProfileDigest.c_str());
             }
             if (!acknowledged) acknowledged = AcknowledgePalette(applied);
             continue;
@@ -740,8 +750,7 @@ bool PaletteStep(PaletteWorkerState& state) {
             monoicon_hyos_select_icon_generation(next.enabled && exportedIcons ? next.generation : nullptr);
             gIconsEnabled.store(next.enabled != 0 && exportedIcons, std::memory_order_release);
             if (!state.startup && next.enabled && exportedIcons && gProfile.icons.geometryBridge < gProfile.functions.size()) {
-                const auto& bridge = gProfile.functions[gProfile.icons.geometryBridge];
-                monoicon_hyos_start_geometry_bridge(gRuntime.images[bridge.image].bias + bridge.address, gProfileDigest.c_str());
+                monoicon_hyos_start_geometry_bridge(&gRuntime, &gProfile, gProfileDigest.c_str());
             }
             applied = next;
             haveApplied = true;

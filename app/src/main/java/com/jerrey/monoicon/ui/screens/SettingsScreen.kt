@@ -1,5 +1,5 @@
 // Navigation adapted from KernelSU, GPL-3.0-or-later.
-// Source revision: 2fe188310309bd7a7c9b5a80beed6f14469c6cd2. See THIRD_PARTY_NOTICES.md.
+// Source revision: 2fe188310309bd7a7c9b5a80beed6f14469c6cd2. See docs/THIRD_PARTY_NOTICES.md.
 package com.jerrey.monoicon.ui.screens
 
 import androidx.activity.compose.BackHandler

@@ -1,5 +1,7 @@
 package com.jerrey.monoicon
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
@@ -43,23 +45,54 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.AppStrings
 import com.jerrey.monoicon.ui.MonoIconApp
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
 import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
+import com.jerrey.monoicon.ui.settings.UiPreferences
+import com.jerrey.monoicon.ui.settings.UiSettings
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExternalResource
 import org.junit.runner.RunWith
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 /** Navigation regression coverage for KernelSU's four-page Miuix pager. */
 @RunWith(AndroidJUnit4::class)
 class SettingsScreenComposeTest {
-    @get:Rule
+    @get:Rule(order = 0)
+    val isolatedManagerSettings = object : ExternalResource() {
+        private var savedPreferences: SharedPreferences? = null
+        private lateinit var savedSettings: UiSettings
+
+        override fun before() {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            UiPreferences.init(context)
+            savedPreferences = uiField("preferences").get(null) as SharedPreferences?
+            savedSettings = uiState().value
+            val isolated = context.getSharedPreferences("settings_screen_test", Context.MODE_PRIVATE)
+            isolated.edit().clear().commit()
+            uiField("preferences").set(null, isolated)
+            // Exercise the requested default glass/pager behavior, regardless of
+            // user customization. Navigation tests need no network/update feed.
+            uiState().value = UiSettings(checkUpdate = false)
+        }
+
+        override fun after() {
+            // This outer rule restores preferences only after Compose disposed
+            // every screen, so restoration cannot start an update/background job.
+            uiField("preferences").set(null, savedPreferences)
+            uiState().value = savedSettings
+        }
+    }
+
+    @get:Rule(order = 1)
     val composeRule = createComposeRule()
 
     @Test
@@ -147,18 +180,24 @@ class SettingsScreenComposeTest {
         val strings = currentStrings()
         composeRule.setContent { MonoIconApp() }
         tab(strings.iconStyle).performClick()
-        composeRule.onNodeWithText(strings.restart).performScrollTo().assertIsDisplayed()
-        val originalY = composeRule.onNodeWithText(strings.restart).fetchSemanticsNode().positionInRoot.y
+        assertNavigation(strings, selectedIndex = 1)
+        // Restart is now a top-bar action. The final colour option belongs to
+        // the scrolling page and provides an anchor without changing settings.
+        val anchor = composeRule.onNodeWithText(Material2025ColorEngine.VariantId.entries.last().label)
+        val unscrolledY = anchor.fetchSemanticsNode().positionInRoot.y
+        anchor.performScrollTo().assertIsDisplayed()
+        val originalY = anchor.fetchSemanticsNode().positionInRoot.y
+        assertTrue("The style page must actually scroll before checking restoration", originalY < unscrolledY - 1f)
 
         tab(strings.configurationManagement).performClick()
         assertNavigation(strings, selectedIndex = 2)
         tab(strings.iconStyle).performClick()
         assertNavigation(strings, selectedIndex = 1)
-        composeRule.onNodeWithText(strings.restart).assertIsDisplayed()
+        anchor.assertIsDisplayed()
         assertEquals(
             "Returning to icon style must preserve its independent scroll position",
             originalY,
-            composeRule.onNodeWithText(strings.restart).fetchSemanticsNode().positionInRoot.y,
+            anchor.fetchSemanticsNode().positionInRoot.y,
             1f,
         )
     }
@@ -170,18 +209,24 @@ class SettingsScreenComposeTest {
         tab(strings.moduleSettings).performClick()
         assertNavigation(strings, selectedIndex = 3)
 
+        // About's shader is intentionally continuous. Waiting for all animation
+        // frames to finish would never become idle; advance only navigation time.
+        composeRule.mainClock.autoAdvance = false
         listOf(true, false).forEach { about ->
             openSecondary(strings, about)
             assertSecondary(strings, about)
             composeRule.onAllNodes(isTab).assertCountEquals(0)
             composeRule.onNodeWithContentDescription(strings.back).performClick()
+            composeRule.mainClock.advanceTimeBy(2_000)
             assertNavigation(strings, selectedIndex = 3)
 
             openSecondary(strings, about)
             assertSecondary(strings, about)
             pressBack()
+            composeRule.mainClock.advanceTimeBy(2_000)
             assertNavigation(strings, selectedIndex = 3)
         }
+        composeRule.mainClock.autoAdvance = true
     }
 
     @Test
@@ -191,6 +236,8 @@ class SettingsScreenComposeTest {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) { MonoIconApp() }
         }
         tab(strings.moduleSettings).performClick()
+        assertNavigation(strings, selectedIndex = 3)
+        composeRule.mainClock.autoAdvance = false
         openSecondary(strings, about = true)
         assertSecondary(strings, about = true)
 
@@ -201,25 +248,23 @@ class SettingsScreenComposeTest {
             backDispatcher = activity.onBackPressedDispatcher
         }
         fun event(progress: Float) = BackEventCompat(0f, 0f, progress, BackEventCompat.EDGE_LEFT)
-        composeRule.mainClock.autoAdvance = false
-        try {
-            composeRule.runOnUiThread { backDispatcher.dispatchOnBackStarted(event(0f)) }
-            composeRule.runOnUiThread { backDispatcher.dispatchOnBackProgressed(event(0.45f)) }
-            composeRule.mainClock.advanceTimeBy(64)
-            composeRule.runOnUiThread { backDispatcher.dispatchOnBackCancelled() }
-            composeRule.mainClock.advanceTimeBy(2_000)
-            assertSecondary(strings, about = true)
-            composeRule.onAllNodes(isTab).assertCountEquals(0)
+        composeRule.runOnUiThread { backDispatcher.dispatchOnBackStarted(event(0f)) }
+        composeRule.runOnUiThread { backDispatcher.dispatchOnBackProgressed(event(0.45f)) }
+        composeRule.mainClock.advanceTimeBy(64)
+        composeRule.runOnUiThread { backDispatcher.dispatchOnBackCancelled() }
+        composeRule.mainClock.advanceTimeBy(2_000)
+        assertSecondary(strings, about = true)
+        composeRule.onAllNodes(isTab).assertCountEquals(0)
 
-            composeRule.runOnUiThread { backDispatcher.dispatchOnBackStarted(event(0f)) }
-            composeRule.runOnUiThread { backDispatcher.dispatchOnBackProgressed(event(0.45f)) }
-            composeRule.mainClock.advanceTimeBy(64)
-            composeRule.runOnUiThread { backDispatcher.onBackPressed() }
-            composeRule.mainClock.advanceTimeBy(2_000)
-        } finally {
-            composeRule.mainClock.autoAdvance = true
-        }
+        composeRule.runOnUiThread { backDispatcher.dispatchOnBackStarted(event(0f)) }
+        composeRule.runOnUiThread { backDispatcher.dispatchOnBackProgressed(event(0.45f)) }
+        composeRule.mainClock.advanceTimeBy(64)
+        composeRule.runOnUiThread { backDispatcher.onBackPressed() }
+        composeRule.mainClock.advanceTimeBy(2_000)
         assertNavigation(strings, selectedIndex = 3)
+        // On a failed assertion keep the clock paused until the rule disposes
+        // About; reenabling it in finally would revive the endless frame waiter.
+        composeRule.mainClock.autoAdvance = true
     }
 
     private fun openSecondary(strings: AppStrings, about: Boolean) {
@@ -228,8 +273,12 @@ class SettingsScreenComposeTest {
         } else {
             val sendLog = if (strings == stringsFor(AppLanguage.CHINESE, true)) "发送日志" else "Send logs"
             composeRule.onNodeWithText(sendLog).performScrollTo().performClick()
-            composeRule.onNodeWithText(strings.logsTitle).performClick()
+            // With About's infinite shader animation keeping the clock paused,
+            // the overlay needs explicit frames before its log entry exists.
+            if (!composeRule.mainClock.autoAdvance) composeRule.mainClock.advanceTimeBy(2_000)
+            composeRule.onNodeWithText(strings.logsTitle).assertIsDisplayed().performClick()
         }
+        if (!composeRule.mainClock.autoAdvance) composeRule.mainClock.advanceTimeBy(2_000)
     }
 
     private fun assertSecondary(strings: AppStrings, about: Boolean) {
@@ -374,6 +423,11 @@ class SettingsScreenComposeTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         return stringsFor(AppLanguage.fromId(ConfigManager.getLanguageFromUi()), systemPrefersChinese(context))
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun uiState() = uiField("mutableState").get(null) as MutableStateFlow<UiSettings>
+
+    private fun uiField(name: String) = UiPreferences::class.java.getDeclaredField(name).apply { isAccessible = true }
 
     @Test
     fun variantIdsMapToPaletteStyles() {

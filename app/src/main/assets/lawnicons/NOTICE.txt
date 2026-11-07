@@ -1,0 +1,14 @@
+# Lawnicons masks
+
+The 77 PNG masks in this directory are rasterizations of the original SVG artwork
+from LawnchairLauncher/lawnicons v2.18.0, commit
+`74b428b747004046686cbe5e24218e958afe2eb9`:
+https://github.com/LawnchairLauncher/lawnicons/tree/74b428b747004046686cbe5e24218e958afe2eb9/svgs
+
+Copyright remains with the Lawnicons contributors. The upstream Apache-2.0
+license is included as `LICENSE.txt`.
+
+MonoIcon renders the vectors at 768×768. Asset names, component aliases, artwork
+and the proportional layout are retained. This notice accompanies the artwork
+in the APK; project documentation and full attribution are in
+`docs/THIRD_PARTY_NOTICES.md` in the source distribution.

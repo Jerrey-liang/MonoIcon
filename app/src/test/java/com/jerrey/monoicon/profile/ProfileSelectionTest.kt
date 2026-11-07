@@ -13,7 +13,7 @@ class ProfileSelectionTest {
         source = byteArrayOf(),
         digest = "0".repeat(64),
         match = ProfileMatch(setOf(801026144L), setOf("test-build"), 37, 37,
-            mapOf("ro.build.version.incremental" to listOf("OS4."))),
+            mapOf("ro.build.version.incremental" to listOf("OS4.")), setOf("OS4.0.0.3.XAACNXM")),
         images = listOf(ProfileImage("libapp.so", 1234L, "1".repeat(64))),
         icons = ProfileIconRules(listOf("qualified", "class", "package"), emptyMap()),
         settingsKey = "key_monochrome_color",
@@ -45,5 +45,23 @@ class ProfileSelectionTest {
         val custom = profile("same")
         assertNull(ProfileSelection.choose(listOf(official, custom), "same"))
         assertNull(ProfileSelection.choose(listOf(official, custom), null))
+    }
+
+    @Test fun legacyProfileRequiresBothExplicitSelectionAndApproval() {
+        val original = profile("legacy")
+        val legacy = original.copy(match = original.match.copy(systemVersions = null))
+        assertNull(ProfileSelection.choose(listOf(legacy), null))
+        assertNull(ProfileSelection.choose(listOf(legacy), legacy.id))
+        assertNull(ProfileSelection.choose(listOf(legacy), null, setOf(legacy.digest)))
+        assertSame(legacy, ProfileSelection.choose(listOf(legacy), legacy.id, setOf(legacy.digest)))
+        assertNull(ProfileSelection.choose(listOf(legacy.copy(digest = "f".repeat(64))), legacy.id, setOf(legacy.digest)))
+    }
+
+    @Test fun legacyImportCannotMakeADeclaredAutomaticProfileAmbiguous() {
+        val declared = profile("declared")
+        val legacy = profile("legacy").let { it.copy(match = it.match.copy(systemVersions = null)) }
+        assertSame(declared, ProfileSelection.choose(listOf(declared, legacy), null))
+        // An unavailable explicit choice cannot silently select the declared profile.
+        assertNull(ProfileSelection.choose(listOf(declared, legacy), legacy.id))
     }
 }

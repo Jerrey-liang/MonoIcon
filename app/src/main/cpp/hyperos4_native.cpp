@@ -25,8 +25,14 @@ Java_com_jerrey_monoicon_profile_ProfileNative_systemProperty(JNIEnv* env, jobje
     if (!name || env->GetStringUTFLength(name) > 92) return env->NewStringUTF("");
     const char* key = env->GetStringUTFChars(name, nullptr);
     if (!key) return nullptr;
-    char value[PROP_VALUE_MAX]{};
-    if (key[0] == 'r' && key[1] == 'o' && key[2] == '.') __system_property_get(key, value);
+    std::string value;
+    if (std::string(key).rfind("ro.", 0) == 0) {
+        if (const auto* property = __system_property_find(key)) {
+            __system_property_read_callback(property, [](void* cookie, const char*, const char* text, uint32_t) {
+                *static_cast<std::string*>(cookie) = text;
+            }, &value);
+        }
+    }
     env->ReleaseStringUTFChars(name, key);
-    return env->NewStringUTF(value);
+    return env->NewStringUTF(value.c_str());
 }

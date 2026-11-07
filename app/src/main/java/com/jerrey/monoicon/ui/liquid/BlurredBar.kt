@@ -1,4 +1,4 @@
-// Adapted from KernelSU BlurExt.kt, GPL-3.0-or-later. See THIRD_PARTY_NOTICES.md.
+// Adapted from KernelSU BlurExt.kt, GPL-3.0-or-later. See docs/THIRD_PARTY_NOTICES.md.
 package com.jerrey.monoicon.ui.liquid
 
 import androidx.compose.foundation.layout.Box

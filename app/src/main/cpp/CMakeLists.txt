@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22.1)
 project(monoicon_hyperos4 LANGUAGES CXX)
 
 # One parser for JNI validation and the native_init compatibility engine.
-add_library(monoicon_hyperos4 SHARED hyperos4_native.cpp hyperos4_profile.cpp)
+add_library(monoicon_hyperos4 SHARED hyperos4_native.cpp hyperos4_profile.cpp launcher_safety.cpp launcher_safety_jni.cpp)
 target_compile_features(monoicon_hyperos4 PRIVATE cxx_std_17)
 target_compile_options(monoicon_hyperos4 PRIVATE -Wall -Wextra -fvisibility=hidden)
 target_link_options(monoicon_hyperos4 PRIVATE "-Wl,-z,now")
@@ -17,6 +17,7 @@ if("${ANDROID_ABI}" STREQUAL "arm64-v8a")
         hyperos4_geometry_bridge.cpp
         hyperos4_profile.cpp
         hyperos4_profile_runtime.cpp
+        launcher_safety.cpp
     )
 
     target_compile_features(monoicon_hyperos4_native_init PRIVATE cxx_std_17)

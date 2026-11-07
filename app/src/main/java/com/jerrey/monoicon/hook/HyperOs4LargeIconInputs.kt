@@ -20,6 +20,7 @@ internal data class HyperOs4LargeIconInputs(
     companion object {
         val EMPTY = HyperOs4LargeIconInputs(null, emptyList())
         private const val MAX_CONFIG_BYTES = 512 * 1024
+        private val diagnostics = HyperOs4LargeIconDiagnostics()
 
         fun read(context: Context, profile: CompatibilityProfile?, launcherUid: Int): HyperOs4LargeIconInputs {
             val prefixes = profile?.icons?.largeIconPrefixes.orEmpty()
@@ -33,11 +34,11 @@ internal data class HyperOs4LargeIconInputs(
                 printf '['
                 for config in $globs; do
                     [ -f "${'$'}config" ] && [ ! -L "${'$'}config" ] || continue
-                    bytes=${'$'}(stat -c %s "${'$'}config") || continue
-                    case "${'$'}bytes" in ''|*[!0-9]*) continue ;; esac
-                    [ "${'$'}bytes" -gt 0 ] && [ "${'$'}bytes" -le 131072 ] || continue
+                    bytes=${'$'}(stat -c %s "${'$'}config") || exit 2
+                    case "${'$'}bytes" in ''|*[!0-9]*) exit 2 ;; esac
+                    [ "${'$'}bytes" -gt 0 ] && [ "${'$'}bytes" -le 131072 ] || exit 3
                     total=${'$'}((total + bytes))
-                    [ "${'$'}total" -le $MAX_CONFIG_BYTES ] && [ "${'$'}count" -lt 64 ] || break
+                    [ "${'$'}total" -le $MAX_CONFIG_BYTES ] && [ "${'$'}count" -lt 64 ] || exit 3
                     [ "${'$'}count" -eq 0 ] || printf ','
                     cat "${'$'}config" || exit 1
                     count=${'$'}((count + 1))
@@ -48,11 +49,20 @@ internal data class HyperOs4LargeIconInputs(
             return try {
                 process = ProcessBuilder("su", "-M", "-c", script).redirectOutput(output)
                     .redirectError(File("/dev/null")).start()
-                if (!process.waitFor(5, TimeUnit.SECONDS) || process.exitValue() != 0 ||
-                    output.length() > MAX_CONFIG_BYTES + 128) return EMPTY
-                HyperOs4LargeIconInputs(geometry, parse(output.readText(), prefixes))
-            } catch (_: Exception) {
-                EMPTY
+                if (!process.waitFor(5, TimeUnit.SECONDS)) return unavailable("config-read-timeout")
+                if (process.exitValue() != 0) return unavailable(
+                    if (process.exitValue() == 3) "config-read-limit" else "config-read-failed",
+                    "exit=${process.exitValue()}",
+                )
+                if (output.length() > MAX_CONFIG_BYTES + 128) return unavailable("config-output-limit")
+                val icons = parse(output.readText(), prefixes)
+                if (icons.isEmpty()) diagnostics.report("no-configured-icons", "user=${launcherUid / 100000}")
+                HyperOs4LargeIconInputs(geometry, icons)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                unavailable("config-read-interrupted")
+            } catch (failure: Exception) {
+                unavailable("config-read-or-parse-exception", failure.javaClass.simpleName)
             } finally {
                 if (process?.isAlive == true) process.destroyForcibly()
                 process?.inputStream?.close()
@@ -60,6 +70,11 @@ internal data class HyperOs4LargeIconInputs(
                 process?.outputStream?.close()
                 output.delete()
             }
+        }
+
+        private fun unavailable(reason: String, detail: String = ""): HyperOs4LargeIconInputs {
+            diagnostics.report(reason, detail)
+            return EMPTY
         }
 
         internal fun parse(text: String, prefixes: List<String>): List<Icon> {

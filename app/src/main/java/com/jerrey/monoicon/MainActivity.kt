@@ -6,7 +6,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.jerrey.monoicon.config.ConfigManager
-import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.ui.MonoIconApp
@@ -53,7 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        HyperOs4PalettePublisher.publish(applicationContext)
+        com.jerrey.monoicon.safety.LauncherSafety.refreshAndPublish(applicationContext)
     }
 
     override fun onDestroy() {
