@@ -72,7 +72,7 @@ HyperOS 4 配置可以声明 `match.systemVersions`，例如 `["OS4.0.0.3.XAACNX
 
 [配置编写指南](<docs/HyperOS4 profile编写指南.md>)包含配置使用、材料准备和编写步骤；[AI 任务模板](docs/Agent_example_prompt.md)可配合指南使用。
 
-MonoIcon 和所包含的第三方组件遵循各自的许可证，详见[许可证与第三方声明](docs/THIRD_PARTY_NOTICES.md)。
+MonoIcon 采用 **GNU GPL 第 3 版或任何后续版本（GPL-3.0-or-later）**，详见[项目许可声明](docs/LICENSE)和[许可证全文](LICENSE)。所包含的第三方代码与素材保留各自的许可证和署名，详见[许可证与第三方声明](docs/THIRD_PARTY_NOTICES.md)。
 
 ---
 
@@ -112,4 +112,6 @@ HyperOS 4 Profiles may declare exact system versions in `match.systemVersions`. 
 
 **Refresh runtime information** under **Configurations** requests reports from the actual Launcher and SystemUI processes. HyperOS 3 shows installation and first-hit status for individual Java hooks. HyperOS 4 also reports Native hooks and Profile patches, including library bases, target addresses, original values and replacements. Historical or unknown reports are clearly marked when no current process replies; old addresses are not current addresses. Restart the scopes after upgrading to receive the new point-by-point reports.
 
-See the [configuration guide](<docs/HyperOS4 profile编写指南.md>) and [AI task template](docs/Agent_example_prompt.md) for more help (Chinese), or [report an issue](https://github.com/Jerrey-liang/MonoIcon/issues). Licence terms and attribution are collected in [Third-party notices](docs/THIRD_PARTY_NOTICES.md).
+See the [configuration guide](<docs/HyperOS4 profile编写指南.md>) and [AI task template](docs/Agent_example_prompt.md) for more help (Chinese), or [report an issue](https://github.com/Jerrey-liang/MonoIcon/issues).
+
+MonoIcon is licensed under the **GNU General Public License, version 3 or (at your option) any later version (GPL-3.0-or-later)**; see the [project licence notice](docs/LICENSE) and [full licence text](LICENSE). Bundled third-party code and artwork retain their own licence terms and attributions, detailed in [Third-party notices](docs/THIRD_PARTY_NOTICES.md).

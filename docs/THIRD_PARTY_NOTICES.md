@@ -1,14 +1,14 @@
 # 许可证与第三方声明 / Licences and third-party notices
 
-本文件汇总 MonoIcon 的许可证、第三方来源及署名。项目原有独立代码的 Apache-2.0 许可证全文见 [LICENSE](LICENSE)。第三方代码与素材遵循各自的许可证；包含 GPL 授权界面代码的组合分发还须满足下述 GPL 条件。
+本文件汇总 MonoIcon 的许可证、第三方来源及署名。MonoIcon 采用 **GNU GPL 第 3 版或任何后续版本（GPL-3.0-or-later）**，许可声明见 [LICENSE](LICENSE)，完整条款见根目录的 [LICENSE](../LICENSE)。第三方代码与素材保留各自的许可证和署名；分发组合构建时须遵守 GPL-3.0-or-later，包括提供对应源代码。
 
-Original, independently authored MonoIcon code retains its Apache-2.0 terms; see the full [licence](LICENSE). Third-party components retain their own terms. A combined distribution containing the GPL interface adaptations must also satisfy the GPL requirements below.
+MonoIcon is licensed under the **GNU General Public License, version 3 or (at your option) any later version (GPL-3.0-or-later)**; see the [project licence notice](LICENSE) and the full [licence text](../LICENSE). Third-party components retain their own licence terms and attributions. Distributing a combined build requires complying with GPL-3.0-or-later, including providing the corresponding source.
 
 ## KernelSU interface adaptations
 
 The MonoIcon interface adapts source from [tiann/KernelSU](https://github.com/tiann/KernelSU/tree/2fe188310309bd7a7c9b5a80beed6f14469c6cd2), revision `2fe188310309bd7a7c9b5a80beed6f14469c6cd2`.
 
-KernelSU's README licenses its manager and other non-kernel code under **GPL-3.0-or-later**. The adapted navigation, home, settings, theme, About, background effects, dialogs and blur helpers retain that license. The full license is included in [licenses/KernelSU-GPL-3.0.txt](licenses/KernelSU-GPL-3.0.txt). Copyright remains with KernelSU and its contributors. These files have been modified for MonoIcon, its LSPosed status, compatibility profiles, release feed, logs and project links. Distributing a combined build containing these adaptations requires complying with GPL-3.0-or-later, including providing the corresponding source. Existing independently authored MonoIcon sources retain their original notices.
+KernelSU's README licenses its manager and other non-kernel code under **GPL-3.0-or-later**. The adapted navigation, home, settings, theme, About, background effects, dialogs and blur helpers retain that license. The full license is included in [licenses/KernelSU-GPL-3.0.txt](licenses/KernelSU-GPL-3.0.txt). Copyright remains with KernelSU and its contributors. These files have been modified for MonoIcon, its LSPosed status, compatibility profiles, release feed, logs and project links. Distributing a combined build containing these adaptations requires complying with GPL-3.0-or-later, including providing the corresponding source. Upstream copyright and licence notices are retained.
 
 KernelSU's `FloatingBottomBar.kt` explicitly identifies its compose-miuix-ui origin as Apache-2.0; that notice is retained in `LiquidGlassNavigationBar.kt`. Miuix libraries and Material icons retain their upstream Apache-2.0 terms.
 
@@ -40,8 +40,8 @@ The APK includes the upstream licence and attribution alongside the artwork. The
 
 ## Material Color Utilities
 
-The Material 2025 and Material Design 3 colour implementations derive from Google's Material Color Utilities (2025 and 2021 specifications) and retain its Apache-2.0 copyright notices in the source files. See the [upstream project](https://github.com/material-foundation/material-color-utilities) and the [Apache-2.0 licence](LICENSE).
+The Material 2025 and Material Design 3 colour implementations derive from Google's Material Color Utilities (2025 and 2021 specifications) and retain its Apache-2.0 copyright notices in the source files. See the [upstream project](https://github.com/material-foundation/material-color-utilities) and the [Apache-2.0 licence](licenses/Apache-2.0.txt).
 
 ## Miuix and Material icons
 
-Miuix libraries and Material icons are distributed under their upstream Apache-2.0 terms. Source attributions in adapted files are retained. See [Miuix](https://github.com/compose-miuix-ui/miuix) and [Material icons](https://github.com/google/material-design-icons).
+Miuix libraries, adapted Miuix example liquid-glass helpers and Material icons are distributed under their upstream Apache-2.0 terms. Source attributions in adapted files are retained. See [Miuix](https://github.com/compose-miuix-ui/miuix), [Material icons](https://github.com/google/material-design-icons) and the [Apache-2.0 licence](licenses/Apache-2.0.txt).
