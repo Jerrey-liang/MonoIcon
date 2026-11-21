@@ -33,9 +33,7 @@ internal object HyperOs4SystemEvents {
     /** Register from process startup, independently of notification icon rendering. */
     fun install(api: XposedInterface) {
         val attach = Application::class.java.getDeclaredMethod("attach", Context::class.java)
-        api.hook(attach)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain ->
+        HookRegistry.intercept(api, attach) { chain ->
                 val result = chain.proceed()
                 val context = chain.getArg(0) as? Context
                 if (context?.packageName == "com.android.systemui") {

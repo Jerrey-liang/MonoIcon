@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import com.jerrey.monoicon.cache.BoundedSingleFlightCache
 import com.jerrey.monoicon.color.IconDrawableCache
+import com.jerrey.monoicon.config.ConfigManager
 
 /**
  * Draw-time cache for launcher icon generation.
@@ -96,6 +97,8 @@ object LauncherIconRenderer {
      *  caller must then keep the original drawable (fail-open).
      */
     fun build(request: LauncherIconRequest, source: Drawable): ThemedIconBuilder.Result? {
+        // Refresh before a recipe hit can bypass the mask/color strategies.
+        ConfigManager.refreshIconPreferences()
         if (IconDrawableCache.get(request.identity) == null) {
             return ThemedIconBuilder.build(source, request.identity)
         }

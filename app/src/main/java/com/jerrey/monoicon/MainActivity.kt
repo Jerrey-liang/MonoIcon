@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.jerrey.monoicon.theme.wallpaper.WallpaperSourceRepository.refresh(force = true)
         com.jerrey.monoicon.safety.LauncherSafety.refreshAndPublish(applicationContext)
     }
 

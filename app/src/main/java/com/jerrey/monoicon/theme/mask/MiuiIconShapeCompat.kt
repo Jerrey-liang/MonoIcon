@@ -7,6 +7,8 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Region
 import com.jerrey.monoicon.theme.render.CircleIconShape
+import com.jerrey.monoicon.theme.render.IconAppearance
+import androidx.core.graphics.PathParser
 
 /**
  * MIUI `IconCustomizer` bridge for the circular icon shape (Phase 9).
@@ -40,8 +42,8 @@ object MiuiIconShapeCompat {
     private const val MAX_MASK_SIZE = 512
     private const val MAX_CACHED_SIZES = 4
 
-    /** Rendered circle masks keyed by edge length. Source bitmaps are never shared. */
-    private val maskCache = HashMap<Int, Bitmap>()
+    /** Rendered rounded masks keyed by edge length and radius. Source bitmaps are never shared. */
+    private val maskCache = HashMap<Pair<Int, Int>, Bitmap>()
 
     @Volatile
     private var selfChecked = false
@@ -97,21 +99,22 @@ object MiuiIconShapeCompat {
     fun isBypassed(): Boolean = bypassed
 
     /**
-     * Writes the circular mask into an `IconConfig` instance
+     * Writes the selected rounded mask into an `IconConfig` instance
      * (`IconConfig.mConfigIconMask`), in place.
      *
-     * Idempotent: returns true when the target already carries the circle.
+     * Idempotent: returns true when the target already carries the same mask.
      * Never throws; a missing field is logged once and then short-circuits.
      */
-    fun injectMask(target: Any?): Boolean {
+    fun injectMask(target: Any?, roundnessPercent: Int = 100): Boolean {
         if (target == null || bypassed) return false
         return try {
             val field = target.javaClass.getDeclaredField(FIELD_CONFIG_ICON_MASK)
             field.isAccessible = true
-            if ((field.get(target) as? String) == CircleIconShape.MASK_PATH_DATA) {
+            val mask = IconAppearance(roundnessPercent, 100).maskPathData()
+            if ((field.get(target) as? String) == mask) {
                 true
             } else {
-                field.set(target, CircleIconShape.MASK_PATH_DATA)
+                field.set(target, mask)
                 true
             }
         } catch (t: NoSuchFieldException) {
@@ -142,13 +145,17 @@ object MiuiIconShapeCompat {
      * A copy is returned on purpose: MIUI may recycle or re-densify the bitmap
      * it receives, so the cached source is never handed out directly.
      */
-    fun circleMaskCopy(size: Int): Bitmap? {
+    fun circleMaskCopy(size: Int): Bitmap? = maskCopy(size, 100)
+
+    /** Copies a continuous rounded mask, with both size and radius in the cache identity. */
+    fun maskCopy(size: Int, roundnessPercent: Int): Bitmap? {
         if (bypassed) return null
         val edge = size.coerceIn(MIN_MASK_SIZE, MAX_MASK_SIZE)
+        val key = edge to roundnessPercent.coerceIn(0, 100)
         val source = synchronized(maskCache) {
-            maskCache[edge] ?: renderCircleMask(edge)?.also { rendered ->
+            maskCache[key] ?: renderMask(edge, key.second)?.also { rendered ->
                 if (maskCache.size >= MAX_CACHED_SIZES) maskCache.clear()
-                maskCache[edge] = rendered
+                maskCache[key] = rendered
             }
         } ?: return null
         return try {
@@ -158,9 +165,9 @@ object MiuiIconShapeCompat {
         }
     }
 
-    private fun renderCircleMask(size: Int): Bitmap? = try {
+    private fun renderMask(size: Int, roundnessPercent: Int): Bitmap? = try {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val path: Path? = CircleIconShape.unitPath()
+        val path: Path? = PathParser.createPathFromPathData(IconAppearance(roundnessPercent, 100).maskPathData())
         if (path == null) {
             bitmap.recycle()
             null

@@ -6,10 +6,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import java.util.Base64
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -73,12 +77,31 @@ private enum class MainTab(val icon: ImageVector) {
     }
 }
 
-private enum class AppRoute : NavKey { MAIN, LOGS, ABOUT, THEME }
+private enum class AppRoute : NavKey { MAIN, LOGS, ABOUT, THEME, LAWNICONS_APPS, ICON_ROUNDNESS, ICON_SIZE, ICON_BORDER, ARTWORK_ROUNDNESS }
+private data class AppIconRoute(val app: LawniconsApp) : NavKey
 
-// These routes carry no arguments; save enum names across process recreation.
+// Encode app metadata as separate fields so names containing separators and
+// non-ASCII text survive process recreation without re-querying the entire list.
 private val RouteSaver = listSaver<NavBackStack, String>(
-    save = { stack -> stack.map { (it as AppRoute).name } },
-    restore = { names -> navBackStackOf(*names.map(AppRoute::valueOf).toTypedArray()) },
+    save = { stack -> stack.map { route ->
+        when (route) {
+            is AppIconRoute -> "APP_ICON|" + route.app.let { app ->
+                listOf(app.packageName, app.label, app.identity,
+                    app.hasNativeMonochrome.toString(), app.hasLawnicons.toString()).joinToString("|") {
+                    Base64.getUrlEncoder().withoutPadding().encodeToString(it.toByteArray(Charsets.UTF_8))
+                }
+            }
+            else -> (route as AppRoute).name
+        }
+    } },
+    restore = { names -> navBackStackOf(*names.map { saved ->
+        if (saved.startsWith("APP_ICON|")) {
+            val fields = saved.removePrefix("APP_ICON|").split('|').map {
+                String(Base64.getUrlDecoder().decode(it), Charsets.UTF_8)
+            }
+            AppIconRoute(LawniconsApp(fields[0], fields[1], fields[2], fields[3].toBoolean(), fields[4].toBoolean()))
+        } else AppRoute.valueOf(saved)
+    }.toTypedArray()) },
 )
 
 @Composable
@@ -114,6 +137,15 @@ fun SettingsScreen(variant: String, onVariantChange: (String) -> Unit) {
                             onOpenLogs = { open(AppRoute.LOGS) },
                             onOpenAbout = { open(AppRoute.ABOUT) },
                             onOpenTheme = { open(AppRoute.THEME) },
+                            onOpenLawniconsApps = { open(AppRoute.LAWNICONS_APPS) },
+                            onOpenParameter = { parameter ->
+                                open(when (parameter) {
+                                    IconStyleParameter.ROUNDNESS -> AppRoute.ICON_ROUNDNESS
+                                    IconStyleParameter.SIZE -> AppRoute.ICON_SIZE
+                                    IconStyleParameter.BORDER -> AppRoute.ICON_BORDER
+                                    IconStyleParameter.ARTWORK_ROUNDNESS -> AppRoute.ARTWORK_ROUNDNESS
+                                })
+                            },
                         )
                         AppRoute.LOGS -> KernelPage(title = strings.logsTitle, onBack = ::back) {
                             LogScreen(isActive = routes.last() == AppRoute.LOGS)
@@ -123,7 +155,18 @@ fun SettingsScreen(variant: String, onVariantChange: (String) -> Unit) {
                             title = settingsText("settings_theme"),
                             onBack = ::back,
                         ) { ThemeSettingsScreen() }
+                        AppRoute.LAWNICONS_APPS -> LawniconsAppsScreen(
+                            onBack = ::back,
+                            onOpenApp = { app -> routes.add(AppIconRoute(app)) },
+                        )
+                        AppRoute.ICON_ROUNDNESS -> IconStyleParameterScreen(IconStyleParameter.ROUNDNESS, ::back)
+                        AppRoute.ICON_SIZE -> IconStyleParameterScreen(IconStyleParameter.SIZE, ::back)
+                        AppRoute.ICON_BORDER -> IconStyleParameterScreen(IconStyleParameter.BORDER, ::back)
+                        AppRoute.ARTWORK_ROUNDNESS -> IconStyleParameterScreen(IconStyleParameter.ARTWORK_ROUNDNESS, ::back)
                     }
+                }
+                entry<AppIconRoute>(swipeDismiss = dismiss) { route ->
+                    AppIconSettingsScreen(app = route.app, onBack = ::back)
                 }
             }
         }
@@ -168,6 +211,8 @@ private fun MainPages(
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenTheme: () -> Unit,
+    onOpenLawniconsApps: () -> Unit,
+    onOpenParameter: (IconStyleParameter) -> Unit,
 ) {
     val strings = LocalStrings.current
     val settings by UiPreferences.state.collectAsState()
@@ -242,13 +287,19 @@ private fun MainPages(
                     title = if (tab == MainTab.HOME) "MonoIcon" else tab.label(strings),
                     actions = { if (tab != MainTab.MODULE) HomeTopBarActions() },
                     bottomPadding = padding.calculateBottomPadding(),
+                    pinnedContent = if (tab == MainTab.ICON_STYLE) {
+                        { GlobalIconStylePreview(variant) }
+                    } else null,
                     modifier = Modifier.testTag("main-page-$index").then(
                         if (active) Modifier else Modifier.semantics { hideFromAccessibility() },
                     ),
                 ) {
                     when (tab) {
                         MainTab.HOME -> OverviewScreen(onOpenLogs = onOpenLogs, onOpenAbout = onOpenAbout, isActive = active)
-                        MainTab.ICON_STYLE -> IconStyleScreen(variant, onVariantChange)
+                        MainTab.ICON_STYLE -> IconStyleScreen(
+                            variant, onVariantChange, onOpenLawniconsApps = onOpenLawniconsApps,
+                            onOpenParameter = onOpenParameter,
+                        )
                         MainTab.CONFIGURATION -> ConfigurationScreen(isActive = active)
                         MainTab.MODULE -> ModuleSettingsScreen(
                             language = language,
@@ -272,12 +323,32 @@ internal fun KernelPage(
     bottomPadding: Dp = 0.dp,
     onBack: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {},
+    pinnedContent: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
+) {
+    KernelLazyPage(title, modifier, bottomPadding, onBack, actions, pinnedContent) {
+        item { Column { content() } }
+    }
+}
+
+/** App lists use the same page chrome while composing only visible rows. */
+@Composable
+internal fun KernelLazyPage(
+    title: String,
+    modifier: Modifier = Modifier,
+    bottomPadding: Dp = 0.dp,
+    onBack: (() -> Unit)? = null,
+    actions: @Composable () -> Unit = {},
+    pinnedContent: (@Composable () -> Unit)? = null,
+    topBarContent: (@Composable (Float) -> Unit)? = null,
+    popupHost: @Composable () -> Unit = {},
+    content: LazyListScope.() -> Unit,
 ) {
     val settings by UiPreferences.state.collectAsState()
     val scrollBehavior = MiuixScrollBehavior()
     val backdrop = rememberBlurBackdrop(settings.enableBlur)
     val strings = LocalStrings.current
+    val layoutDirection = LocalLayoutDirection.current
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -292,23 +363,41 @@ internal fun KernelPage(
                             Icon(MiuixIcons.Regular.Back, strings.back)
                         }
                     },
+                    bottomContent = {
+                        topBarContent?.invoke(scrollBehavior.state.collapsedFraction)
+                    },
                 )
             }
         },
-        popupHost = {},
+        popupHost = popupHost,
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { padding ->
-        Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().scrollEndHaptic().overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                contentPadding = padding,
-                overscrollEffect = null,
-            ) {
-                item {
-                    Column { content() }
-                    Spacer(Modifier.height(bottomPadding + if (onBack != null)
-                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp else 12.dp))
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()
+            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+            .then(if (pinnedContent != null) Modifier.padding(
+                start = padding.calculateStartPadding(layoutDirection),
+                top = padding.calculateTopPadding(),
+                end = padding.calculateEndPadding(layoutDirection),
+            ) else Modifier)) {
+            val previewLimit = minOf(maxHeight * 0.6f, (maxHeight - 120.dp).coerceAtLeast(0.dp))
+            Column(Modifier.fillMaxSize()) {
+                if (pinnedContent != null) {
+                    // Preserve the preview itself. Short landscape/split windows
+                    // scroll its contents independently and retain space for controls.
+                    Box(Modifier.fillMaxWidth().heightIn(max = previewLimit)
+                        .testTag("pinned-preview-host").verticalScroll(rememberScrollState())) {
+                        pinnedContent()
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth().testTag("kernel-page-scroll").scrollEndHaptic().overScrollVertical()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = if (pinnedContent == null) padding else PaddingValues(bottom = padding.calculateBottomPadding()),
+                    overscrollEffect = null,
+                ) {
+                    content()
+                    item { Spacer(Modifier.height(bottomPadding + if (onBack != null)
+                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp else 12.dp)) }
                 }
             }
         }

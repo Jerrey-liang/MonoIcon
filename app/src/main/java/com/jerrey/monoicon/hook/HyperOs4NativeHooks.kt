@@ -9,12 +9,13 @@ import io.github.libxposed.api.XposedModuleInterface
  * adaptation belongs to native_init; existing Java/SystemUI hooks keep their path. */
 internal object HyperOs4NativeHooks {
     fun onPackageReady(
-        @Suppress("UNUSED_PARAMETER") api: XposedModule,
+        api: XposedModule,
         param: XposedModuleInterface.PackageReadyParam,
         isLauncherProcess: Boolean,
     ) {
         if (isLauncherProcess && param.isFirstPackage && param.packageName == "com.miui.home" &&
             param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0) {
+            HookDiagnostics.start(api, "com.miui.home", "com.miui.home", nativeLauncher = true)
             Log.i("MonoIcon.HyperOS4", "Native launcher uses the published Profile through LSPosed native_init")
         }
     }

@@ -554,9 +554,9 @@ fun LiquidGlassNavigationBar(
                             containerColor = MiuixTheme.colorScheme.primaryContainer,
                             contentColor = MiuixTheme.colorScheme.onPrimaryContainer,
                         ) { Text(count.toString()) }
-                    }) { Icon(item.icon, contentDescription = null) }
+                    }) { Icon(item.icon, contentDescription = item.label) }
                 } else {
-                    Icon(item.icon, contentDescription = null)
+                    Icon(item.icon, contentDescription = item.label)
                 }
                 Text(
                     text = item.label,

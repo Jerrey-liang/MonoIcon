@@ -1,18 +1,7 @@
 package com.jerrey.monoicon.theme.color.dynamic
 
-import com.jerrey.monoicon.material2025.dynamiccolor.ColorSpec
-import com.jerrey.monoicon.material2025.dynamiccolor.DynamicScheme
 import com.jerrey.monoicon.material2025.dynamiccolor.Variant
 import com.jerrey.monoicon.material2025.hct.Hct
-import com.jerrey.monoicon.material2025.scheme.SchemeContent
-import com.jerrey.monoicon.material2025.scheme.SchemeExpressive
-import com.jerrey.monoicon.material2025.scheme.SchemeFidelity
-import com.jerrey.monoicon.material2025.scheme.SchemeFruitSalad
-import com.jerrey.monoicon.material2025.scheme.SchemeMonochrome
-import com.jerrey.monoicon.material2025.scheme.SchemeNeutral
-import com.jerrey.monoicon.material2025.scheme.SchemeRainbow
-import com.jerrey.monoicon.material2025.scheme.SchemeTonalSpot
-import com.jerrey.monoicon.material2025.scheme.SchemeVibrant
 
 /** Pure Google Material Color Utilities 2025 calculation used by MonoIcon. */
 object Material2025ColorEngine {
@@ -54,15 +43,15 @@ object Material2025ColorEngine {
         val primaryContainerDark: Int,
     )
 
-    private const val FALLBACK_SOURCE = 0xFF4285F4.toInt()
-
     fun fromSource(
         sourceColor: Int,
         candidates: List<Int> = listOf(sourceColor),
         variant: Variant = Variant.TONAL_SPOT,
     ): Material2025IconColors {
         val sourceHct = Hct.fromInt(sourceColor)
-        fun scheme(dark: Boolean) = schemeFor(variant, sourceHct, dark)
+        fun scheme(dark: Boolean) = MaterialIconColorEngine.schemeFor(
+            variant, sourceHct, dark, IconColorEngineId.MATERIAL_2025,
+        )
         val light = scheme(false)
         val dark = scheme(true)
         return Material2025IconColors(
@@ -97,22 +86,9 @@ object Material2025ColorEngine {
         sourceColor: Int,
         dark: Boolean,
         variant: Variant = Variant.TONAL_SPOT,
-    ): IconThemeColors {
-        val scheme = schemeFor(variant, Hct.fromInt(sourceColor), dark)
-        return if (dark) {
-            IconThemeColors(
-                foreground = scheme.primaryPalette.tone(80),
-                background = scheme.secondaryPalette.tone(20),
-                palette = fallbackPalette(sourceColor),
-            )
-        } else {
-            IconThemeColors(
-                foreground = scheme.primaryPalette.tone(30),
-                background = scheme.primaryPalette.tone(90),
-                palette = fallbackPalette(sourceColor),
-            )
-        }
-    }
+    ): IconThemeColors = MaterialIconColorEngine.iconColorsForSource(
+        sourceColor, dark, variant, IconColorEngineId.MATERIAL_2025,
+    )
 
     fun variantFromId(id: String?): Variant = when (VariantId.fromId(id)) {
         VariantId.MONOCHROME -> Variant.MONOCHROME
@@ -126,32 +102,4 @@ object Material2025ColorEngine {
         VariantId.FRUIT_SALAD -> Variant.FRUIT_SALAD
     }
 
-    /**
-     * Builds the [DynamicScheme] for [variant] with MonoIcon's fixed
-     * spec 2025 / phone platform / zero contrast. All nine variants share
-     * the same constructor shape, so the mapping is a plain `when`.
-     */
-    private fun schemeFor(variant: Variant, sourceHct: Hct, dark: Boolean): DynamicScheme {
-        val spec = ColorSpec.SpecVersion.SPEC_2025
-        val platform = DynamicScheme.Platform.PHONE
-        return when (variant) {
-            Variant.MONOCHROME -> SchemeMonochrome(sourceHct, dark, 0.0, spec, platform)
-            Variant.NEUTRAL -> SchemeNeutral(sourceHct, dark, 0.0, spec, platform)
-            Variant.TONAL_SPOT -> SchemeTonalSpot(sourceHct, dark, 0.0, spec, platform)
-            Variant.VIBRANT -> SchemeVibrant(sourceHct, dark, 0.0, spec, platform)
-            Variant.EXPRESSIVE -> SchemeExpressive(sourceHct, dark, 0.0, spec, platform)
-            Variant.FIDELITY -> SchemeFidelity(sourceHct, dark, 0.0, spec, platform)
-            Variant.CONTENT -> SchemeContent(sourceHct, dark, 0.0, spec, platform)
-            Variant.RAINBOW -> SchemeRainbow(sourceHct, dark, 0.0, spec, platform)
-            Variant.FRUIT_SALAD -> SchemeFruitSalad(sourceHct, dark, 0.0, spec, platform)
-        }
-    }
-
-    private fun fallbackPalette(seed: Int): MonetPalette = MonetPalette(
-        TonePalette.generate(seed),
-        TonePalette.generate(seed),
-        TonePalette.generate(seed),
-        TonePalette.generate(seed),
-        TonePalette.generate(seed),
-    )
 }

@@ -37,15 +37,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuOpen
 import androidx.compose.material.icons.rounded.AspectRatio
-import androidx.compose.material.icons.rounded.BlurOn
-import androidx.compose.material.icons.rounded.CallToAction
 import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DesignServices
 import androidx.compose.material.icons.rounded.Pin
 import androidx.compose.material.icons.rounded.Style
-import androidx.compose.material.icons.rounded.Wallpaper
-import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material.icons.rounded.Swipe
 import androidx.compose.material.icons.rounded.ViewCarousel
 import androidx.compose.runtime.Composable
@@ -132,103 +128,81 @@ fun ThemeSettingsScreen(modifier: Modifier = Modifier) {
                 .padding(top = 12.dp)
                 .fillMaxWidth(),
         ) {
-            SwitchPreference(
-                title = settingsText("settings_monet"),
+            val colorItems = listOf(
+                settingsText("settings_key_color_default"),
+                settingsText("color_red"),
+                settingsText("color_pink"),
+                settingsText("color_purple"),
+                settingsText("color_deep_purple"),
+                settingsText("color_indigo"),
+                settingsText("color_blue"),
+                settingsText("color_cyan"),
+                settingsText("color_teal"),
+                settingsText("color_green"),
+                settingsText("color_yellow"),
+                settingsText("color_amber"),
+                settingsText("color_orange"),
+                settingsText("color_brown"),
+                settingsText("color_blue_grey"),
+                settingsText("color_sakura"),
+            )
+            val colorValues = listOf(0) + keyColorOptions
+            OverlayDropdownPreference(
+                title = settingsText("settings_key_color"),
+                items = colorItems,
                 startAction = {
                     Icon(
-                        Icons.Rounded.Wallpaper,
+                        Icons.Rounded.Colorize,
                         modifier = Modifier.padding(end = 6.dp),
-                        contentDescription = settingsText("settings_monet"),
+                        contentDescription = settingsText("settings_key_color"),
                         tint = colorScheme.onBackground
                     )
                 },
-                checked = uiState.monet,
-                onCheckedChange = {
-                    actions.onSetMiuixMonet(it)
+                selectedIndex = colorValues.indexOf(uiState.keyColor).takeIf { it >= 0 } ?: 0,
+                onSelectedIndexChange = { index ->
+                    actions.onSetKeyColor(colorValues[index])
                 }
             )
 
             AnimatedVisibility(
-                visible = uiState.monet
+                visible = uiState.keyColor != 0
             ) {
                 Column {
-                    val colorItems = listOf(
-                        settingsText("settings_key_color_default"),
-                        settingsText("color_red"),
-                        settingsText("color_pink"),
-                        settingsText("color_purple"),
-                        settingsText("color_deep_purple"),
-                        settingsText("color_indigo"),
-                        settingsText("color_blue"),
-                        settingsText("color_cyan"),
-                        settingsText("color_teal"),
-                        settingsText("color_green"),
-                        settingsText("color_yellow"),
-                        settingsText("color_amber"),
-                        settingsText("color_orange"),
-                        settingsText("color_brown"),
-                        settingsText("color_blue_grey"),
-                        settingsText("color_sakura"),
-                    )
-                    val colorValues = listOf(0) + keyColorOptions
+                    val styles = ThemePaletteStyle.entries
                     OverlayDropdownPreference(
-                        title = settingsText("settings_key_color"),
-                        items = colorItems,
+                        title = settingsText("settings_color_style"),
                         startAction = {
                             Icon(
-                                Icons.Rounded.Colorize,
+                                Icons.Rounded.Style,
                                 modifier = Modifier.padding(end = 6.dp),
-                                contentDescription = settingsText("settings_key_color"),
+                                contentDescription = settingsText("settings_color_style"),
                                 tint = colorScheme.onBackground
                             )
                         },
-                        selectedIndex = colorValues.indexOf(uiState.keyColor).takeIf { it >= 0 } ?: 0,
+                        items = styles.map { it.name },
+                        selectedIndex = styles.indexOfFirst { it.name == uiState.colorStyle }.coerceAtLeast(0),
                         onSelectedIndexChange = { index ->
-                            actions.onSetKeyColor(colorValues[index])
+                            actions.onSetColorStyle(styles[index].name)
                         }
                     )
 
-                    AnimatedVisibility(
-                        visible = uiState.keyColor != 0
-                    ) {
-                        Column {
-                            val styles = ThemePaletteStyle.entries
-                            OverlayDropdownPreference(
-                                title = settingsText("settings_color_style"),
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Style,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = settingsText("settings_color_style"),
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                items = styles.map { it.name },
-                                selectedIndex = styles.indexOfFirst { it.name == uiState.colorStyle }.coerceAtLeast(0),
-                                onSelectedIndexChange = { index ->
-                                    actions.onSetColorStyle(styles[index].name)
-                                }
+                    val specs = ThemeColorSpec.entries
+                    OverlayDropdownPreference(
+                        title = settingsText("settings_color_spec"),
+                        startAction = {
+                            Icon(
+                                Icons.Rounded.DesignServices,
+                                modifier = Modifier.padding(end = 6.dp),
+                                contentDescription = settingsText("settings_color_spec"),
+                                tint = colorScheme.onBackground
                             )
-
-                            val specs = ThemeColorSpec.entries
-                            OverlayDropdownPreference(
-                                title = settingsText("settings_color_spec"),
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.DesignServices,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = settingsText("settings_color_spec"),
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                items = specs.map { it.name },
-                                selectedIndex = specs.indexOfFirst { it.name == uiState.colorSpec }.coerceAtLeast(0),
-                                onSelectedIndexChange = { index ->
-                                    actions.onSetColorSpec(specs[index].name)
-                                }
-                            )
+                        },
+                        items = specs.map { it.name },
+                        selectedIndex = specs.indexOfFirst { it.name == uiState.colorSpec }.coerceAtLeast(0),
+                        onSelectedIndexChange = { index ->
+                            actions.onSetColorSpec(specs[index].name)
                         }
-                    }
+                    )
                 }
             }
         }
@@ -238,58 +212,6 @@ fun ThemeSettingsScreen(modifier: Modifier = Modifier) {
                 .padding(top = 12.dp)
                 .fillMaxWidth(),
         ) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                SwitchPreference(
-                    title = settingsText("settings_enable_blur"),
-                    summary = settingsText("settings_enable_blur_summary"),
-                    startAction = {
-                        Icon(
-                            Icons.Rounded.BlurOn,
-                            modifier = Modifier.padding(end = 6.dp),
-                            contentDescription = settingsText("settings_enable_blur"),
-                            tint = colorScheme.onBackground
-                        )
-                    },
-                    checked = uiState.enableBlur,
-                    onCheckedChange = {
-                        actions.onSetEnableBlur(it)
-                    }
-                )
-            }
-            SwitchPreference(
-                title = settingsText("settings_floating_bottom_bar"),
-                summary = settingsText("settings_floating_bottom_bar_summary"),
-                startAction = {
-                    Icon(
-                        Icons.Rounded.CallToAction,
-                        modifier = Modifier.padding(end = 6.dp),
-                        contentDescription = settingsText("settings_floating_bottom_bar"),
-                        tint = colorScheme.onBackground
-                    )
-                },
-                checked = uiState.floatingBottomBar,
-                onCheckedChange = {
-                    actions.onSetEnableFloatingBottomBar(it)
-                }
-            )
-            AnimatedVisibility(visible = uiState.floatingBottomBar && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                SwitchPreference(
-                    title = settingsText("settings_enable_glass"),
-                    summary = settingsText("settings_enable_glass_summary"),
-                    startAction = {
-                        Icon(
-                            Icons.Rounded.WaterDrop,
-                            modifier = Modifier.padding(end = 6.dp),
-                            contentDescription = settingsText("settings_enable_glass"),
-                            tint = colorScheme.onBackground
-                        )
-                    },
-                    checked = uiState.glassBottomBar,
-                    onCheckedChange = {
-                        actions.onSetEnableFloatingBottomBarBlur(it)
-                    }
-                )
-            }
             SwitchPreference(
                 title = settingsText("settings_navigation_badge"),
                 summary = settingsText("settings_navigation_badge_summary"),
@@ -614,13 +536,9 @@ private fun ThemePreviewCardMiuix(
 
 private class ThemeActions(private val activity: android.app.Activity?) {
     fun onSetThemeMode(value: Int) = UiPreferences.update { it.copy(themeMode = value) }
-    fun onSetMiuixMonet(value: Boolean) = UiPreferences.update { it.copy(monet = value) }
     fun onSetKeyColor(value: Int) = UiPreferences.update { it.copy(keyColor = value) }
     fun onSetColorStyle(value: String) = UiPreferences.update { it.copy(colorStyle = value) }
     fun onSetColorSpec(value: String) = UiPreferences.update { it.copy(colorSpec = value) }
-    fun onSetEnableBlur(value: Boolean) = UiPreferences.update { it.copy(enableBlur = value) }
-    fun onSetEnableFloatingBottomBar(value: Boolean) = UiPreferences.update { it.copy(floatingBottomBar = value) }
-    fun onSetEnableFloatingBottomBarBlur(value: Boolean) = UiPreferences.update { it.copy(glassBottomBar = value) }
     fun onSetEnableNavigationBadge(value: Boolean) = UiPreferences.update { it.copy(navigationBadge = value) }
     fun onSetEnablePredictiveBack(value: Boolean) {
         UiPreferences.update { it.copy(predictiveBack = value) }

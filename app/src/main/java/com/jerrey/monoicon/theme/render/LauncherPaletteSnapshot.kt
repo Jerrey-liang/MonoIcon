@@ -14,8 +14,10 @@ import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.theme.color.dynamic.IconThemeColors
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
+import com.jerrey.monoicon.theme.wallpaper.WallpaperSourceRepository
 import java.util.WeakHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -131,16 +133,28 @@ object LauncherPaletteSnapshot {
         }
     }
 
-    private val colorsListener = WallpaperManager.OnColorsChangedListener { _, _ -> refresh() }
+    private fun wallpaperChanged() {
+        PixelMonetColorEngine.invalidate()
+        refresh()
+    }
+
+    private val colorsListener = WallpaperManager.OnColorsChangedListener { _, _ -> wallpaperChanged() }
     private val configurationListener = object : ComponentCallbacks {
         override fun onConfigurationChanged(newConfig: Configuration) = refresh()
         override fun onLowMemory() = Unit
     }
     private val wallpaperReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = refresh()
+        override fun onReceive(context: Context?, intent: Intent?) = wallpaperChanged()
     }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || key == "variant_id") refresh()
+        if (key == null || key in setOf("variant_id", "color_engine_id", "lawnicons_enabled",
+                "lawnicons_disabled_packages", "circle_icons", "icon_roundness_percent", "icon_size_percent",
+                "generated_icon_border_percent", "generated_artwork_roundness_percent",
+                "generated_artwork_follow_icon_roundness", "default_icon_source_style", "app_icon_overrides")) {
+            ConfigManager.invalidateHookIconPreferences()
+            invalidateObservedDrawables()
+            refresh()
+        }
     }
     private val activityListener = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: Activity) = refresh()
@@ -155,6 +169,10 @@ object LauncherPaletteSnapshot {
     private fun registerSystemListeners(context: Context) {
         if (systemListenersRegistered) return
         systemListenersRegistered = true
+        WallpaperSourceRepository.addListener {
+            LauncherIconRenderer.clear()
+            refresh()
+        }
         registerSafely("wallpaper colors") {
             WallpaperManager.getInstance(context).addOnColorsChangedListener(colorsListener, mainHandler)
         }

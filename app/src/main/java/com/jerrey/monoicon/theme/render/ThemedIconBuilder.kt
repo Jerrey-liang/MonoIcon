@@ -11,9 +11,7 @@ import com.jerrey.monoicon.theme.ThemeManager
  *
  * Desktop icons (Hook 5) and HyperOS recents task icons (Hook 11) both call
  * [build], so both surfaces share the mask/colour caches and render
- * identically — including the Phase 9 shape chosen by
- * [ConfigManager.iconShape] (circle with the AOSP normalization, or the
- * previous full-bleed behaviour).
+ * identically — including the shared corner-radius and whole-icon size controls.
  *
  * Generation is split in two so callers that see the same component
  * repeatedly (the launcher rebinds every icon on each drawer scroll) can cache
@@ -27,8 +25,9 @@ object ThemedIconBuilder {
     class Result(
         val drawable: ColoredMonochromeDrawable,
         val mask: Bitmap,
-        /** Mask source tier (`MaskStrategy.SOURCE_*`) — diagnostics only. */
+        /** Mask source tier (`MaskStrategy.SOURCE_*`), including border eligibility. */
         val source: Int,
+        val tonal: Boolean = false,
     )
 
     /**
@@ -44,8 +43,10 @@ object ThemedIconBuilder {
         val mask: Bitmap,
         val color: Int,
         val plate: Int,
-        /** Mask source tier (`MaskStrategy.SOURCE_*`) — diagnostics only. */
+        /** Mask source tier (`MaskStrategy.SOURCE_*`), including border eligibility. */
         val source: Int,
+        val tonal: Boolean = false,
+        val identity: String? = null,
     )
 
     /**
@@ -74,23 +75,33 @@ object ThemedIconBuilder {
         // cache cost; the renderer supplies the glyph colour in either format.
         val copyConfig = if (mask.config == Bitmap.Config.ALPHA_8) Bitmap.Config.ALPHA_8 else Bitmap.Config.ARGB_8888
         val safeMask = mask.copy(copyConfig, false) ?: mask
-        return Recipe(safeMask, iconResult.color, iconResult.plate, iconResult.source)
+        return Recipe(safeMask, iconResult.color, iconResult.plate, iconResult.source, iconResult.tonal, identity)
     }
 
     /**
      * Wraps [recipe] in a fresh drawable for one bind.
      *
-     * [ConfigManager.iconShape] is read here rather than cached in the recipe
-     * so a shape change takes effect on the next bind without invalidation.
+     * Appearance is read here rather than cached in the recipe; the resulting
+     * drawable also follows geometry changes at draw time.
      */
-    fun drawable(recipe: Recipe): Result = Result(
-        drawable = ColoredMonochromeDrawable(
-            recipe.mask,
-            recipe.color,
-            recipe.plate,
-            ConfigManager.iconShape(),
-        ),
-        mask = recipe.mask,
-        source = recipe.source,
-    )
+    fun drawable(recipe: Recipe): Result {
+        val preferences = ConfigManager.getEffectiveIconStyle(recipe.identity)
+        return Result(
+            drawable = ColoredMonochromeDrawable(
+                recipe.mask,
+                recipe.color,
+                recipe.plate,
+                roundnessPercent = preferences.roundnessPercent,
+                sizePercent = preferences.sizePercent,
+                generatedBorderRatio = preferences.generatedBorderRatio,
+                generatedArtworkRadiusFraction = preferences.generatedArtworkRadiusFraction,
+                adjustGeneratedBorder = adjustsGeneratedBorder(recipe.source),
+                tonal = recipe.tonal,
+                identity = recipe.identity,
+            ),
+            mask = recipe.mask,
+            source = recipe.source,
+            tonal = recipe.tonal,
+        )
+    }
 }

@@ -87,6 +87,8 @@ internal object HyperOs4IconRefresh {
             case "${'$'}oldGeneration" in g-*) ;; *) exit 2 ;; esac
             case "${'$'}{oldGeneration#g-}" in *[!0-9a-f]*) exit 2 ;; esac
             head -c 65 "${'$'}directory/monoicon_icons/${'$'}oldGeneration/.large-signature" 2>/dev/null || true
+            printf '\nMONOICON_ICON_STYLE\n'
+            head -c 65 "${'$'}directory/monoicon_icons/${'$'}oldGeneration/.icon-style" 2>/dev/null || true
         """.trimIndent()
         var process: Process? = null
         try {
@@ -104,10 +106,15 @@ internal object HyperOs4IconRefresh {
             val fields = content.trim().split(Regex("\\s+"))
             if (content.length >= 256 || fields.size != 9 || fields[0] != "MONOICON" || fields[1] != "3" ||
                 fields[2] != "1" || fields[8] != profile.digest ||
-                fields[5] != (if (ConfigManager.isCircleIconsEnabledFromUi()) "1" else "0") ||
+                // The native preservation patches keep any exported alpha shape intact.
+                fields[5] != "1" ||
                 fields[6] != (if (ConfigManager.isLawniconsEnabledFromUi()) "1" else "0") ||
                 !Regex("g-[a-f0-9]{32}").matches(fields[7])) return null
-            val publishedSignature = text.substringAfter("\nMONOICON_LARGE_SIGNATURE\n", "").trim()
+            val publishedStyle = text.substringAfter("\nMONOICON_ICON_STYLE\n", "").trim()
+            // Missing signatures from older versions require one fresh export.
+            if (publishedStyle != HyperOs4IconStyle.current().signature()) return null
+            val publishedSignature = text.substringAfter("\nMONOICON_LARGE_SIGNATURE\n", "")
+                .substringBefore("\nMONOICON_ICON_STYLE\n").trim()
             if (profile.icons.largeIconPrefixes.isNotEmpty()) {
                 val current = HyperOs4LargeIconInputs.read(context, profile, launcher.uid)
                 // Initialization can temporarily hide bridge/config data. Keep

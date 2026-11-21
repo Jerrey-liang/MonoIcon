@@ -46,24 +46,11 @@ object DebugHooks {
         android.util.Log.i(TAG, "DebugHooks installed: $ok/$total")
     }
 
-    private inline fun safeInstall(
-        api: XposedInterface,
+    private fun safeInstall(
+        @Suppress("UNUSED_PARAMETER") api: XposedInterface,
         name: String,
-        block: () -> Unit
-    ): Int = try {
-        block()
-        android.util.Log.i(TAG, "  ✓ $name (debug)")
-        1
-    } catch (e: ClassNotFoundException) {
-        android.util.Log.w(TAG, "  ✗ $name: class not found — ${e.message}")
-        0
-    } catch (e: NoSuchMethodException) {
-        android.util.Log.w(TAG, "  ✗ $name: method not found — ${e.message}")
-        0
-    } catch (e: Throwable) {
-        android.util.Log.e(TAG, "  ✗ $name: ${e.javaClass.simpleName} — ${e.message}", e)
-        0
-    }
+        block: () -> Unit,
+    ): Int = if (HookRegistry.install("Debug/$name", required = false, install = block)) 1 else 0
 
     // ═══════════════════════════════════════════════════════════════
     // Hook 1: MonochromeUtils.getMonochrome(AdaptiveIconDrawable)
@@ -74,9 +61,7 @@ object DebugHooks {
             .getDeclaredMethod("getMonochrome", AdaptiveIconDrawable::class.java)
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val start = System.nanoTime()
                 val adaptiveIcon = chain.getArg(0) as? AdaptiveIconDrawable
                 val desc = if (adaptiveIcon != null) {
@@ -109,9 +94,7 @@ object DebugHooks {
             .getDeclaredMethod("isSupportMonochrome")
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val start = System.nanoTime()
                 val result = chain.proceed()
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
@@ -130,9 +113,7 @@ object DebugHooks {
             .getDeclaredMethod("isMonoEnable")
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val start = System.nanoTime()
                 val result = chain.proceed()
                 val elapsed = (System.nanoTime() - start) / 1_000_000L
@@ -151,9 +132,7 @@ object DebugHooks {
             .getDeclaredMethod("getColor")
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val start = System.nanoTime()
                 val result = chain.proceed()
                 val c = result as? Int ?: 0

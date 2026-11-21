@@ -28,6 +28,7 @@
 #include "hyperos4_paths.h"
 #include "hyperos4_geometry_bridge.h"
 #include "launcher_safety.h"
+#include "hyperos4_diagnostics.h"
 
 namespace monoicon::hyos {
 
@@ -40,6 +41,16 @@ profile::Runtime gRuntime;
 std::string gProfileDigest, gProfileError;
 std::vector<uint32_t> gCurrentInstructions;
 constexpr size_t kMaxPatches = profile::kMaxPatches;
+std::vector<uint32_t> gDiagnosticExpected;
+std::vector<uint8_t> gDiagnosticExpectedKnown;
+bool gDiagnosticRuntimeReady = false, gDiagnosticImagesValid = false;
+bool gDiagnosticMappingMatchesProfile = false;
+std::string gDiagnosticLoadedProfileDigest, gDiagnosticRequestedProfileDigest;
+bool gDiagnosticHaveCommit = false, gDiagnosticEnabled = false;
+bool gDiagnosticInstallationStopped = false;
+bool gDiagnosticDirty = true;
+char gDiagnosticPhase[96] = "startup";
+std::string gDiagnosticNonce;
 
 extern "C" const profile::Profile* monoicon_hyos_active_profile() { return &gProfile; }
 
@@ -126,6 +137,10 @@ void AppendUint(char* buffer, size_t capacity, uint32_t value) {
 }  // namespace
 
 void WritePaletteStatus(const char* phase) {
+    // Defer the richer read-only snapshot until PaletteStep has returned and
+    // its thread rendezvous has ended. Existing legacy status stays unchanged.
+    std::snprintf(gDiagnosticPhase, sizeof(gDiagnosticPhase), "%s", phase);
+    gDiagnosticDirty = true;
     char statusPath[160];
     LauncherFilePath(statusPath, sizeof(statusPath), "monoicon_hyos_palette.txt");
     const char* paths[] = {statusPath};
@@ -347,9 +362,196 @@ void* gForegroundPage = nullptr;
 bool ValidateImages() {
     uint32_t checked = 0;
     const bool valid = gRuntime.validate(gProfile, gCurrentInstructions, checked);
+    gDiagnosticImagesValid = valid;
     __atomic_store_n(&monoicon_hyos_palette.identity_bytes_checked, checked, __ATOMIC_RELEASE);
     return valid;
 }
+
+namespace {
+bool ReadDiagnosticText(const char* path, char* output, size_t capacity, bool regular = false) {
+    if (capacity < 2) return false;
+    const int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, path,
+        O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0));
+    if (fd < 0) return false;
+    struct stat metadata{};
+    bool valid = !regular || (syscall(SYS_fstat, fd, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
+        metadata.st_size > 0 && static_cast<uint64_t>(metadata.st_size) < capacity);
+    size_t used = 0;
+    while (valid && used < capacity - 1) {
+        const auto count = syscall(SYS_read, fd, output + used, capacity - 1 - used);
+        if (count > 0) used += static_cast<size_t>(count);
+        else if (count < 0 && errno == EINTR) continue;
+        else { valid = count == 0; break; }
+    }
+    syscall(SYS_close, fd);
+    output[used] = '\0';
+    return valid && used > 0 && used < capacity - 1 && (!regular ||
+        (used == static_cast<size_t>(metadata.st_size) && std::memchr(output, '\0', used) == nullptr));
+}
+
+uint64_t DiagnosticStartTicks() {
+    char status[4096]{};
+    if (!ReadDiagnosticText("/proc/self/stat", status, sizeof(status))) return 0;
+    // comm (field 2) can itself contain spaces and parentheses.
+    const char* end = std::strrchr(status, ')');
+    if (!end) return 0;
+    const char* value = end + 1;
+    for (unsigned field = 3; field < 22; ++field) {
+        while (*value == ' ') ++value;
+        while (*value && *value != ' ') ++value;
+        if (!*value) return 0;
+    }
+    while (*value == ' ') ++value;
+    uint64_t ticks = 0;
+    bool digit = false;
+    while (*value >= '0' && *value <= '9') {
+        const unsigned number = static_cast<unsigned>(*value++ - '0');
+        if (ticks > (UINT64_MAX - number) / 10) return 0;
+        ticks = ticks * 10 + number; digit = true;
+    }
+    return digit && (*value == ' ' || *value == '\n' || !*value) ? ticks : 0;
+}
+
+std::string ReadDiagnosticNonce() {
+    char path[256], text[129]{};
+    LauncherFilePath(path, sizeof(path), "monoicon_hyos_hooks.request");
+    if (!ReadDiagnosticText(path, text, sizeof(text), true)) return {};
+    size_t length = std::strlen(text);
+    if (length && text[length - 1] == '\n') text[--length] = '\0';
+    if (length < 16 || length > 64) return {};
+    for (size_t i = 0; i < length; ++i) if (!((text[i] >= '0' && text[i] <= '9') ||
+        (text[i] >= 'a' && text[i] <= 'f'))) return {};
+    return std::string(text, length);
+}
+
+void AppendProfileDiagnostics(std::string& output) {
+    using namespace diagnostics;
+    const uint32_t result = __atomic_load_n(&monoicon_hyos_palette.result, __ATOMIC_ACQUIRE);
+    for (size_t i = 0; i < gProfile.patches.size(); ++i) {
+        const auto& patch = gProfile.patches[i];
+        const auto& function = gProfile.functions[patch.function];
+        const auto& image = gProfile.images[function.image];
+        const bool mapped = gDiagnosticMappingMatchesProfile && function.image < gRuntime.images.size() &&
+            gRuntime.images[function.image].bias && patch.address <= UINTPTR_MAX - gRuntime.images[function.image].bias;
+        const uintptr_t bias = mapped ? gRuntime.images[function.image].bias : 0;
+        const uintptr_t address = mapped ? bias + patch.address : 0;
+        const bool expectedKnown = i < gDiagnosticExpected.size() && i < gDiagnosticExpectedKnown.size() && gDiagnosticExpectedKnown[i];
+        const uint32_t expected = expectedKnown ? gDiagnosticExpected[i] : 0;
+        uint32_t observed = 0;
+        const bool read = mapped && gDiagnosticRuntimeReady && gRuntime.readWord(address, observed);
+        const bool committed = gDiagnosticHaveCommit && gDiagnosticImagesValid && result != kResultRollbackIncomplete;
+        const char* state = !mapped || !gDiagnosticRuntimeReady ? "blocked" : !read ? "read-failed" :
+            expectedKnown && observed != expected ? "mismatch" : !committed || !expectedKnown ? "blocked" :
+            !gDiagnosticEnabled ? "restored" : expected == patch.original ? "unchanged" : "verified";
+        const char* detail = !mapped ? "image-unavailable" : !gDiagnosticRuntimeReady ? "image-not-verified" :
+            !read ? "safe-memory-read-failed" : !expectedKnown ? "instruction-not-prepared" :
+            observed != expected ? "observed-instruction-differs" : !committed ? gDiagnosticPhase : "instruction-verified";
+        output += ','; output += '{'; Text(output, "id", patch.id.c_str());
+        output += ','; Text(output, "kind", "profile-patch");
+        output += ','; Text(output, "state", state);
+        output += ','; Text(output, "library", image.library.c_str());
+        output += ','; Text(output, "function", function.id.c_str());
+        output += ','; Hex(output, "offset", patch.address);
+        output += ','; Hex(output, "target", address, mapped);
+        output += ','; Hex(output, "loadBias", bias, mapped);
+        output += ','; Text(output, "valueType", "instruction");
+        output += ','; Hex(output, "original", patch.original, true, true);
+        output += ','; Hex(output, "replacement", expected, expectedKnown, true);
+        output += ','; Hex(output, "observed", observed, read, true);
+        output += ','; Hex(output, "committed", i < gCurrentInstructions.size() ? gCurrentInstructions[i] : 0,
+            gDiagnosticHaveCommit && i < gCurrentInstructions.size(), true);
+        output += ','; Text(output, "detail", detail);
+        output += ','; Number(output, "originPid", static_cast<uint32_t>(getpid()));
+        output += '}';
+    }
+}
+
+bool WriteHookDiagnostics(const std::string& nonce) {
+    using namespace diagnostics;
+    const uint64_t startTicks = DiagnosticStartTicks();
+    // A snapshot that cannot establish process ownership is unusable; preserve
+    // the last file so the reader can explicitly reject its old identity.
+    if (!startTicks) return false;
+    char boot[64]{};
+    ReadDiagnosticText("/proc/sys/kernel/random/boot_id", boot, sizeof(boot));
+    if (const size_t length = std::strlen(boot); length && boot[length - 1] == '\n') boot[length - 1] = '\0';
+    timespec now{};
+    const bool haveTime = syscall(SYS_clock_gettime, CLOCK_BOOTTIME, &now) == 0;
+    timespec wall{};
+    const bool haveWall = syscall(SYS_clock_gettime, CLOCK_REALTIME, &wall) == 0;
+    std::string output; output.reserve(32 * 1024);
+    output += '{'; Number(output, "schema", 1);
+    output += ','; Number(output, "pid", static_cast<uint32_t>(getpid()));
+    output += ','; Number(output, "startTicks", startTicks);
+    output += ','; Text(output, "process", "com.miui.home");
+    output += ','; Text(output, "bootId", boot);
+    output += ','; Number(output, "updatedElapsedMs", haveTime ? uint64_t(now.tv_sec) * 1000 + now.tv_nsec / 1000000 : 0);
+    output += ','; Number(output, "capturedAtMillis", haveWall ? uint64_t(wall.tv_sec) * 1000 + wall.tv_nsec / 1000000 : 0);
+    output += ','; Text(output, "requestNonce", nonce.c_str());
+    output += ','; Text(output, "profileId", gProfile.id.c_str());
+    output += ','; Text(output, "profileDigest", gProfileDigest.empty() ? gDiagnosticLoadedProfileDigest.c_str() : gProfileDigest.c_str());
+    output += ','; Text(output, "requestedProfileDigest", gDiagnosticRequestedProfileDigest.c_str());
+    output += ','; Text(output, "phase", gDiagnosticPhase);
+    output += ','; Number(output, "result", __atomic_load_n(&monoicon_hyos_palette.result, __ATOMIC_ACQUIRE));
+    output += ','; Text(output, "reason", gProfileError.c_str());
+    output += ','; Number(output, "pageSize", __atomic_load_n(&monoicon_hyos_palette.page_size, __ATOMIC_ACQUIRE));
+    output += ','; Number(output, "installerStopped", gDiagnosticInstallationStopped ? 1 : 0);
+    output += ','; Number(output, "iconsEnabled", monoicon_hyos_icons_enabled() ? 1 : 0);
+    output += ','; Hex(output, "foregroundPage", reinterpret_cast<uintptr_t>(gForegroundPage), gForegroundPage != nullptr);
+    output += ','; Quote(output, "nativeInit"); output += ':'; monoicon_hyos_append_init_diagnostics(output);
+    output += ','; Quote(output, "images"); output += ":[";
+    for (size_t i = 0; i < gProfile.images.size(); ++i) {
+        if (i) output += ',';
+        const auto& image = gProfile.images[i];
+        const bool mapped = gDiagnosticMappingMatchesProfile && i < gRuntime.images.size() && gRuntime.images[i].bias;
+        output += '{'; Text(output, "id", image.id.c_str());
+        output += ','; Text(output, "library", image.library.c_str());
+        output += ','; Text(output, "path", mapped ? gRuntime.images[i].path.c_str() : "");
+        output += ','; Hex(output, "loadBias", mapped ? gRuntime.images[i].bias : 0, mapped);
+        output += ','; Hex(output, "fileOffset", mapped ? gRuntime.images[i].fileOffset : 0, mapped);
+        output += ','; Hex(output, "inode", mapped ? gRuntime.images[i].inode : 0, mapped);
+        output += ','; Text(output, "state", mapped && gDiagnosticRuntimeReady && gDiagnosticImagesValid ? "verified" : "unverified");
+        output += '}';
+    }
+    output += "],"; Quote(output, "points"); output += ":[";
+    monoicon_hyos_append_startup_diagnostics(output);
+    monoicon_hyos_append_icon_diagnostics(output);
+    AppendProfileDiagnostics(output);
+    output += "]}\n";
+    if (output.size() > 1024 * 1024) return false;
+    char path[256], stage[256], name[96];
+    LauncherFilePath(path, sizeof(path), "monoicon_hyos_hooks.json");
+    std::snprintf(name, sizeof(name), "monoicon_hyos_hooks.json.%d.new", static_cast<int>(getpid()));
+    LauncherFilePath(stage, sizeof(stage), name);
+    const int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, stage,
+        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600));
+    if (fd < 0) return false;
+    struct stat metadata{};
+    const bool regular = syscall(SYS_fstat, fd, &metadata) == 0 && S_ISREG(metadata.st_mode);
+    size_t written = 0;
+    while (regular && written < output.size()) {
+        const auto count = syscall(SYS_write, fd, output.data() + written, output.size() - written);
+        if (count > 0) written += static_cast<size_t>(count);
+        else if (count < 0 && errno == EINTR) continue;
+        else break;
+    }
+    syscall(SYS_close, fd);
+    if (written == output.size() && syscall(SYS_renameat, AT_FDCWD, stage, AT_FDCWD, path) == 0) return true;
+    syscall(SYS_unlinkat, AT_FDCWD, stage, 0);
+    return false;
+}
+
+void MaybeWriteHookDiagnostics() {
+    if (::hyperos4::pauseActive.load(std::memory_order_acquire) != 0) return;
+    const int savedErrno = errno;
+    const auto nonce = ReadDiagnosticNonce();
+    if ((gDiagnosticDirty || (!nonce.empty() && nonce != gDiagnosticNonce)) && WriteHookDiagnostics(nonce)) {
+        gDiagnosticDirty = false;
+        gDiagnosticNonce = nonce;
+    }
+    errno = savedErrno;
+}
+} // namespace
 
 void* PrepareForegroundPage(uintptr_t from, size_t pageSize, uint32_t background, uint32_t foreground,
                             uint32_t& branch) {
@@ -463,6 +665,11 @@ uint32_t InstallPaletteTransaction(size_t pageSize, uint32_t background,
         const uint32_t replacement = enabled ? profile::Resolve(value, p.original, background, foreground, foregroundBranch) : p.original;
         patches[i] = {gRuntime.address(gProfile, p), gCurrentInstructions[i], replacement};
     }
+    // Record the exact branch/literal chosen for this attempt before touching
+    // code. A failed transaction must not pretend this was a committed word.
+    gDiagnosticExpected.resize(patchCount);
+    gDiagnosticExpectedKnown.assign(patchCount, 1);
+    for (size_t i = 0; i < patchCount; ++i) gDiagnosticExpected[i] = patches[i].replacement;
 
     uintptr_t pages[kMaxPatches] = {};
     size_t pageCount = 0;
@@ -555,6 +762,7 @@ uint32_t InstallPaletteTransaction(size_t pageSize, uint32_t background,
         }
         const bool finished = pause.finish();
         if (finished) {
+            gDiagnosticEnabled = enabled;
             if (previousPage != nullptr) munmap(previousPage, pageSize);
             Fail(enabled ? kResultInstalled : kResultDisabled,
                  enabled ? "installed" : "disabled-restored");
@@ -615,6 +823,7 @@ bool PaletteStep(PaletteWorkerState& state) {
     do {
         PaletteConfig next;
         uint32_t result = ReadPalette(next);
+        if (result == kResultNone) gDiagnosticRequestedProfileDigest = next.profileDigest;
         // This runs before profile loading, native icon hooks or code writes.
         // A native abort cannot run cleanup, so the next process detects the
         // pending checkpoint and permanently stops here until explicit retry.
@@ -625,19 +834,28 @@ bool PaletteStep(PaletteWorkerState& state) {
             return false;
         }
         if (result == kResultNone && !profileReady) {
+            gDiagnosticRuntimeReady = false;
+            gDiagnosticImagesValid = false;
+            gDiagnosticMappingMatchesProfile = false;
             if (!profile::LoadProfile(next.profileDigest, gProfile, gProfileError)) result = kResultProfileInvalid;
             else if (failedImageDigest == next.profileDigest) {
                 gProfileError = failedImageReason;
                 result = kResultIdentityMismatch;
-            } else if (!gRuntime.discover(gProfile, gProfileError)) {
-                result = gProfileError.rfind("image-missing:", 0) == 0 ? kResultImageMissing : kResultIdentityMismatch;
-                if (result == kResultIdentityMismatch) { failedImageDigest = next.profileDigest; failedImageReason = gProfileError; }
-            }
-            else {
-                gProfileDigest = next.profileDigest;
-                gCurrentInstructions.clear();
-                for (const auto& patch : gProfile.patches) gCurrentInstructions.push_back(patch.original);
-                profileReady = true; gProfileError.clear();
+            } else {
+                gDiagnosticLoadedProfileDigest = next.profileDigest;
+                gDiagnosticMappingMatchesProfile = true;
+                if (!gRuntime.discover(gProfile, gProfileError)) {
+                    result = gProfileError.rfind("image-missing:", 0) == 0 ? kResultImageMissing : kResultIdentityMismatch;
+                    if (result == kResultIdentityMismatch) { failedImageDigest = next.profileDigest; failedImageReason = gProfileError; }
+                } else {
+                    gProfileDigest = next.profileDigest;
+                    gCurrentInstructions.clear();
+                    for (const auto& patch : gProfile.patches) gCurrentInstructions.push_back(patch.original);
+                    gDiagnosticExpected = gCurrentInstructions;
+                    gDiagnosticExpectedKnown.assign(gCurrentInstructions.size(), 1);
+                    gDiagnosticRuntimeReady = true;
+                    profileReady = true; gProfileError.clear();
+                }
             }
         }
         if (result != kResultNone) {
@@ -676,6 +894,7 @@ bool PaletteStep(PaletteWorkerState& state) {
                 }
             }
             if (!known) {
+                gDiagnosticImagesValid = false;
                 gIconsEnabled.store(false, std::memory_order_release);
                 Fail(kResultIdentityMismatch, "unexpected-code-change");
                 return false;
@@ -708,6 +927,17 @@ bool PaletteStep(PaletteWorkerState& state) {
         }
         __atomic_fetch_add(&monoicon_hyos_palette.attempts, 1u, __ATOMIC_RELAXED);
         const bool exportedIcons = next.version >= 2;
+        // The dynamic veneer branch is filled by InstallPaletteTransaction.
+        // Other words remain available even if a precondition stops installation.
+        gDiagnosticExpected.resize(patchCount);
+        gDiagnosticExpectedKnown.resize(patchCount);
+        for (size_t i = 0; i < patchCount; ++i) {
+            const auto& patch = gProfile.patches[i];
+            const auto& value = exportedIcons ? (next.circle ? patch.circle : patch.icons) : patch.palette;
+            gDiagnosticExpected[i] = next.enabled ? profile::Resolve(value, patch.original,
+                next.background, next.foreground, 0) : patch.original;
+            gDiagnosticExpectedKnown[i] = !next.enabled || value.kind != profile::ValueKind::Veneer;
+        }
         if (!ValidateImages()) {
             gIconsEnabled.store(false, std::memory_order_release);
             Fail(kResultIdentityMismatch, "identity-mismatch");
@@ -745,6 +975,10 @@ bool PaletteStep(PaletteWorkerState& state) {
                                                next.enabled != 0, exportedIcons, next.circle != 0);
         }
         if (result == kResultInstalled || result == kResultDisabled) {
+            gDiagnosticHaveCommit = true;
+            gDiagnosticEnabled = next.enabled != 0;
+            gDiagnosticExpected = gCurrentInstructions;
+            gDiagnosticExpectedKnown.assign(gCurrentInstructions.size(), 1);
             __atomic_store_n(&monoicon_hyos_palette.background, next.background, __ATOMIC_RELEASE);
             __atomic_store_n(&monoicon_hyos_palette.foreground, next.foreground, __ATOMIC_RELEASE);
             monoicon_hyos_select_icon_generation(next.enabled && exportedIcons ? next.generation : nullptr);
@@ -771,9 +1005,19 @@ bool PaletteStep(PaletteWorkerState& state) {
 void* PaletteWorker(void* data) {
     std::unique_ptr<PaletteWorkerState> state(static_cast<PaletteWorkerState*>(data));
     while (state->start.load(std::memory_order_acquire) == 0) usleep(1000);
-    if (state->start.load(std::memory_order_acquire) == 2) return nullptr;
-    while (PaletteStep(*state)) usleep(500000);
-    return nullptr;
+    bool keepInstalling = state->start.load(std::memory_order_acquire) == 1;
+    gDiagnosticInstallationStopped = !keepInstalling;
+    while (true) {
+        // A fatal/safety stop is permanent for this process. Retain this thread
+        // solely to answer read-only diagnostic nonces; never re-enter the
+        // safety guard, configuration engine or instruction transaction.
+        if (keepInstalling) {
+            keepInstalling = PaletteStep(*state);
+            gDiagnosticInstallationStopped = !keepInstalling;
+        }
+        MaybeWriteHookDiagnostics();
+        usleep(500000);
+    }
 }
 
 // Exactly one engine belongs to each child. Only a safe startup loader callback
@@ -822,9 +1066,13 @@ uint32_t StartPalette(bool synchronous) {
     // The worker touches neither the linker nor the transaction until release.
     // Never wait for a worker holding/waiting on linker locks in a loader callback.
     const bool keepRunning = !synchronous || PaletteStep(*state);
+    if (synchronous) gDiagnosticInstallationStopped = !keepRunning;
     if (synchronous && state->haveApplied && state->acknowledged) {
         WritePaletteStatus(state->applied.enabled ? "startup-applied" : "startup-disabled");
     }
+    // The synchronous owner still holds the worker's start gate here; only one
+    // thread reads the runtime pipe or publishes the snapshot at any time.
+    if (synchronous) MaybeWriteHookDiagnostics();
     state->startup = false;
     state->start.store(keepRunning ? 1 : 2, std::memory_order_release);
     return __atomic_load_n(&monoicon_hyos_palette.result, __ATOMIC_ACQUIRE);

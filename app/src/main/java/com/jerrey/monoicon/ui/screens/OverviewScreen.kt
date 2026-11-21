@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,14 +54,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.safety.LauncherSafety
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
 import com.jerrey.monoicon.ui.ScopeApp
 import com.jerrey.monoicon.ui.XposedState
 import com.jerrey.monoicon.ui.requestScope
 import com.jerrey.monoicon.ui.settings.AppUpdateChecker
-import com.jerrey.monoicon.ui.settings.rememberUiSettings
 import com.jerrey.monoicon.ui.stringsFor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -72,6 +76,7 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.isDynamicColor
@@ -93,9 +98,19 @@ fun OverviewScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var status by remember { mutableStateOf(XposedState.UNAVAILABLE) }
     var enabled by remember { mutableStateOf(ConfigManager.isEnabledFromUi()) }
+    var safetyBlocked by remember { mutableStateOf(ConfigManager.isSafetyBlockedFromUi()) }
+    var safetyBusy by remember { mutableStateOf(false) }
+    var safetyError by remember { mutableStateOf(false) }
+    var restartHint by rememberSaveable { mutableStateOf(false) }
+    val chinese = strings.masterSwitch == stringsFor(AppLanguage.CHINESE, true).masterSwitch
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) {
-        val listener: (String?) -> Unit = { scope.launch { enabled = ConfigManager.isEnabledFromUi() } }
+        val listener: (String?) -> Unit = {
+            scope.launch {
+                enabled = ConfigManager.isEnabledFromUi()
+                safetyBlocked = ConfigManager.isSafetyBlockedFromUi()
+            }
+        }
         ConfigManager.addOnConfigChangedListener(listener)
         onDispose { ConfigManager.removeOnConfigChangedListener(listener) }
     }
@@ -109,6 +124,7 @@ fun OverviewScreen(
         if (!isActive) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             enabled = ConfigManager.isEnabledFromUi()
+            safetyBlocked = ConfigManager.isSafetyBlockedFromUi()
             launch {
                 systemInfo = withContext(Dispatchers.IO) { HomeSystemInfo.load() }
                 scopeApps = withContext(Dispatchers.IO) { ScopeApp.load(context, XposedState.REQUIRED_SCOPE) }
@@ -131,6 +147,64 @@ fun OverviewScreen(
     ) {
         HomeUpdateCard(labels)
         StatusHeroCard(status, enabled, labels, onClick = { showScope = true })
+        Card(modifier = Modifier.fillMaxWidth()) {
+            SwitchPreference(
+                title = strings.masterSwitch,
+                summary = if (safetyBlocked) {
+                    if (chinese) "安全模式已自动停用模块：检测到桌面短命重启。重新开启主开关并重启作用域可重试。"
+                    else "Safety mode disabled the module after an early launcher restart. Enable the master switch and restart the scope to retry."
+                } else strings.masterSwitchSummary,
+                startAction = {
+                    Icon(
+                        Icons.Rounded.PowerSettingsNew,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 6.dp),
+                        tint = colorScheme.onBackground,
+                    )
+                },
+                checked = enabled,
+                enabled = !safetyBusy,
+                onCheckedChange = { value ->
+                    safetyBusy = true
+                    safetyError = false
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                if (value) LauncherSafety.enable(context) else ConfigManager.setEnabled(false)
+                            }
+                            restartHint = true
+                            logi("MonoIcon.Home", "master switch=$value")
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            safetyError = true
+                        } finally {
+                            enabled = ConfigManager.isEnabledFromUi()
+                            safetyBlocked = ConfigManager.isSafetyBlockedFromUi()
+                            safetyBusy = false
+                        }
+                    }
+                },
+            )
+            Text(
+                text = if (chinese) "启动保护始终开启：启用后桌面未能存活 30 秒，将在下次启动时自动停用模块。"
+                    else "Startup protection is always on: if the launcher exits within 30 seconds of activation, the module is disabled on the next start.",
+                style = MiuixTheme.textStyles.footnote1,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
+            )
+            if (safetyError) Text(
+                text = if (chinese) "无法安全恢复，请授予 MonoIcon root 权限后重试。" else "Unable to retry safely. Grant MonoIcon root access and try again.",
+                color = colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
+            )
+            if (restartHint) Text(
+                text = strings.restartHint,
+                style = MiuixTheme.textStyles.footnote1,
+                color = colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
+            )
+        }
         SystemInfoCards(systemInfo, labels)
     }
 
@@ -287,7 +361,7 @@ private fun SystemInfoCards(systemInfo: HomeSystemInfo, labels: HomeLabels) {
 @Composable
 private fun HomeUpdateCard(labels: HomeLabels) {
     val update by AppUpdateChecker.state.collectAsState()
-    val release = update.availableRelease.takeIf { rememberUiSettings().checkUpdate }
+    val release = update.availableRelease
     var showDetails by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
     AnimatedVisibility(visible = release != null, enter = fadeIn() + expandVertically(), exit = shrinkVertically() + fadeOut()) {

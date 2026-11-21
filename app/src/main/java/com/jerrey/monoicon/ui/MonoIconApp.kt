@@ -10,11 +10,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import com.jerrey.monoicon.ui.settings.rememberUiSettings
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.jerrey.monoicon.config.ConfigManager
-import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
+import com.jerrey.monoicon.theme.wallpaper.WallpaperSourceRepository
 import com.jerrey.monoicon.ui.screens.SettingsScreen
 import com.jerrey.monoicon.ui.theme.MonoIconTheme
 import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
@@ -29,12 +30,13 @@ import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
 fun MonoIconApp() {
     val settings = rememberUiSettings()
     val context = LocalContext.current
-    LaunchedEffect(settings.checkUpdate) {
-        if (settings.checkUpdate) AppUpdateChecker.check(context)
+    LaunchedEffect(context) {
+        AppUpdateChecker.check(context)
     }
     val systemDensity = LocalDensity.current
     var variant by remember { mutableStateOf(ConfigManager.getVariantIdFromUi()) }
-    val seedColor = PixelMonetColorEngine.getSeedColor()
+    val wallpaper by WallpaperSourceRepository.state.collectAsState()
+    val seedColor = wallpaper.seedColor
 
     MonoIconTheme(
         seedColor = seedColor,

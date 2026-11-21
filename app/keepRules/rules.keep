@@ -9,6 +9,9 @@
 # Hook utilities
 -keep class com.jerrey.monoicon.hook.HookStats { *; }
 
+# Root app_process entry point for wallpaper-only SurfaceControl capture.
+-keep class com.jerrey.monoicon.theme.wallpaper.RootWallpaperScreenshot { *; }
+
 # Logging
 -keep class com.jerrey.monoicon.logging.** { *; }
 

@@ -257,7 +257,7 @@ internal fun ProfileSettings(isActive: Boolean = true) {
         )
         BasicComponent(
             title = strings.profilePublication,
-            summary = publishStatus,
+            summary = (if (chinese) "本次应用进程的配置发布记录：\n" else "Configuration publication recorded by this app process:\n") + publishStatus,
             startAction = { ProfilePreferenceIcon(Icons.Rounded.Info, strings.profilePublication) },
         )
     }

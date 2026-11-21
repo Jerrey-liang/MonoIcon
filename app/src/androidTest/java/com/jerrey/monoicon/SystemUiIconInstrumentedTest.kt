@@ -1,5 +1,6 @@
 package com.jerrey.monoicon
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -7,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
+import android.util.LruCache
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jerrey.monoicon.cache.MonochromeCache
@@ -17,11 +20,13 @@ import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.theme.mask.LawniconsAssetSource
 import com.jerrey.monoicon.theme.render.ColoredMonochromeDrawable
 import com.jerrey.monoicon.theme.render.IconShape
+import com.jerrey.monoicon.theme.render.LauncherPaletteSnapshot
 import com.jerrey.monoicon.theme.render.ThemedIconBuilder
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,9 +44,15 @@ import org.junit.runner.RunWith
 class SystemUiIconInstrumentedTest {
 
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+    private var restoreNotificationState: (() -> Unit)? = null
 
     @After
     fun clearCaches() {
+        restoreNotificationState?.let { restore ->
+            restoreNotificationState = null
+            restore()
+            return
+        }
         IconDrawableCache.clear()
         MonochromeCache.shared.clear()
         PixelMonetColorEngine.invalidate()
@@ -123,6 +134,114 @@ class SystemUiIconInstrumentedTest {
         assertEquals(0, Color.alpha(bitmap.bitmap.getPixel(0, 0)))
         assertTrue(Color.alpha(bitmap.bitmap.getPixel(32, 32)) > 220)
         assertEquals(originalBounds, themed.bounds)
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun notificationBitmapCacheRefreshesBorderWithTheSamePackageSizeAndColors() {
+        val prefs = context.getSharedPreferences("notification_border_cache_test", Context.MODE_PRIVATE)
+        val configFields = listOf("fallbackPrefs", "uiRemotePrefs", "remotePrefsProvider")
+            .map { runtimeField(ConfigManager::class.java, it) }
+        val engineFields = listOf("launcherContext", "cachedIconColors", "lastLoggedColors")
+            .map { runtimeField(PixelMonetColorEngine::class.java, it) }
+        val initialised = runtimeField(SystemUiIconHooks::class.java, "initialised")
+        val palette = runtimeField(LauncherPaletteSnapshot::class.java, "palette")
+        val savedFields = (configFields + engineFields + initialised + palette)
+            .associateWith { it.get(null) }
+        val listeners = runtimeField(ConfigManager::class.java, "configListeners").get(null)
+            as MutableSet<(String?) -> Unit>
+        val savedListeners = listeners.toSet()
+        val bitmapCache = runtimeField(SystemUiIconHooks::class.java, "bitmapCache").get(null)
+            as MutableMap<String, java.lang.ref.WeakReference<Bitmap>>
+        val savedBitmaps = bitmapCache.toMap()
+        val rawLock = runtimeField(IconDrawableCache::class.java, "lock").get(null)
+        val rawStore = runtimeField(IconDrawableCache::class.java, "store").get(null)
+            as Map<String, Drawable>
+        val savedRaw = synchronized(rawLock) { rawStore.toMap() }
+        val maskCache = runtimeField(MonochromeCache::class.java, "cache").get(MonochromeCache.shared)
+            as LruCache<String, Bitmap>
+        val savedMasks = maskCache.snapshot()
+        val ownedBitmaps = mutableListOf<Bitmap>()
+
+        // This test must not export temporary preferences or leave runtime state
+        // behind, even when an assertion fails before the second render.
+        restoreNotificationState = {
+            savedFields.forEach { (field, value) -> field.set(null, value) }
+            listeners.clear()
+            listeners.addAll(savedListeners)
+            bitmapCache.clear()
+            bitmapCache.putAll(savedBitmaps)
+            IconDrawableCache.clear()
+            savedRaw.forEach { (identity, drawable) -> IconDrawableCache.put(identity, drawable) }
+            maskCache.evictAll()
+            savedMasks.forEach { (key, bitmap) -> maskCache.put(key, bitmap) }
+            prefs.edit().clear().commit()
+            ownedBitmaps.distinct().filterNot { it.isRecycled }.forEach(Bitmap::recycle)
+        }
+        listeners.clear()
+        prefs.edit().clear()
+            .putBoolean("lawnicons_enabled", false)
+            .putInt("icon_roundness_percent", 0)
+            .putInt("icon_size_percent", 100)
+            .putInt("generated_icon_border_percent", 100)
+            .putString("variant_id", "monochrome")
+            .putString("color_engine_id", "material_2025")
+            .commit()
+        configFields[0].set(null, prefs)
+        configFields[1].set(null, prefs)
+        configFields[2].set(null, null)
+        // Use cached raw input with manager=null, avoiding SystemUI startup and
+        // wallpaper retrieval. Monochrome colors also stay independent of seed.
+        initialised.setBoolean(null, true)
+        engineFields[0].set(null, null)
+        engineFields[1].set(null, null)
+        palette.set(null, null)
+        bitmapCache.clear()
+        IconDrawableCache.clear()
+        maskCache.evictAll()
+
+        val source = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).also {
+            it.density = Bitmap.DENSITY_NONE
+            it.eraseColor(Color.rgb(0, 128, 223))
+            Canvas(it).drawRect(22f, 22f, 42f, 42f, Paint().apply { color = Color.WHITE })
+            ownedBitmaps += it
+        }
+        val pkg = "com.example.notificationborder"
+        IconDrawableCache.put(pkg, BitmapDrawable(context.resources, source))
+        val original = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also {
+            it.density = 320
+            ownedBitmaps += it
+        }
+        val render = SystemUiIconHooks::class.java.getDeclaredMethod(
+            "themedBitmap", Any::class.java, String::class.java, Bitmap::class.java,
+        ).apply { isAccessible = true }
+        fun renderNotification(): Bitmap = checkNotNull(
+            render.invoke(SystemUiIconHooks, null, pkg, original) as? Bitmap,
+        ).also { ownedBitmaps += it }
+
+        val colors = PixelMonetColorEngine.getIconColors()
+        val withBorder = renderNotification()
+        assertSame("unchanged notification reuses the warm bitmap", withBorder, renderNotification())
+        // A remote preference update does not clear this separate bitmap cache.
+        // Keep it warm so the border lookup itself must notice the new value.
+        assertTrue(prefs.edit().putInt("generated_icon_border_percent", 0).commit())
+        assertEquals(0f, ConfigManager.generatedIconBorderRatio, 0f)
+        val unchangedColors = PixelMonetColorEngine.getIconColors()
+        assertEquals(colors.foreground, unchangedColors.foreground)
+        assertEquals(colors.background, unchangedColors.background)
+        val withoutBorder = renderNotification()
+        assertNotSame("border changes cannot return the warm old bitmap", withBorder, withoutBorder)
+        assertFalse("border changes must alter the rendered pixels", withBorder.sameAs(withoutBorder))
+        assertEquals("white artwork keeps its foreground tint", colors.foreground, withoutBorder.getPixel(48, 48))
+        assertEquals("white artwork is independent of border width", withBorder.getPixel(48, 48), withoutBorder.getPixel(48, 48))
+        assertEquals(original.width, withoutBorder.width)
+        assertEquals(original.height, withoutBorder.height)
+        assertEquals(original.density, withoutBorder.density)
+        assertSame("the new border result is cached too", withoutBorder, renderNotification())
+    }
+
+    private fun runtimeField(owner: Class<*>, name: String) = owner.getDeclaredField(name).apply {
+        isAccessible = true
     }
 
     /** Adaptive icon with a white plate and a black glyph in the middle. */

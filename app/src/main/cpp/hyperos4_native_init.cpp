@@ -67,6 +67,7 @@
 #include <cstdint>
 #include <cstring>
 #include "hyperos4_paths.h"
+#include "hyperos4_diagnostics.h"
 
 namespace {
 
@@ -121,6 +122,8 @@ struct HyosStatus {
 };
 
 constexpr uint32_t kStatusMagic = 0x4D4F4E49u;  // "MONI"
+std::atomic<uintptr_t> gEntryPointAddress{0};
+std::atomic<uint32_t> gNativeInitPid{0};
 
 extern "C" __attribute__((used, visibility("default")))
 HyosStatus monoicon_hyos_status = {};
@@ -351,6 +354,7 @@ void HandleLauncherLibrary(void* handle) {
     // until a reboot. Hooking now goes exclusively through LSPosed's hookFunc.
     void* entryPoint = dlsym(handle, kLauncherEntrySymbol);
     if (entryPoint != nullptr) {
+        gEntryPointAddress.store(reinterpret_cast<uintptr_t>(entryPoint), std::memory_order_release);
         __atomic_store_n(&monoicon_hyos_status.entry_point_resolved, 1u,
                          __ATOMIC_RELEASE);
         __atomic_store_n(&monoicon_hyos_status.has_app_entry_point, 1u,
@@ -418,6 +422,7 @@ extern "C" __attribute__((visibility("default"))) NativeOnModuleLoaded
 native_init(const NativeAPIEntries* entries) {
     const bool spawner = IsHyosSpawnerProcess();
     const bool launcherChild = IsLauncherChildProcess();
+    gNativeInitPid.store(static_cast<uint32_t>(getpid()), std::memory_order_release);
 
     __atomic_store_n(&monoicon_hyos_status.api_version,
                      entries != nullptr ? entries->version : 0u, __ATOMIC_RELEASE);
@@ -474,4 +479,20 @@ native_init(const NativeAPIEntries* entries) {
         "MonoIcon native_init armed the HYOS library callback");
     WriteStatusFile("armed");
     return &OnLibraryLoaded;
+}
+
+extern "C" void monoicon_hyos_append_init_diagnostics(std::string& output) {
+    using namespace monoicon::hyos::diagnostics;
+    output += '{'; Number(output, "originPid", gNativeInitPid.load(std::memory_order_acquire));
+    output += ','; Number(output, "apiVersion", __atomic_load_n(&monoicon_hyos_status.api_version, __ATOMIC_ACQUIRE));
+    output += ','; Number(output, "hookAvailable", __atomic_load_n(&monoicon_hyos_status.have_hook_func, __ATOMIC_ACQUIRE));
+    output += ','; Number(output, "unhookAvailable", __atomic_load_n(&monoicon_hyos_status.have_unhook_func, __ATOMIC_ACQUIRE));
+    output += ','; Number(output, "spawner", IsHyosSpawnerProcess() ? 1 : 0);
+    output += ','; Number(output, "child", IsLauncherChildProcess() ? 1 : 0);
+    output += ','; Number(output, "sequence", __atomic_load_n(&monoicon_hyos_status.lifecycle_sequence, __ATOMIC_ACQUIRE));
+    output += ','; Number(output, "launcherLibrarySeen", __atomic_load_n(&monoicon_hyos_status.launcher_library_seen, __ATOMIC_ACQUIRE));
+    output += ','; Number(output, "dartLibrarySeen", __atomic_load_n(&monoicon_hyos_status.dart_library_seen, __ATOMIC_ACQUIRE));
+    const uintptr_t entryPoint = gEntryPointAddress.load(std::memory_order_acquire);
+    output += ','; Hex(output, "entryPoint", entryPoint, entryPoint != 0);
+    output += '}';
 }

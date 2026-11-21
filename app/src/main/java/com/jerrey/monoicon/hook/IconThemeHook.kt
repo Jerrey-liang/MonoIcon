@@ -12,7 +12,6 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
-import android.os.Looper
 import com.jerrey.monoicon.color.IconColorCache
 import com.jerrey.monoicon.color.IconDrawableCache
 import com.jerrey.monoicon.color.IconColorExtractor
@@ -70,6 +69,7 @@ class IconThemeHook : XposedModule() {
 
     @Volatile
     private var isLauncherMainProcess = false
+    private var runtimeProcessName = ""
 
     // Phase 3.11: Pixel-style icon color extraction（独立管线，不影响 mask 生成）
     private val colorExtractor = PixelStyleColorExtractor()
@@ -86,8 +86,8 @@ class IconThemeHook : XposedModule() {
      * Bitmaps produced from a [ColoredMonochromeDrawable] by
      * `FloatingIconAnimHelper.drawableToBitmap` (used by both
      * `FloatingIconUtils.fillDrawable` and the classic `FloatingIconView2`
-     * path). Lets the launch/back-home animation hooks recognize MonoIcon
-     * content after the launcher converted our drawable into a bitmap.
+     * path). The animation and icon-binding hooks recognize finished MonoIcon
+     * content after conversion, so it cannot enter mask generation again.
      * Weak keys — a bitmap stays marked only while the launcher holds it.
      */
     private val monoBitmapIds = java.util.Collections.synchronizedSet(
@@ -119,6 +119,7 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
 
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
+        runtimeProcessName = param.processName
         isLauncherMainProcess = !param.isSystemServer && param.processName == "com.miui.home"
         android.util.Log.i(TAG, "onModuleLoaded: process=${param.processName} systemServer=${param.isSystemServer}")
     }
@@ -135,6 +136,9 @@ class IconThemeHook : XposedModule() {
         if (pkg != "com.miui.home" && pkg != "com.android.systemui") return
         if (pkg == "com.miui.home" && (!isLauncherMainProcess || !param.isFirstPackage)) return
 
+        HookDiagnostics.start(this, pkg, runtimeProcessName,
+            pkg == "com.miui.home" && param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0)
+
         // The no-DEX launcher is handled by onPackageReady; its Java icon classes
         // do not exist. Preserve the legacy and SystemUI hook paths below.
         if (pkg == "com.miui.home" &&
@@ -147,6 +151,7 @@ class IconThemeHook : XposedModule() {
         if (pkg == "com.miui.home" && ConfigManager.isEnabled() &&
             !com.jerrey.monoicon.safety.LauncherSafetyNative.begin()) {
             ConfigManager.disableForHooks()
+            HookRegistry.skipPending("Launcher startup safety blocked installation")
             android.util.Log.w(TAG, "Startup safety blocked MonoIcon; launcher hooks will not be installed")
             return
         }
@@ -163,7 +168,10 @@ class IconThemeHook : XposedModule() {
             HookRegistry.install("HyperOs4SystemEvents", required = false) {
                 HyperOs4SystemEvents.install(this)
             }
-            if (!enabled) return
+            if (!enabled) {
+                HookRegistry.skipPending("Module disabled")
+                return
+            }
             installSystemUiHooks(cl)
             return
         }
@@ -171,7 +179,10 @@ class IconThemeHook : XposedModule() {
         android.util.Log.i(TAG, "MonoIcon enabled=$enabled — ${if (enabled) "installing hooks" else "skip hooks"}")
         android.util.Log.i(TAG, "ClassLoader: $cl")
 
-        if (!enabled) return
+        if (!enabled) {
+            HookRegistry.skipPending("Module disabled")
+            return
+        }
 
         installHooks(cl)
     }
@@ -259,9 +270,7 @@ class IconThemeHook : XposedModule() {
             .getDeclaredMethod("setIconDrawable", Drawable::class.java, Bitmap::class.java)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 val start = System.nanoTime()
 
                 // Phase 4.1: runtime switch — disabled = original launcher behavior
@@ -311,9 +320,7 @@ class IconThemeHook : XposedModule() {
             .getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 processFolderIcon(chain, "Folder6", "folderSetImageDrawable")
             }
     }
@@ -331,9 +338,7 @@ class IconThemeHook : XposedModule() {
         ).getDeclaredMethod("refreshIconDrawable", Drawable::class.java)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 processFolderIcon(chain, "Folder8", null)
             }
     }
@@ -438,7 +443,7 @@ class IconThemeHook : XposedModule() {
             // mono glyph is ~0 alpha → invisible folder icons, e.g.
             // googlequicksearchbox / kernelsu). Keep the existing
             // replacement unchanged — the view already shows the correct icon.
-            if (d is ColoredMonochromeDrawable) {
+            if (isMonoAnimationDrawable(d)) {
                 logd(TAG_FOLDER,
                     "[${logPrefix}Keep] t=$tMs vh=@${Integer.toHexString(viewHash)} " +
                     "dClass=$dClass already_mono")
@@ -475,11 +480,18 @@ class IconThemeHook : XposedModule() {
             // Phase 6.0: ColoredMonochromeDrawable renders mask with SRC_IN color;
             // Phase 3.18-D: hand the launcher a private copy (cache bitmap never shared)
             val safeMask = mask.copy(Bitmap.Config.ARGB_8888, false) ?: mask
+            val preferences = ConfigManager.getEffectiveIconStyle(identity)
             val replacement = ColoredMonochromeDrawable(
                 safeMask,
                 iconResult.color,
                 iconResult.plate,
-                ConfigManager.iconShape(),
+                roundnessPercent = preferences.roundnessPercent,
+                sizePercent = preferences.sizePercent,
+                generatedBorderRatio = preferences.generatedBorderRatio,
+                generatedArtworkRadiusFraction = preferences.generatedArtworkRadiusFraction,
+                adjustGeneratedBorder = com.jerrey.monoicon.theme.render.adjustsGeneratedBorder(iconResult.source),
+                tonal = iconResult.tonal,
+                identity = identity,
             )
 
             logd(TAG_FOLDER,
@@ -533,9 +545,7 @@ class IconThemeHook : XposedModule() {
                 Drawable::class.java)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 val tMs = relMs()
 
                 // Phase 4.1: runtime switch — disabled = original launcher behavior
@@ -598,9 +608,7 @@ class IconThemeHook : XposedModule() {
             iShortcutInfoClass, containerClass, Integer.TYPE, Drawable::class.java)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 val tMs = relMs()
 
                 // Phase 4.1: runtime switch — disabled = original launcher behavior
@@ -667,9 +675,7 @@ class IconThemeHook : XposedModule() {
             .getDeclaredMethod("resetBackAnim")
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 try {
                     val icon = chain.thisObject
                     val drawable = icon.javaClass.getMethod("getIconDrawable").invoke(icon) as? Drawable
@@ -727,12 +733,10 @@ class IconThemeHook : XposedModule() {
             .getDeclaredMethod("drawableToBitmap", Drawable::class.java, Integer.TYPE, Integer.TYPE)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 val drawable = chain.getArg(0) as? Drawable
                 val result = chain.proceed() as? Bitmap
-                if (drawable is ColoredMonochromeDrawable && result != null) {
+                if (isMonoAnimationDrawable(drawable) && result != null) {
                     monoBitmapIds.add(result)
                     logd(TAG, "[DrawableToBitmap] marked mono bitmap ${result.width}x${result.height}")
                 }
@@ -749,9 +753,7 @@ class IconThemeHook : XposedModule() {
                 Integer.TYPE)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 try {
                     val helper = chain.thisObject
                     val bgField = helper.javaClass.getDeclaredField("mBackgroundBitmapDrawable")
@@ -801,9 +803,7 @@ class IconThemeHook : XposedModule() {
             .getDeclaredMethod("getMIsClamp")
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 try {
                     if (isMonoFloatingLayer(chain.thisObject)) {
                         logd(TAG, "[LayerIconClamp] mono layer → forced getMIsClamp=false")
@@ -844,9 +844,7 @@ class IconThemeHook : XposedModule() {
                 java.lang.Boolean.TYPE, java.lang.Boolean.TYPE, java.lang.Integer.TYPE)
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 val drawable = chain.getArg(0) as? Drawable
                 if (drawable is ColoredMonochromeDrawable) {
                     logd(TAG, "[FillDrawable] mono drawable → skip bitmap/JNI conversion")
@@ -888,9 +886,8 @@ class IconThemeHook : XposedModule() {
     // ═══════════════════════════════════════════════════════════════
     // Hook 7: IconProvider.getActivityIcon(LauncherActivityInfo)
     //
-    // Phase 3.15: 在图标加载阶段提取原始色彩。
-    // 此时 AdaptiveIconDrawable 还保留着 APK 中的完整颜色，
-    // HyperOS 的 theme 处理尚未将其替换为 monochrome mask。
+    // Capture the activity's APK resource during icon loading. OEM icon
+    // getters can return a theme override even before this provider runs.
     // ═══════════════════════════════════════════════════════════════
 
     private fun installGetActivityIcon(cl: ClassLoader) {
@@ -901,11 +898,7 @@ class IconThemeHook : XposedModule() {
         }.getOrNull()
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
-                val tMs = relMs()
-
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 // Phase 4.1: runtime switch — disabled = original launcher behavior
                 if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
 
@@ -914,7 +907,7 @@ class IconThemeHook : XposedModule() {
                 // IconCache.cacheLocked / ShortcutInfo.getIconDrawable assert
                 // a worker thread in HyperOS 3. Finish preparation before their
                 // existing async result is posted back to the UI thread.
-                if (info != null && context != null && Looper.myLooper() != Looper.getMainLooper()) {
+                if (info != null && context != null) {
                     try {
                         initializeLauncherResources(context)
                         val component = info.componentName
@@ -923,48 +916,15 @@ class IconThemeHook : XposedModule() {
                             identity, info.user, context.resources.displayMetrics.densityDpi,
                             context.resources.configuration.hashCode(),
                         )
-                        // The expensive half — getIcon(0) plus the early colour
-                        // render inside extractEarlyIconColor — runs once per
-                        // component. The drawable is re-published to
-                        // IconDrawableCache on every call because that cache is
-                        // an LRU and may have evicted the identity meanwhile.
-                        val isolated = LauncherIconRenderer.capture(request) {
-                            val raw = info.getIcon(0) ?: return@capture null
-                            val copy = raw.constantState?.newDrawable()?.mutate()
-                                ?: return@capture null
-                            extractEarlyIconColor(info, copy, "RawAPK")
-                            copy
+                        // OEM icon getters can already apply the user's theme.
+                        // Read the activity's APK resource through the same
+                        // profile/density-aware capture used for large icons.
+                        LauncherLargeIconSource.capture(context, request) { capturedInfo, raw ->
+                            extractEarlyIconColor(capturedInfo, raw, "RawAPKResource")
                         }
-                        if (isolated != null) IconDrawableCache.put(identity, isolated)
                     } catch (t: Throwable) {
                         logd(TAG) { "[RawIconProvider] preparation failed: ${t.message}" }
                     }
-                    return@intercept chain.proceed()
-                }
-                // 在 HyperOS 处理之前，从 APK 直接获取原始彩色图标
-                // launcherActivityInfo.getIcon(0) 返回未经 theme 修改的 AdaptiveIconDrawable
-                if (info != null) {
-                    try {
-                        val rawIcon = info.getIcon(0)
-                        if (rawIcon != null) {
-                            // mutate() 创建隔离副本 — HyperOS 会在构造
-                            // LayerAdaptiveIconDrawable 时原地修改 foreground。
-                            // 没有 mutate(), our cached reference 会共享 HyperOS 的修改。
-                            val isolated = rawIcon.constantState?.newDrawable()?.mutate()
-                                ?: rawIcon.mutate()
-                            val cn = info.componentName
-                            if (cn != null) {
-                                val ident = "${cn.packageName}/${cn.className}"
-                                // Phase 3.16-A: cache isolated raw drawable for mask generation
-                                IconDrawableCache.put(ident, isolated)
-                                logd(TAG_FOLDER,
-                                    "[CachePut] t=$tMs component=$ident " +
-                                    "drawable=${isolated.javaClass.simpleName} " +
-                                    "cacheSize=${IconDrawableCache.size}")
-                            }
-                            extractEarlyIconColor(info, isolated, "RawAPK")
-                        }
-                    } catch (_: Throwable) { }
                 }
                 chain.proceed()
             }
@@ -986,6 +946,7 @@ class IconThemeHook : XposedModule() {
      * @param drawable 刚加载的图标（完整色彩）。
      */
     private fun extractEarlyIconColor(info: LauncherActivityInfo, drawable: Drawable, sourceLabel: String = "Adaptive") {
+        val previousBounds = android.graphics.Rect(drawable.bounds)
         try {
             val cn = info.componentName ?: return
             val component = "${cn.packageName}/${cn.className}"
@@ -1030,6 +991,8 @@ class IconThemeHook : XposedModule() {
             }
         } catch (t: Throwable) {
             logw(TAG_COLOR, "[EarlyColorExtractFail] component=${info.componentName} reason=${t.message}")
+        } finally {
+            drawable.bounds = previousBounds
         }
     }
 
@@ -1142,9 +1105,9 @@ class IconThemeHook : XposedModule() {
 
         // Fix (Phase 6.5): some launcher re-set flows pass back the
         // ColoredMonochromeDrawable we installed earlier. Re-generating a
-        // mask from an already-monochrome drawable degrades it; keep the
-        // existing replacement unchanged (same as the folder path).
-        if (d is ColoredMonochromeDrawable) {
+        // mask from a finished drawable or its marked bitmap degrades it;
+        // keep the existing replacement unchanged (same as the folder path).
+        if (isMonoAnimationDrawable(d)) {
             logd(TAG, "[setIconDrawable] already mono → keep existing replacement")
             return null
         }
@@ -1153,19 +1116,19 @@ class IconThemeHook : XposedModule() {
         val identity = launcherIdentity?.component ?: IdentityResolver.resolve(chain.thisObject)
         val view = chain.thisObject as? android.view.View
         if (launcherIdentity != null && view != null) {
+            ConfigManager.refreshIconPreferences()
             val request = LauncherIconRequest(
                 identity, launcherIdentity.user, view.resources.displayMetrics.densityDpi,
                 view.resources.configuration.hashCode(),
             )
-            // Large icons are loaded through IconProvider.getBigIconDrawable,
-            // bypassing the normal RawIconProvider capture entirely.
-            if (LauncherLargeIconHooks.isLargeIcon(view)) {
-                LauncherLargeIconSource.capture(view.context, request) { info, raw ->
-                    extractEarlyIconColor(info, raw, "LargeIconRawAPK")
-                } ?: return null // Do not reuse another profile's component-keyed raw cache.
-            }
-            LauncherIconRenderer.build(request, d)?.let { themed ->
-                return Pair(themed.drawable, themed.mask)
+            // A normal icon can bypass IconProvider too, and its display
+            // drawable may already be OEM-themed. Capture the APK source for
+            // every exact component/profile before trusting the raw cache.
+            val raw = LauncherLargeIconSource.capture(view.context, request) { info, raw ->
+                extractEarlyIconColor(info, raw, "RawAPKResource")
+            } ?: return null // Do not use a themed display or another profile's raw cache.
+            return LauncherIconRenderer.build(request, raw)?.let { themed ->
+                Pair(themed.drawable, themed.mask)
             }
         }
 
@@ -1223,7 +1186,8 @@ class IconThemeHook : XposedModule() {
                 android.content.res.Resources::class.java,
                 Boolean::class.javaPrimitiveType,
             )
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            HookRegistry.discoveryFailed("RecentsInvalidate", t)
             null
         }
         if (invalidate != null) {
@@ -1237,7 +1201,8 @@ class IconThemeHook : XposedModule() {
                 taskKeyClass,
                 android.app.ActivityManager.TaskDescription::class.java,
             )
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            HookRegistry.discoveryFailed("RecentsGetIcon", t)
             null
         }
         if (getIcon != null) {
@@ -1247,7 +1212,8 @@ class IconThemeHook : XposedModule() {
 
         val put = try {
             cacheClass.getDeclaredMethod("put", taskKeyClass, Any::class.java)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            HookRegistry.discoveryFailed("RecentsCachePut", t)
             null
         }
         if (put != null) {
@@ -1269,14 +1235,13 @@ class IconThemeHook : XposedModule() {
     private fun hookRecentsIconCachePut(method: java.lang.reflect.Method) {
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
 
                 val key: Any = chain.getArg(0) ?: return@intercept chain.proceed()
                 // Thumbnails / labels / descriptions share this cache.
                 val icon = chain.getArg(1) as? Drawable ?: return@intercept chain.proceed()
+                if (isMonoAnimationDrawable(icon)) return@intercept chain.proceed()
 
                 val identity = RecentsIconCompat.identity(key)
                 val themed = try {
@@ -1297,9 +1262,7 @@ class IconThemeHook : XposedModule() {
     private fun hookRecentsIconMethod(method: java.lang.reflect.Method, label: String) {
         deoptimize(method)
 
-        hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(this, method) { chain: Chain ->
                 // Phase 4.1: master switch — disabled = untouched recents
                 if (!ConfigManager.isEnabled()) return@intercept chain.proceed()
 
@@ -1311,6 +1274,7 @@ class IconThemeHook : XposedModule() {
                     null
                 }
                 val icon = original as? Drawable ?: return@intercept original
+                if (isMonoAnimationDrawable(icon)) return@intercept icon
 
                 val identity = RecentsIconCompat.identity(chain.getArg(0))
                 val themed = try {

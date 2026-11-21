@@ -9,6 +9,7 @@ import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.logging.logd
 import com.jerrey.monoicon.theme.mask.MiuiIconShapeCompat
 import com.jerrey.monoicon.theme.render.CircleIconShape
+import com.jerrey.monoicon.theme.render.IconAppearance
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,10 +37,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    the AOSP-normalized size (`IconNormalizer` scale ≈ 0.913) so MIUI's own
  *    icons carry the same transparent padding as MonoIcon's.
  *
- * All four are **optional** hooks: a missing MIUI member is reported in the
- * hook status line and degrades to "no shape change". Every interceptor is
- * pass-through when the `circle_icons` toggle is off, so the default build
- * behaves exactly as before.
+ * All four are optional hooks: a missing MIUI member is reported in the hook
+ * status line and degrades to the original behavior. While MonoIcon is enabled,
+ * the shared appearance controls determine the mask and composition size.
+ * Disabling the module passes every interceptor through.
  */
 object CircleIconHooks {
 
@@ -59,7 +60,7 @@ object CircleIconHooks {
     private val loggedComposeInset = AtomicBoolean(false)
 
     /**
-     * Installs the optional hooks (all pass-through while the toggle is off).
+     * Installs the optional hooks (all pass-through while the module is off).
      *
      * @param api The hooked-process Xposed interface (the module instance).
      * @param cl The launcher class loader (MIUI framework classes resolve
@@ -85,7 +86,11 @@ object CircleIconHooks {
 
     /** True when the shape hooks may alter MIUI's icon config right now. */
     private fun active(): Boolean =
-        ConfigManager.isCircleIconsEnabled() && !MiuiIconShapeCompat.isBypassed()
+        ConfigManager.isEnabled() && !MiuiIconShapeCompat.isBypassed()
+
+    private fun appearance(): IconAppearance = IconAppearance(
+        ConfigManager.getIconRoundnessPercent(), ConfigManager.getIconSizePercent(),
+    )
 
     // ── Hook 1: IconCustomizer.ensureIconConfigLoaded() ────────────────
 
@@ -94,9 +99,7 @@ object CircleIconHooks {
             .getDeclaredMethod("ensureIconConfigLoaded")
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val config = try {
                     chain.proceed()
                 } catch (t: Throwable) {
@@ -105,10 +108,10 @@ object CircleIconHooks {
                 }
                 if (config != null && active()) {
                     try {
-                        if (MiuiIconShapeCompat.injectMask(config) &&
+                        if (MiuiIconShapeCompat.injectMask(config, appearance().roundnessPercent) &&
                             loggedConfig.compareAndSet(false, true)
                         ) {
-                            logd(TAG, "[CircleIconConfig] IconConfig.mConfigIconMask → circle")
+                            logd(TAG, "[CircleIconConfig] IconConfig.mConfigIconMask → selected rounded mask")
                         }
                     } catch (_: Throwable) {
                         // never disturb icon composition
@@ -125,14 +128,12 @@ object CircleIconHooks {
             .getDeclaredMethod("getConfigIconMaskValue")
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 if (active()) {
                     if (loggedMaskValue.compareAndSet(false, true)) {
-                        logd(TAG, "[CircleIconMaskValue] returning the circle mask path")
+                        logd(TAG, "[CircleIconMaskValue] returning the selected rounded mask path")
                     }
-                    CircleIconShape.MASK_PATH_DATA
+                    appearance().maskPathData()
                 } else {
                     chain.proceed()
                 }
@@ -146,9 +147,7 @@ object CircleIconHooks {
             .getDeclaredMethod("getRawIcon", String::class.java)
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val original = try {
                     chain.proceed()
                 } catch (t: Throwable) {
@@ -161,11 +160,11 @@ object CircleIconHooks {
                 if (!MiuiIconShapeCompat.isThemeMaskName(name)) return@intercept original
 
                 val size = (original as? Bitmap)?.width?.takeIf { it > 0 } ?: FALLBACK_MASK_SIZE
-                val circle = MiuiIconShapeCompat.circleMaskCopy(size) ?: return@intercept original
+                val rounded = MiuiIconShapeCompat.maskCopy(size, appearance().roundnessPercent) ?: return@intercept original
                 if (loggedThemeMask.compareAndSet(false, true)) {
-                    logd(TAG, "[CircleIconThemeMask] icon_mask.png → circle (${size}px)")
+                    logd(TAG, "[CircleIconThemeMask] icon_mask.png → selected rounded mask (${size}px)")
                 }
-                circle
+                rounded
             }
     }
 
@@ -178,8 +177,8 @@ object CircleIconHooks {
      * this step MIUI-side icons would stay full-bleed while MonoIcon-rendered
      * icons are inset. `BaseIconFactory.drawIconBitmap()` shrinks the whole
      * icon by `IconNormalizer`'s scale and leaves the ring transparent; the
-     * same is done here by redrawing the composed bitmap into
-     * [CircleIconShape.insetBounds].
+     * same baseline is used here. The size control reduces that inset toward
+     * the system's full bounds through [IconAppearance.contentBounds].
      *
      * Only the mask-path composer is covered: the theme-bitmap composer
      * (`composeIcon`) would need its own bitmap stage, and a bitmap mask can
@@ -203,9 +202,7 @@ object CircleIconHooks {
         )
         api.deoptimize(method)
 
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 val result = try {
                     chain.proceed()
                 } catch (t: Throwable) {
@@ -242,7 +239,7 @@ object CircleIconHooks {
         val height = source.height
         if (width <= 0 || height <= 0) return null
         val full = Rect(0, 0, width, height)
-        val content = CircleIconShape.insetBounds(full)
+        val content = appearance().contentBounds(full)
         if (content.width() <= 0 || content.height() <= 0 || content == full) return null
 
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

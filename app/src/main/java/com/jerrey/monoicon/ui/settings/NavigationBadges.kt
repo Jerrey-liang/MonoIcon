@@ -8,6 +8,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
 import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
 import com.jerrey.monoicon.profile.ProfileRepository
+import com.jerrey.monoicon.ui.screens.ConfigurationDiagnosticsRepository
+import com.jerrey.monoicon.ui.screens.LauncherEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
@@ -24,6 +26,7 @@ fun rememberNavigationBadges(): Map<Int, Int> {
     val publication by HyperOs4PalettePublisher.status.collectAsState()
     val profileCount by produceState(0, context, publication) {
         withContext(Dispatchers.IO) {
+            if (ConfigurationDiagnosticsRepository.environment(context).engine != LauncherEngine.NATIVE) return@withContext
             val directory = File(context.filesDir, "hyperos4-profiles").apply { mkdirs() }
             callbackFlow {
                 val observer = object : FileObserver(
@@ -41,7 +44,7 @@ fun rememberNavigationBadges(): Map<Int, Int> {
     }
     if (!settings.navigationBadge) return emptyMap()
     return buildMap {
-        if (settings.checkUpdate && update.availableRelease != null) put(0, 1)
+        if (update.availableRelease != null) put(0, 1)
         if (profileCount > 0) put(2, profileCount)
     }
 }

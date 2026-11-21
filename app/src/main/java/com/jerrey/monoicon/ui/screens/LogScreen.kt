@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Save
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,9 +27,10 @@ import com.jerrey.monoicon.logging.LogExport
 import com.jerrey.monoicon.logging.LogStore
 import com.jerrey.monoicon.ui.LocalStrings
 import kotlinx.coroutines.delay
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** How often the page re-reads [LogStore] while it is on screen. */
@@ -81,11 +84,22 @@ fun LogScreen(modifier: Modifier = Modifier, isActive: Boolean = true) {
         ).show()
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        modifier = modifier.padding(top = PageSpacing.betweenCards),
+        verticalArrangement = Arrangement.spacedBy(PageSpacing.betweenCards),
+    ) {
         Card(modifier = Modifier.padding(horizontal = PageSpacing.gutter)) {
-            BasicComponent(
+            ArrowPreference(
                 title = strings.logsExport,
                 summary = strings.logsExportSummary,
+                startAction = {
+                    Icon(
+                        imageVector = Icons.Rounded.Save,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = strings.logsExport,
+                        tint = MiuixTheme.colorScheme.onBackground,
+                    )
+                },
                 onClick = { exporter.launch(LogExport.suggestedFileName()) },
             )
         }

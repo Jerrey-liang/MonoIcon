@@ -4,7 +4,7 @@
 
 覆盖环境：**Codex desktop、Claude Code、DeepSeek Harness**。
 
-适用基线：MonoIcon 2.3.0，官方 6144 Profile 的 schema 1 / revision 9。源码和应用升级后，应重新核对字段支持与匹配条件。
+适用源码版本：MonoIcon 2.4.0，官方 6144 Profile 的 schema 1 / revision 9。源码和应用升级后，应重新核对字段支持与匹配条件。
 
 本文统一承担 HyperOS 4 的使用说明、原生架构说明、自定义 Profile 规范、验证和排错说明。配套文件是 [Agent_example_prompt.md](Agent_example_prompt.md)：把它交给 AI，再填写任务信息，即可开始工作。
 
@@ -833,7 +833,7 @@ Profile不保存用户当前的颜色/圆形/Lawnicons开关；Palette保存它�
 MONOICON 3 <enabled> <background> <foreground> <circle> <lawnicons> <g-32位十六进制> <profile-sha256>
 ```
 
-应用图标来源优先级：有效原生monochrome → Lawnicons（可关闭）→ AOSP回退；空白或全不透明占位层不能阻断回退。每批次使用唯一 `g-<32位十六进制>` 目录，含PNG、`.ready`、真实包名清单 `.packages`，大图标还有相应映射/签名。`.packages`按真实桌面Activity包名去重排序，也包含已枚举但可能跳过PNG导出的应用，使它们能清旧缓存并走系统回退。
+应用图标来源优先级由默认或每应用风格决定：应用原生（首次使用的默认策略）为有效原生monochrome → Lawnicons → MonoIcon生成；原生 → MonoIcon为有效原生monochrome → MonoIcon生成；Lawnicons优先为Lawnicons → 有效原生monochrome → MonoIcon生成；空白或全不透明占位层不能阻断回退。每批次使用唯一 `g-<32位十六进制>` 目录，含PNG、`.ready`、真实包名清单 `.packages`，大图标还有相应映射/签名。`.packages`按真实桌面Activity包名去重排序，也包含已枚举但可能跳过PNG导出的应用，使它们能清旧缓存并走系统回退。
 
 Root发布使用 `su -M` 的全局挂载环境，设置桌面UID、权限和SELinux上下文；完整资源就绪后才原子重命名Palette。发布成功和桌面实际可读是两项独立条件，需要分别核对。不要指导用户手工向旧路径复制文件来替代应用发布。
 

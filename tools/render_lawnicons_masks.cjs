@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Requires sharp (no Android runtime dependency). Example:
 // node tools/render_lawnicons_masks.cjs --sharp /path/to/node_modules/sharp
-// --source-dir reuses downloaded SVGs; --verify checks bundled PNG hashes only.
+// --source-dir reuses downloaded SVGs; --verify checks PNG hashes and package visibility.
 'use strict';
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { syncLawniconsQueries } = require('./sync_lawnicons_queries.cjs');
 
 const root = path.resolve(__dirname, '..');
 const bundle = path.join(root, 'app/src/main/assets/lawnicons');
@@ -58,6 +59,7 @@ async function main() {
     }
     await fs.writeFile(destination, png);
   }
+  await syncLawniconsQueries({ checkOnly: verify });
   console.log(`${verify ? 'Verified' : 'Rendered'} ${names.length} pinned Lawnicons masks at ${manifest.size}px`);
 }
 

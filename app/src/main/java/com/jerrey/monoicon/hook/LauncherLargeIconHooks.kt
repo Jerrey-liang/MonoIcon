@@ -34,9 +34,7 @@ internal object LauncherLargeIconHooks {
         HookRegistry.install("LargeIconRoundedDrawable", required = false) {
             val method = bigIconClass.getDeclaredMethod("roundedIcon", Drawable::class.java)
             api.deoptimize(method)
-            api.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
+            HookRegistry.intercept(api, method) { chain ->
                     val drawable = chain.getArg(0)
                     if (ConfigManager.isEnabled() && drawable is ColoredMonochromeDrawable) {
                         // The original method rasterizes at the current bounds,
@@ -60,9 +58,7 @@ internal object LauncherLargeIconHooks {
                 java.lang.Float.TYPE,
             )
             api.deoptimize(method)
-            api.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
+            HookRegistry.intercept(api, method) { chain ->
                     val drawable = chain.getArg(0)
                     if (ConfigManager.isEnabled() && drawable is ColoredMonochromeDrawable) {
                         // The uninstall dialog uses a normal ShortcutIcon view.

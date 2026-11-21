@@ -1,6 +1,7 @@
 #include "hyperos4_icon_files.h"
 #include "hyperos4_paths.h"
 #include "hyperos4_large_icon_paths.h"
+#include "hyperos4_diagnostics.h"
 
 #include <android/log.h>
 #include <dlfcn.h>
@@ -29,6 +30,11 @@ std::atomic<unsigned> gRedirectCount{0};
 std::atomic<unsigned> gLargeRedirectCount{0};
 std::atomic<unsigned> gMissingCount{0};
 std::atomic<bool> gComplete{false};
+monoicon::hyos::diagnostics::HookPoint gHookDiagnostics[] = {
+    {"open"}, {"openat"}, {"__open_2"}, {"__openat_2"},
+    {"stat"}, {"stat64"}, {"lstat64"}, {"fstatat64"}, {"fstatat"},
+    {"access"}, {"faccessat"}, {"fopen"}, {"opendir"}, {"madvise"},
+};
 pthread_mutex_t gDirectoryMutex = PTHREAD_MUTEX_INITIALIZER;
 char gDirectory[256]{};
 std::vector<monoicon::hyos::LargeIconPath> gLargePaths;
@@ -422,17 +428,33 @@ extern "C" bool monoicon_hyos_install_icon_files(MonoiconNativeHook hook) {
         {"opendir", reinterpret_cast<void*>(OpenDir), reinterpret_cast<void**>(&gOpenDir)},
         {"madvise", reinterpret_cast<void*>(Madvise), reinterpret_cast<void**>(&gMadvise)},
     };
+    static_assert(sizeof(entries) / sizeof(entries[0]) == sizeof(gHookDiagnostics) / sizeof(gHookDiagnostics[0]));
     void* targets[sizeof(entries) / sizeof(entries[0])]{};
     for (size_t index = 0; index < sizeof(entries) / sizeof(entries[0]); ++index) {
         auto& entry = entries[index];
         void* target = dlsym(RTLD_DEFAULT, entry.name);
-        if (!target) continue;
-        bool alias = false;
-        for (size_t previous = 0; previous < index; ++previous) {
-            if (targets[previous] == target) { alias = true; break; }
+        if (!target) {
+            monoicon::hyos::diagnostics::Record(gHookDiagnostics[index], nullptr, entry.replacement,
+                nullptr, -1, static_cast<uint32_t>(getpid()), "symbol-missing");
+            continue;
         }
-        if (alias) continue;  // bionic's 64-bit stat aliases share the same ABI.
+        int alias = -1;
+        for (size_t previous = 0; previous < index; ++previous) {
+            if (targets[previous] == target) { alias = static_cast<int>(previous); break; }
+        }
+        if (alias >= 0) {
+            // Report the actual installed replacement/backup shared by aliases.
+            const auto& existing = gHookDiagnostics[alias];
+            monoicon::hyos::diagnostics::Record(gHookDiagnostics[index], target,
+                reinterpret_cast<void*>(existing.replacement.load(std::memory_order_relaxed)),
+                reinterpret_cast<void*>(existing.backup.load(std::memory_order_relaxed)),
+                0, static_cast<uint32_t>(getpid()), "alias", alias);
+            continue;  // bionic's 64-bit stat aliases share the same ABI.
+        }
         const int result = hook(target, entry.replacement, entry.backup);
+        monoicon::hyos::diagnostics::Record(gHookDiagnostics[index], target, entry.replacement,
+            *entry.backup, result, static_cast<uint32_t>(getpid()),
+            result != 0 ? "hook-failed" : *entry.backup ? "installed" : "backup-missing");
         if (result == 0 && *entry.backup) {
             targets[index] = target;
             gHookCount.fetch_add(1, std::memory_order_relaxed);
@@ -451,4 +473,14 @@ extern "C" bool monoicon_hyos_install_icon_files(MonoiconNativeHook hook) {
         "icon file hooks=%u complete=%d", gHookCount.load(), installed);
     gInstalling.clear(std::memory_order_release);
     return installed;
+}
+
+extern "C" void monoicon_hyos_append_icon_diagnostics(std::string& output) {
+    for (const auto& point : gHookDiagnostics) {
+        const int alias = point.alias.load(std::memory_order_relaxed);
+        output += ',';
+        monoicon::hyos::diagnostics::AppendHook(output, point, "libc-hook",
+            alias >= 0 && static_cast<size_t>(alias) < sizeof(gHookDiagnostics) / sizeof(gHookDiagnostics[0])
+                ? gHookDiagnostics[alias].id : "");
+    }
 }

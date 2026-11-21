@@ -13,21 +13,23 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Local manager preferences; these must never be published to hooked processes. */
 data class UiSettings(
-    val checkUpdate: Boolean = true,
     val themeMode: Int = 0,
-    val monet: Boolean = true,
     val keyColor: Int = 0,
     val colorStyle: String = "TonalSpot",
     val colorSpec: String = "Spec2025",
-    val enableBlur: Boolean = true,
-    val floatingBottomBar: Boolean = true,
-    val glassBottomBar: Boolean = true,
     val navigationBadge: Boolean = true,
     val predictiveBack: Boolean = true,
     val swipeDismiss: Boolean = true,
     val pagerGestureMode: Int = 1,
     val pageScale: Float = 1f,
-)
+) {
+    // These manager features are always enabled, including for older installs.
+    val checkUpdate: Boolean get() = true
+    val monet: Boolean get() = true
+    val enableBlur: Boolean get() = true
+    val floatingBottomBar: Boolean get() = true
+    val glassBottomBar: Boolean get() = true
+}
 
 object UiPreferences {
     private var preferences: SharedPreferences? = null
@@ -39,16 +41,18 @@ object UiPreferences {
         if (preferences != null) return
         val prefs = context.applicationContext.getSharedPreferences("manager_ui", Context.MODE_PRIVATE)
         preferences = prefs
+        prefs.edit()
+            .remove("check_update")
+            .remove("monet")
+            .remove("blur")
+            .remove("floating_bar")
+            .remove("glass_bar")
+            .apply()
         mutableState.value = UiSettings(
-            checkUpdate = prefs.getBoolean("check_update", true),
             themeMode = prefs.getInt("theme_mode", 0).coerceIn(0, 2),
-            monet = prefs.getBoolean("monet", true),
             keyColor = prefs.getInt("key_color", 0),
             colorStyle = prefs.getString("color_style", "TonalSpot") ?: "TonalSpot",
             colorSpec = prefs.getString("color_spec", "Spec2025") ?: "Spec2025",
-            enableBlur = prefs.getBoolean("blur", true),
-            floatingBottomBar = prefs.getBoolean("floating_bar", true),
-            glassBottomBar = prefs.getBoolean("glass_bar", true),
             navigationBadge = prefs.getBoolean("navigation_badge", true),
             predictiveBack = prefs.getBoolean("predictive_back", true),
             swipeDismiss = prefs.getBoolean("swipe_dismiss", true),
@@ -61,15 +65,10 @@ object UiPreferences {
     fun update(transform: (UiSettings) -> UiSettings) {
         val value = transform(mutableState.value)
         preferences?.edit()?.apply {
-            putBoolean("check_update", value.checkUpdate)
             putInt("theme_mode", value.themeMode)
-            putBoolean("monet", value.monet)
             putInt("key_color", value.keyColor)
             putString("color_style", value.colorStyle)
             putString("color_spec", value.colorSpec)
-            putBoolean("blur", value.enableBlur)
-            putBoolean("floating_bar", value.floatingBottomBar)
-            putBoolean("glass_bar", value.glassBottomBar)
             putBoolean("navigation_badge", value.navigationBadge)
             putBoolean("predictive_back", value.predictiveBack)
             putBoolean("swipe_dismiss", value.swipeDismiss)

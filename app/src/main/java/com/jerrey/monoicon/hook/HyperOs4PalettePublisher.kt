@@ -20,6 +20,7 @@ import com.jerrey.monoicon.cache.CacheManager
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.logging.logw
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
+import com.jerrey.monoicon.theme.wallpaper.WallpaperSourceRepository
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -74,7 +75,7 @@ internal object HyperOs4PalettePublisher {
                     val resolution = ProfileRepository.resolve(context)
                     val colors = PixelMonetColorEngine.getIconColors()
                     val config = HyperOs4Config(ConfigManager.isEnabledFromUi() && resolution.profile != null, colors.background,
-                        colors.foreground, ConfigManager.isCircleIconsEnabledFromUi(), ConfigManager.isLawniconsEnabledFromUi())
+                        colors.foreground, true, ConfigManager.isLawniconsEnabledFromUi())
                     val awaitingGeometry = geometryRetries.pending != null || publicationDeferredForGeometry
                     lastSavedRevision == iconRevision.get() && lastSaved == publicationKey(config, resolution.profile, preparedLargeSignature) && !awaitingGeometry
                 }, 250, TimeUnit.MILLISECONDS).get(30, TimeUnit.SECONDS)
@@ -87,7 +88,13 @@ internal object HyperOs4PalettePublisher {
     }
 
     private val configListener: (String?) -> Unit = { key ->
-        if (publicationRequested && (key == null || key in setOf("enabled", "theme_id", "variant_id", "circle_icons", "lawnicons_enabled"))) {
+        if (publicationRequested && (key == null || key in setOf(
+                "enabled", "theme_id", "variant_id", "color_engine_id", "circle_icons",
+                "icon_roundness_percent", "icon_size_percent", "generated_icon_border_percent",
+                "generated_artwork_roundness_percent", "generated_artwork_follow_icon_roundness",
+                "lawnicons_enabled", "lawnicons_disabled_packages",
+                "default_icon_source_style", "app_icon_overrides",
+            ))) {
             appContext?.let(::publish)
         }
     }
@@ -112,6 +119,11 @@ internal object HyperOs4PalettePublisher {
         if (!initialized.compareAndSet(false, true)) return
         appContext = app
         ConfigManager.addOnConfigChangedListener(configListener)
+        WallpaperSourceRepository.addListener {
+            // A new image can arrive after the first publication request.
+            // Listener callbacks never block the image worker on export.
+            if (publicationRequested) publish(app)
+        }
         runCatching {
             WallpaperManager.getInstance(app).addOnColorsChangedListener(
                 wallpaperListener, Handler(Looper.getMainLooper()),
@@ -162,7 +174,9 @@ internal object HyperOs4PalettePublisher {
                     enabled = ConfigManager.isEnabledFromUi() && profile != null,
                     background = palette.background,
                     foreground = palette.foreground,
-                    circle = ConfigManager.isCircleIconsEnabledFromUi(),
+                    // The native flag bypasses launcher clipping/animation expansion.
+                    // Preserve the exported alpha silhouette at every slider position.
+                    circle = true,
                     lawnicons = ConfigManager.isLawniconsEnabledFromUi(),
                 )
                 val largeIcons = if (config.enabled) HyperOs4LargeIconInputs.read(app, profile, launcher.uid)
@@ -171,7 +185,8 @@ internal object HyperOs4PalettePublisher {
                 geometryRetries.readCompleted()
                 publicationDeferredForGeometry = false
                 preparedLargeSignature = largeIcons.signature
-                val content = publicationKey(config, profile, largeIcons.signature)
+                val iconStyle = HyperOs4IconStyle.current().signature()
+                val content = publicationKey(config, profile, largeIcons.signature, iconStyle)
                 val revision = iconRevision.get()
                 val unavailable = config.enabled && profile?.icons?.geometryBridge != null && largeIcons.geometry == null
                 val retryKey = "$content:$revision"
@@ -188,6 +203,7 @@ internal object HyperOs4PalettePublisher {
                     if (icons != null) {
                         val exported = HyperOs4IconExporter.export(app, icons, checkNotNull(profile), largeIcons) { generation.get() == requested }
                             ?: return@schedule
+                        File(icons, ".icon-style").writeText(iconStyle)
                         check(exported.components > 0 && exported.files > 0) { "No usable icons were exported; retaining the previous generation" }
                         logi(TAG, "rendered ${exported.components} components (${exported.files} PNG aliases) with MonoIcon")
                     }
@@ -226,8 +242,9 @@ internal object HyperOs4PalettePublisher {
         }, 1, TimeUnit.SECONDS)
     }
 
-    private fun publicationKey(config: HyperOs4Config, profile: CompatibilityProfile?, largeSignature: String): String =
-        config.encode() + (profile?.digest ?: ProfileRepository.REVOKED_DIGEST) + largeSignature
+    private fun publicationKey(config: HyperOs4Config, profile: CompatibilityProfile?, largeSignature: String,
+                               iconStyle: String = HyperOs4IconStyle.current().signature()): String =
+        config.encode() + (profile?.digest ?: ProfileRepository.REVOKED_DIGEST) + largeSignature + iconStyle
 
     private enum class Publication { APPLIED, SAVED, RETAINED, FAILED }
 

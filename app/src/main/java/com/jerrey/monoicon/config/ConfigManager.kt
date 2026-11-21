@@ -16,6 +16,7 @@ import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.roundToInt
 
 /**
  * Runtime configuration bridge between the settings UI and the hook runtime
@@ -51,13 +52,27 @@ object ConfigManager {
     private const val KEY_THEME_ID = "theme_id"
     private const val KEY_VARIANT_ID = "variant_id"
     private const val KEY_LAWNICONS_ENABLED = "lawnicons_enabled"
+    private const val KEY_LAWNICONS_DISABLED_PACKAGES = "lawnicons_disabled_packages"
+    private const val KEY_DEFAULT_ICON_SOURCE_STYLE = "default_icon_source_style"
+    private const val KEY_APP_ICON_OVERRIDES = "app_icon_overrides"
+    private const val KEY_COLOR_ENGINE_ID = "color_engine_id"
+    private const val DEFAULT_COLOR_ENGINE_ID = "material_2025"
     private const val KEY_CIRCLE_ICONS = "circle_icons"
+    private const val KEY_ICON_ROUNDNESS = "icon_roundness_percent"
+    private const val KEY_ICON_SIZE = "icon_size_percent"
+    private const val KEY_GENERATED_ICON_BORDER = "generated_icon_border_percent"
+    private const val KEY_GENERATED_ARTWORK_ROUNDNESS = "generated_artwork_roundness_percent"
+    private const val KEY_GENERATED_ARTWORK_FOLLOW_ICON_ROUNDNESS = "generated_artwork_follow_icon_roundness"
     private const val KEY_NOTIFICATION_ICONS = "notification_icons"
     private const val KEY_LANGUAGE = "ui_language"
     private const val KEY_PENDING_REMOTE = "pending_remote_keys"
     private val uiKeys = setOf(
         KEY_ENABLED, KEY_SAFETY_BLOCKED, KEY_THEME_ID, KEY_VARIANT_ID, KEY_LAWNICONS_ENABLED,
         KEY_CIRCLE_ICONS, KEY_NOTIFICATION_ICONS, KEY_LANGUAGE,
+        KEY_LAWNICONS_DISABLED_PACKAGES, KEY_COLOR_ENGINE_ID,
+        KEY_ICON_ROUNDNESS, KEY_ICON_SIZE, KEY_GENERATED_ICON_BORDER,
+        KEY_GENERATED_ARTWORK_ROUNDNESS, KEY_GENERATED_ARTWORK_FOLLOW_ICON_ROUNDNESS,
+        KEY_DEFAULT_ICON_SOURCE_STYLE, KEY_APP_ICON_OVERRIDES,
     )
 
     /** Language ids: system default / Simplified Chinese / English. */
@@ -188,6 +203,22 @@ object ConfigManager {
         }
     }
 
+    private fun readUiInt(key: String, default: Int): Int = synchronized(uiPrefsLock) {
+        val local = runCatching { fallbackPrefs?.getInt(key, default) }.getOrNull() ?: default
+        if (key in pendingRemoteKeys()) return@synchronized local
+        runCatching { uiRemotePreferences()?.getInt(key, local) }.getOrNull() ?: local
+    }
+
+    private fun readUiStringSet(key: String): Set<String> = synchronized(uiPrefsLock) {
+        val local = fallbackPrefs?.getStringSet(key, emptySet()).orEmpty().toSet()
+        if (key in pendingRemoteKeys()) return@synchronized local
+        try {
+            uiRemotePreferences()?.getStringSet(key, local)?.toSet() ?: local
+        } catch (_: Throwable) {
+            local
+        }
+    }
+
     /** Mirror every setting locally, including writes made while LSPosed is bound. */
     private fun writeUiPreference(key: String, value: Any) {
         synchronized(uiPrefsLock) {
@@ -245,7 +276,9 @@ object ConfigManager {
     private fun SharedPreferences.Editor.putValue(key: String, value: Any): SharedPreferences.Editor =
         when (value) {
             is Boolean -> putBoolean(key, value)
+            is Int -> putInt(key, value)
             is String -> putString(key, value)
+            is Set<*> -> putStringSet(key, value.filterIsInstance<String>().toSet())
             else -> this
         }
 
@@ -305,6 +338,15 @@ object ConfigManager {
     private val lastLawniconsRefreshMs = AtomicLong(0L)
     @Volatile
     private var lastLawniconsValue = true
+    @Volatile
+    private var cachedLawniconsDisabledPackages: Set<String> = emptySet()
+    private val lastLawniconsPackagesRefreshMs = AtomicLong(0L)
+    @Volatile
+    private var cachedColorEngineId = DEFAULT_COLOR_ENGINE_ID
+    private val lastColorEngineRefreshMs = AtomicLong(0L)
+    @Volatile private var cachedDefaultIconSourceStyle: IconSourceStyle? = null
+    @Volatile private var cachedAppIconOverrides: Map<String, AppIconOverrides> = emptyMap()
+    private val lastIconOverridesRefreshMs = AtomicLong(0L)
 
     // ── Circle icon shape toggle (Phase 9) ─────────────────────────────
     // Default OFF: the shape feature changes the desktop look globally, so it
@@ -313,6 +355,13 @@ object ConfigManager {
     private val lastCircleRefreshMs = AtomicLong(0L)
     @Volatile
     private var lastCircleValue = false
+    private val cachedIconRoundness = AtomicInteger(0)
+    private val cachedIconSize = AtomicInteger(0)
+    private val cachedGeneratedIconBorder = AtomicInteger(100)
+    private val lastGeneratedIconBorderRefreshMs = AtomicLong(0L)
+    private val cachedGeneratedArtworkRoundness = AtomicInteger(0)
+    private val cachedGeneratedArtworkFollowIconRoundness = AtomicBoolean(false)
+    private val lastGeneratedArtworkAppearanceRefreshMs = AtomicLong(0L)
 
     /**
      * Binds the framework's read-only remote preferences (call from
@@ -327,7 +376,25 @@ object ConfigManager {
             cachedLawniconsEnabled.set(readRemoteLawnicons())
             lastLawniconsValue = cachedLawniconsEnabled.get()
             lastLawniconsRefreshMs.set(now)
-            cachedCircleIconsEnabled.set(readRemoteCircleIcons())
+            cachedLawniconsDisabledPackages = readRemoteLawniconsDisabledPackages()
+            lastLawniconsPackagesRefreshMs.set(now)
+            readRemoteIconOverrides()?.let { (style, overrides) ->
+                cachedDefaultIconSourceStyle = style
+                cachedAppIconOverrides = overrides
+            }
+            lastIconOverridesRefreshMs.set(now)
+            cachedColorEngineId = readRemoteColorEngineId()
+            lastColorEngineRefreshMs.set(now)
+            val appearance = readRemoteIconAppearance()
+            cachedIconRoundness.set(appearance.first)
+            cachedIconSize.set(appearance.second)
+            cachedGeneratedIconBorder.set(readRemoteGeneratedIconBorder())
+            lastGeneratedIconBorderRefreshMs.set(now)
+            val artworkAppearance = readRemoteGeneratedArtworkAppearance()
+            cachedGeneratedArtworkRoundness.set(artworkAppearance.first)
+            cachedGeneratedArtworkFollowIconRoundness.set(artworkAppearance.second)
+            lastGeneratedArtworkAppearanceRefreshMs.set(now)
+            cachedCircleIconsEnabled.set(appearance.first == 100)
             lastCircleValue = cachedCircleIconsEnabled.get()
             lastCircleRefreshMs.set(now)
             android.util.Log.i(
@@ -411,11 +478,41 @@ object ConfigManager {
         writeUiPreference(KEY_VARIANT_ID, normalized)
     }
 
+    /** Selected color implementation; unknown/legacy values use the current default. */
+    fun getColorEngineIdFromUi(): String = normalizeColorEngineId(
+        readUiString(KEY_COLOR_ENGINE_ID, DEFAULT_COLOR_ENGINE_ID),
+    )
+
+    fun setColorEngineId(id: String) = writeUiPreference(KEY_COLOR_ENGINE_ID, normalizeColorEngineId(id))
+
+    fun getColorEngineId(): String {
+        if (remotePrefsProvider == null) return getColorEngineIdFromUi()
+        if (claimRefresh(lastColorEngineRefreshMs)) {
+            val value = readRemoteColorEngineId()
+            if (value != cachedColorEngineId) {
+                cachedColorEngineId = value
+                runCatching { CacheManager.clearAll() }
+            }
+        }
+        return cachedColorEngineId
+    }
+
+    private fun readRemoteColorEngineId(): String = try {
+        remotePrefsProvider?.invoke()?.let {
+            normalizeColorEngineId(it.getString(KEY_COLOR_ENGINE_ID, DEFAULT_COLOR_ENGINE_ID).orEmpty())
+        } ?: cachedColorEngineId
+    } catch (_: Throwable) {
+        cachedColorEngineId
+    }
+
+    private fun normalizeColorEngineId(id: String): String =
+        if (id.trim().lowercase() == "material_3") "material_3" else DEFAULT_COLOR_ENGINE_ID
+
     // ── Lawnicons bundle toggle (Phase 8) ─────────────────────────────
 
     /**
      * Launcher side: whether the built-in Lawnicons mask bundle may be used
-     * for icons without a native monochrome layer.
+     * for selected apps, including apps with a native monochrome layer.
      *
      * Refresh cadence matches [isEnabled]. When the value flips, every cached
      * mask was produced by the other branch, so the mask caches are cleared
@@ -425,6 +522,7 @@ object ConfigManager {
         if (remotePrefsProvider == null) return isLawniconsEnabledFromUi()
         if (claimRefresh(lastLawniconsRefreshMs)) {
             val value = readRemoteLawnicons()
+            cachedLawniconsEnabled.set(value)
             if (value != lastLawniconsValue) {
                 lastLawniconsValue = value
                 try {
@@ -434,15 +532,14 @@ object ConfigManager {
                     android.util.Log.w(TAG, "cache clear after toggle failed: ${t.message}")
                 }
             }
-            cachedLawniconsEnabled.set(value)
         }
         return cachedLawniconsEnabled.get()
     }
 
     private fun readRemoteLawnicons(): Boolean = try {
-        remotePrefsProvider?.invoke()?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: true
+        remotePrefsProvider?.invoke()?.getBoolean(KEY_LAWNICONS_ENABLED, true) ?: cachedLawniconsEnabled.get()
     } catch (_: Throwable) {
-        true
+        cachedLawniconsEnabled.get()
     }
 
     /** UI side: reads the Lawnicons toggle (falls back to shared prefs). */
@@ -450,6 +547,182 @@ object ConfigManager {
 
     /** Persists the Lawnicons toggle via the framework remote preferences. */
     fun setLawniconsEnabled(enabled: Boolean) = writeUiPreference(KEY_LAWNICONS_ENABLED, enabled)
+
+    /** App selection alone: remains checked when the global bundle switch is off. */
+    fun isLawniconsEnabledForPackageFromUi(packageName: String): Boolean =
+        normalizedPackage(packageName)?.let { it !in getLawniconsDisabledPackagesFromUi() } ?: false
+
+    /** Defensive copy: callers must never mutate a SharedPreferences-owned set. */
+    fun getLawniconsDisabledPackagesFromUi(): Set<String> = readUiStringSet(KEY_LAWNICONS_DISABLED_PACKAGES)
+
+    fun setLawniconsEnabledForPackage(packageName: String, enabled: Boolean) {
+        val pkg = normalizedPackage(packageName) ?: return
+        // Keep concurrent per-app edits as one read/modify/write operation.
+        synchronized(uiPrefsLock) {
+            val disabled = getLawniconsDisabledPackagesFromUi()
+            writeUiPreference(KEY_LAWNICONS_DISABLED_PACKAGES, if (enabled) disabled - pkg else disabled + pkg)
+        }
+    }
+
+    /** Runtime selection includes the global switch and refreshes the exclusion cache. */
+    fun isLawniconsEnabledForPackage(packageName: String): Boolean {
+        val pkg = normalizedPackage(packageName) ?: return false
+        val globalEnabled = isLawniconsEnabled()
+        refreshLawniconsDisabledPackages()
+        val disabled = if (remotePrefsProvider == null) getLawniconsDisabledPackagesFromUi()
+            else cachedLawniconsDisabledPackages
+        return globalEnabled && pkg !in disabled
+    }
+
+    /** Call before a finished-icon cache lookup so changes cannot hide behind old recipes. */
+    fun refreshIconPreferences() {
+        isLawniconsEnabled()
+        refreshLawniconsDisabledPackages()
+        refreshIconOverrides()
+        getColorEngineId()
+        getIconRoundnessPercent()
+        refreshGeneratedIconBorder()
+        refreshGeneratedArtworkAppearance()
+    }
+
+    /** Remote preference listeners bypass the polling TTL for an immediate redraw. */
+    fun invalidateHookIconPreferences() {
+        val expired = SystemClock.elapsedRealtime() - REFRESH_INTERVAL_MS
+        lastLawniconsRefreshMs.set(expired)
+        lastLawniconsPackagesRefreshMs.set(expired)
+        lastColorEngineRefreshMs.set(expired)
+        lastCircleRefreshMs.set(expired)
+        lastGeneratedIconBorderRefreshMs.set(expired)
+        lastGeneratedArtworkAppearanceRefreshMs.set(expired)
+        lastIconOverridesRefreshMs.set(expired)
+        refreshIconPreferences()
+    }
+
+    private fun refreshLawniconsDisabledPackages() {
+        if (remotePrefsProvider == null || !claimRefresh(lastLawniconsPackagesRefreshMs)) return
+        val value = readRemoteLawniconsDisabledPackages()
+        if (value != cachedLawniconsDisabledPackages) {
+            cachedLawniconsDisabledPackages = value
+            runCatching { CacheManager.clearAll() }
+        }
+    }
+
+    private fun readRemoteLawniconsDisabledPackages(): Set<String> = try {
+        remotePrefsProvider?.invoke()?.getStringSet(KEY_LAWNICONS_DISABLED_PACKAGES, emptySet())
+            ?.toSet() ?: cachedLawniconsDisabledPackages
+    } catch (_: Throwable) {
+        cachedLawniconsDisabledPackages
+    }
+
+    private fun normalizedPackage(identity: String): String? = identity.trim().substringBefore('/')
+        .takeIf { it.isNotEmpty() && it != "unknown" }
+
+    // Each nullable per-app value independently inherits its global default.
+    fun getDefaultIconSourceStyleFromUi(): IconSourceStyle =
+        IconSourceStyle.fromId(readUiString(KEY_DEFAULT_ICON_SOURCE_STYLE, ""))
+            ?: legacyDefaultIconSourceStyleFromUi()
+
+    private fun legacyDefaultIconSourceStyleFromUi(): IconSourceStyle = synchronized(uiPrefsLock) {
+        // The old flag defaulted to true. Only an actually stored choice is
+        // migrated; a fresh install now starts with native-first fallback.
+        val localHasChoice = fallbackPrefs?.contains(KEY_LAWNICONS_ENABLED) == true
+        val hasChoice = if (KEY_LAWNICONS_ENABLED in pendingRemoteKeys()) localHasChoice
+            else runCatching { uiRemotePreferences()?.contains(KEY_LAWNICONS_ENABLED) == true }
+                .getOrDefault(false) || localHasChoice
+        if (!hasChoice) IconSourceStyle.NATIVE
+        else if (isLawniconsEnabledFromUi()) IconSourceStyle.LAWNICONS else IconSourceStyle.NATIVE_GENERATED
+    }
+
+    fun setDefaultIconSourceStyle(style: IconSourceStyle) =
+        writeUiPreference(KEY_DEFAULT_ICON_SOURCE_STYLE, style.id)
+
+    fun getAllAppIconOverridesFromUi(): Map<String, AppIconOverrides> {
+        val saved = AppIconOverridesCodec.decode(readUiString(KEY_APP_ICON_OVERRIDES, ""))
+        return mergeLegacyIconOverrides(saved, getLawniconsDisabledPackagesFromUi())
+    }
+
+    private fun mergeLegacyIconOverrides(saved: Map<String, AppIconOverrides>, disabled: Set<String>): Map<String, AppIconOverrides> =
+        saved.toMutableMap().apply {
+            disabled.forEach { pkg ->
+                val value = saved[pkg] ?: AppIconOverrides()
+                put(pkg, legacyExcludedIconOverrides(value))
+            }
+        }
+
+    private fun legacyExcludedIconOverrides(value: AppIconOverrides): AppIconOverrides =
+        value.copy(style = if (value.style == IconSourceStyle.GENERATED) IconSourceStyle.GENERATED
+            else IconSourceStyle.NATIVE_GENERATED)
+
+    fun getAppIconOverridesFromUi(packageName: String): AppIconOverrides =
+        getAllAppIconOverridesFromUi()[normalizedPackage(packageName)] ?: AppIconOverrides()
+
+    fun setAppIconOverrides(packageName: String, overrides: AppIconOverrides, replaceLegacySource: Boolean = false) {
+        val pkg = normalizedPackage(packageName) ?: return
+        synchronized(uiPrefsLock) {
+            val saved = AppIconOverridesCodec.decode(readUiString(KEY_APP_ICON_OVERRIDES, "")).toMutableMap()
+            val previousStyle = saved[pkg]?.style
+            val normalized = overrides.normalized()
+            if (normalized.hasOverrides) saved[pkg] = normalized else saved.remove(pkg)
+            // Replace only this package's legacy choice; resetting now truly
+            // inherits defaults without changing other packages' old choices.
+            writeUiPreference(KEY_APP_ICON_OVERRIDES, AppIconOverridesCodec.encode(saved))
+            val disabled = getLawniconsDisabledPackagesFromUi()
+            if (pkg in disabled && (replaceLegacySource || !normalized.hasOverrides ||
+                    normalized.style?.let { it != IconSourceStyle.NATIVE_GENERATED && it != previousStyle } == true)) {
+                writeUiPreference(KEY_LAWNICONS_DISABLED_PACKAGES, disabled - pkg)
+            }
+        }
+    }
+
+    fun getEffectiveIconStyleFromUi(identity: String?): EffectiveIconStyle {
+        val defaults = EffectiveIconStyle(getDefaultIconSourceStyleFromUi(), getIconRoundnessPercentFromUi(),
+            getIconSizePercentFromUi(), (getGeneratedIconBorderRatioFromUi() * 100).roundToInt(),
+            getGeneratedArtworkRoundnessPercentFromUi(), getGeneratedArtworkFollowIconRoundnessFromUi())
+        return (identity?.let(::getAppIconOverridesFromUi) ?: AppIconOverrides()).resolve(defaults)
+    }
+
+    fun getEffectiveIconStyle(identity: String?): EffectiveIconStyle {
+        if (remotePrefsProvider == null) return getEffectiveIconStyleFromUi(identity)
+        refreshIconOverrides()
+        refreshLawniconsDisabledPackages()
+        val pkg = identity?.let(::normalizedPackage)
+        val saved = cachedAppIconOverrides[pkg] ?: AppIconOverrides()
+        val overrides = if (pkg in cachedLawniconsDisabledPackages) legacyExcludedIconOverrides(saved) else saved
+        val defaults = EffectiveIconStyle(cachedDefaultIconSourceStyle
+            ?: IconSourceStyle.NATIVE,
+            getIconRoundnessPercent(), getIconSizePercent(), (generatedIconBorderRatio * 100).roundToInt(),
+            getGeneratedArtworkRoundnessPercent(), getGeneratedArtworkFollowIconRoundness())
+        return overrides.resolve(defaults)
+    }
+
+    /** Native-first and Lawnicons-first may use the bundle; legacy exclusions opt out. */
+    internal fun permitsLawniconsFallback(identity: String?): Boolean =
+        getEffectiveIconStyle(identity).style.permitsLawniconsFallback
+
+    /** Preview draft counterpart of legacy source migration, without saving the draft. */
+    fun permitsLawniconsFallbackFromUi(identity: String?, overrides: AppIconOverrides): Boolean =
+        (overrides.style ?: getDefaultIconSourceStyleFromUi()).permitsLawniconsFallback
+
+    private fun readRemoteIconOverrides(): Pair<IconSourceStyle?, Map<String, AppIconOverrides>>? = try {
+        remotePrefsProvider?.invoke()?.let { prefs ->
+            (IconSourceStyle.fromId(prefs.getString(KEY_DEFAULT_ICON_SOURCE_STYLE, null))
+                ?: if (!prefs.contains(KEY_LAWNICONS_ENABLED)) IconSourceStyle.NATIVE
+                else if (prefs.getBoolean(KEY_LAWNICONS_ENABLED, true)) IconSourceStyle.LAWNICONS
+                else IconSourceStyle.NATIVE_GENERATED) to
+                AppIconOverridesCodec.decode(prefs.getString(KEY_APP_ICON_OVERRIDES, "").orEmpty())
+        }
+    } catch (_: Throwable) { null }
+
+    private fun refreshIconOverrides() {
+        if (remotePrefsProvider == null || !claimRefresh(lastIconOverridesRefreshMs)) return
+        val (style, overrides) = readRemoteIconOverrides() ?: return
+        if (style != cachedDefaultIconSourceStyle || overrides != cachedAppIconOverrides) {
+            cachedDefaultIconSourceStyle = style
+            cachedAppIconOverrides = overrides
+            runCatching { CacheManager.clearAll() }
+            runCatching { MiuiIconShapeCompat.invalidateMiuiCaches() }
+        }
+    }
 
     // ── Circle icon shape toggle (Phase 9) ────────────────────────────
 
@@ -464,40 +737,150 @@ object ConfigManager {
      * Icons already rendered keep their old shape until the launcher rebinds
      * them — the settings UI therefore shows the restart hint.
      */
-    fun isCircleIconsEnabled(): Boolean {
-        if (remotePrefsProvider == null) return isCircleIconsEnabledFromUi()
+    private fun refreshIconAppearance() {
+        if (remotePrefsProvider == null) return
         if (claimRefresh(lastCircleRefreshMs)) {
-            val value = readRemoteCircleIcons()
-            if (value != lastCircleValue) {
-                lastCircleValue = value
+            val (roundness, size) = readRemoteIconAppearance()
+            val changed = roundness != cachedIconRoundness.get() || size != cachedIconSize.get()
+            cachedIconRoundness.set(roundness)
+            cachedIconSize.set(size)
+            cachedCircleIconsEnabled.set(roundness == 100)
+            lastCircleValue = roundness == 100
+            if (changed) {
                 try {
                     CacheManager.clearAll()
                     MiuiIconShapeCompat.invalidateMiuiCaches()
-                    android.util.Log.i(TAG, "circleIcons=$value → icon caches cleared")
+                    android.util.Log.i(TAG, "icon roundness=$roundness size=$size → icon caches cleared")
                 } catch (t: Throwable) {
-                    android.util.Log.w(TAG, "cache clear after circle flip failed: ${t.message}")
+                    android.util.Log.w(TAG, "cache clear after geometry change failed: ${t.message}")
                 }
             }
-            cachedCircleIconsEnabled.set(value)
         }
-        return cachedCircleIconsEnabled.get()
     }
+
+    fun getIconRoundnessPercent(): Int {
+        if (remotePrefsProvider == null) return getIconRoundnessPercentFromUi()
+        refreshIconAppearance()
+        return cachedIconRoundness.get()
+    }
+
+    fun getIconSizePercent(): Int {
+        if (remotePrefsProvider == null) return getIconSizePercentFromUi()
+        refreshIconAppearance()
+        return cachedIconSize.get()
+    }
+
+    /** Missing percent preserves the previous circle switch; no destructive migration. */
+    fun getIconRoundnessPercentFromUi(): Int = readUiInt(KEY_ICON_ROUNDNESS,
+        if (readUiBoolean(KEY_CIRCLE_ICONS, false)) 100 else 0).coerceIn(0, 100)
+
+    fun getIconSizePercentFromUi(): Int = readUiInt(KEY_ICON_SIZE, 0).coerceIn(0, 100)
+
+    fun setIconRoundnessPercent(value: Int) = writeUiPreference(KEY_ICON_ROUNDNESS, value.coerceIn(0, 100))
+
+    fun setIconSizePercent(value: Int) = writeUiPreference(KEY_ICON_SIZE, value.coerceIn(0, 100))
+
+    /** Only automatically generated masks use this; authored/native masks retain their geometry. */
+    val generatedIconBorderRatio: Float
+        get() {
+            if (remotePrefsProvider == null) return getGeneratedIconBorderRatioFromUi()
+            refreshGeneratedIconBorder()
+            return cachedGeneratedIconBorder.get() / 100f
+        }
+
+    fun getGeneratedIconBorderRatioFromUi(): Float =
+        readUiInt(KEY_GENERATED_ICON_BORDER, 100).coerceIn(0, 100) / 100f
+
+    fun setGeneratedIconBorderRatio(value: Float) {
+        val ratio = if (value.isFinite()) value.coerceIn(0f, 1f) else 1f
+        writeUiPreference(KEY_GENERATED_ICON_BORDER, (ratio * 100).roundToInt())
+    }
+
+    private fun refreshGeneratedIconBorder() {
+        if (remotePrefsProvider == null || !claimRefresh(lastGeneratedIconBorderRefreshMs)) return
+        val value = readRemoteGeneratedIconBorder()
+        if (cachedGeneratedIconBorder.getAndSet(value) != value) {
+            runCatching { CacheManager.clearAll() }
+            runCatching { MiuiIconShapeCompat.invalidateMiuiCaches() }
+        }
+    }
+
+    private fun readRemoteGeneratedIconBorder(): Int = try {
+        remotePrefsProvider?.invoke()?.getInt(KEY_GENERATED_ICON_BORDER, 100)?.coerceIn(0, 100)
+            ?: cachedGeneratedIconBorder.get()
+    } catch (_: Throwable) {
+        cachedGeneratedIconBorder.get()
+    }
+
+    fun getGeneratedArtworkRoundnessPercent(): Int {
+        if (remotePrefsProvider == null) return getGeneratedArtworkRoundnessPercentFromUi()
+        refreshGeneratedArtworkAppearance()
+        return cachedGeneratedArtworkRoundness.get()
+    }
+
+    fun getGeneratedArtworkRoundnessPercentFromUi(): Int =
+        readUiInt(KEY_GENERATED_ARTWORK_ROUNDNESS, 0).coerceIn(0, 100)
+
+    fun setGeneratedArtworkRoundnessPercent(value: Int) =
+        writeUiPreference(KEY_GENERATED_ARTWORK_ROUNDNESS, value.coerceIn(0, 100))
+
+    fun getGeneratedArtworkFollowIconRoundness(): Boolean {
+        if (remotePrefsProvider == null) return getGeneratedArtworkFollowIconRoundnessFromUi()
+        refreshGeneratedArtworkAppearance()
+        return cachedGeneratedArtworkFollowIconRoundness.get()
+    }
+
+    fun getGeneratedArtworkFollowIconRoundnessFromUi(): Boolean =
+        readUiBoolean(KEY_GENERATED_ARTWORK_FOLLOW_ICON_ROUNDNESS, false)
+
+    fun setGeneratedArtworkFollowIconRoundness(follow: Boolean) =
+        writeUiPreference(KEY_GENERATED_ARTWORK_FOLLOW_ICON_ROUNDNESS, follow)
+
+    private fun refreshGeneratedArtworkAppearance() {
+        if (remotePrefsProvider == null || !claimRefresh(lastGeneratedArtworkAppearanceRefreshMs)) return
+        val (roundness, followIconRoundness) = readRemoteGeneratedArtworkAppearance()
+        val roundnessChanged = cachedGeneratedArtworkRoundness.getAndSet(roundness) != roundness
+        val followChanged = cachedGeneratedArtworkFollowIconRoundness.getAndSet(followIconRoundness) != followIconRoundness
+        val changed = roundnessChanged || followChanged
+        if (changed) {
+            runCatching { CacheManager.clearAll() }
+            runCatching { MiuiIconShapeCompat.invalidateMiuiCaches() }
+        }
+    }
+
+    private fun readRemoteGeneratedArtworkAppearance(): Pair<Int, Boolean> = try {
+        remotePrefsProvider?.invoke()?.let { prefs ->
+            prefs.getInt(KEY_GENERATED_ARTWORK_ROUNDNESS, 0).coerceIn(0, 100) to
+                prefs.getBoolean(KEY_GENERATED_ARTWORK_FOLLOW_ICON_ROUNDNESS, false)
+        } ?: (cachedGeneratedArtworkRoundness.get() to cachedGeneratedArtworkFollowIconRoundness.get())
+    } catch (_: Throwable) {
+        cachedGeneratedArtworkRoundness.get() to cachedGeneratedArtworkFollowIconRoundness.get()
+    }
+
+    fun isCircleIconsEnabled(): Boolean = getIconRoundnessPercent() == 100
 
     /** Silhouette to use for MonoIcon's own drawables right now. */
     fun iconShape(): IconShape =
         if (isCircleIconsEnabled()) IconShape.CIRCLE else IconShape.SQUIRCLE
 
-    private fun readRemoteCircleIcons(): Boolean = try {
-        remotePrefsProvider?.invoke()?.getBoolean(KEY_CIRCLE_ICONS, false) ?: false
+    private fun readRemoteIconAppearance(): Pair<Int, Int> = try {
+        remotePrefsProvider?.invoke()?.let { prefs ->
+            val legacy = if (prefs.getBoolean(KEY_CIRCLE_ICONS, false)) 100 else 0
+            prefs.getInt(KEY_ICON_ROUNDNESS, legacy).coerceIn(0, 100) to
+                prefs.getInt(KEY_ICON_SIZE, 0).coerceIn(0, 100)
+        } ?: (cachedIconRoundness.get() to cachedIconSize.get())
     } catch (_: Throwable) {
-        false
+        cachedIconRoundness.get() to cachedIconSize.get()
     }
 
     /** UI side: reads the circle-icon toggle (falls back to shared prefs). */
-    fun isCircleIconsEnabledFromUi(): Boolean = readUiBoolean(KEY_CIRCLE_ICONS, false)
+    fun isCircleIconsEnabledFromUi(): Boolean = getIconRoundnessPercentFromUi() == 100
 
     /** Persists the circle-icon toggle via the framework remote preferences. */
-    fun setCircleIconsEnabled(enabled: Boolean) = writeUiPreference(KEY_CIRCLE_ICONS, enabled)
+    fun setCircleIconsEnabled(enabled: Boolean) {
+        writeUiPreference(KEY_CIRCLE_ICONS, enabled)
+        if (readUiInt(KEY_ICON_ROUNDNESS, -1) >= 0) setIconRoundnessPercent(if (enabled) 100 else 0)
+    }
 
     // ── Notification app icons (always enabled with the module) ─────
 

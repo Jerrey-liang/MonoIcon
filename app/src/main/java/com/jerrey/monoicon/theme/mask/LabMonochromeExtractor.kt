@@ -2,37 +2,18 @@ package com.jerrey.monoicon.theme.mask
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.InsetDrawable
-import kotlin.math.sqrt
 
-/**
- * HyperOS compatibility mask extraction (Phase 7).
- *
- * The strict mask branches now follow AOSP android15-release
- * ([AospMonochromeFactory] + [IconNormalizerCompat]); this extractor keeps
- * the two pieces that AOSP itself does not provide:
- *
- * - [extractPixelNativeMonochrome]: the native `<monochrome>` ALPHA_8 path
- *   (identical in AOSP and Pixel Launcher).
- * - [extractFromBitmap] / [estimateLuminanceDelta]: the last-resort
- *   compatibility path for HyperOS Drawables that are neither raw legacy
- *   inputs nor AdaptiveIcons — edge-connected plate exclusion plus the
- *   Pixel-style grayscale stretch/mid-tone/polarity pipeline.
- */
+/** Native alpha rendering and source-aware finishing for generic HyperOS bitmaps. */
 object LabMonochromeExtractor {
 
     // ── Background bins for polarity estimation ────────────────────────
     private const val BG_DARK = 10
     private const val BG_MID = 11
     private const val BG_LIGHT = 12
-
-    // Conservative thresholds for legacy bitmap icons that contain a plate
-    // but do not expose an Android monochrome layer.
-    private const val EDGE_COLOR_DISTANCE = 32f
-    private const val MIN_BACKGROUND_RATIO = 0.35
-    private const val MIN_FOREGROUND_RATIO = 0.02
 
     /**
      * Native-monochrome path (AOSP / Pixel identical).
@@ -42,6 +23,7 @@ object LabMonochromeExtractor {
      * polarity or edge-plate processing is involved.
      */
     fun extractPixelNativeMonochrome(drawable: Drawable, targetSize: Int): Bitmap? {
+        val previous = Rect(drawable.bounds)
         return try {
             val size = targetSize.coerceAtLeast(1)
             val inset = InsetDrawable(
@@ -54,172 +36,27 @@ object LabMonochromeExtractor {
             result
         } catch (_: Throwable) {
             null
+        } finally {
+            drawable.bounds = previous
         }
     }
 
-    /**
-     * The compatibility mask pipeline for an already-rendered bitmap —
-     * used by the HyperOS fallback tier:
-     * 1. Edge-connected plate detection and exclusion.
-     * 2. Equi-weight grayscale `(R+G+B)/3 → [0,100]`
-     * 3. min-max contrast stretch
-     * 4. mid-tone boost
-     * 5. optional inversion when [luminanceDelta] < 0
-     *
-     * The input [bitmap] is never recycled (the caller may still need it,
-     * e.g. as the cache fingerprint source).
-     */
-    fun extractFromBitmap(bitmap: Bitmap, luminanceDelta: Double?): Bitmap? {
-        val w = bitmap.width
-        val h = bitmap.height
-        val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-
-        // Legacy PNG icons often contain a white/light plate but no native
-        // monochrome layer. If that plate participates in min-max stretching,
-        // it becomes an opaque glyph and covers the whole themed icon. Detect
-        // a conservative edge-connected plate before extracting luminance.
-        val edgeBackground = detectEdgeBackground(pixels, w, h)
-
-        // Step 2: equi-weight grayscale → [0, 100] range
-        val lValues = FloatArray(pixels.size)
-        var validCount = 0
-        var lMin = Float.MAX_VALUE
-        var lMax = Float.MIN_VALUE
-
-        for (i in pixels.indices) {
-            val a = (pixels[i] shr 24) and 0xFF
-            if (a < 32 || edgeBackground?.get(i) == true) {
-                lValues[i] = -1f
-                continue
-            }
-            val r = ((pixels[i] shr 16) and 0xFF) / 255f
-            val g = ((pixels[i] shr 8) and 0xFF) / 255f
-            val b = (pixels[i] and 0xFF) / 255f
-            val l = ((r + g + b) / 3.0f) * 100f
-            lValues[i] = l
-            lMin = minOf(lMin, l)
-            lMax = maxOf(lMax, l)
-            validCount++
-        }
-
-        if (validCount < 4) return null
-        if (lMax - lMin < 1f) {
-            // A flat foreground still has a useful silhouette after a plate
-            // was removed. Preserve the old null result for truly flat images.
-            if (edgeBackground == null) return null
-            val silhouettePixels = IntArray(pixels.size)
-            for (i in pixels.indices) {
-                val a = (pixels[i] shr 24) and 0xFF
-                if (a >= 32 && edgeBackground[i] != true) silhouettePixels[i] = a shl 24
-            }
-            val silhouette = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            silhouette.setPixels(silhouettePixels, 0, w, 0, 0, w, h)
-            return silhouette
-        }
-
-        // Step 3: contrast stretch + mid-tone boost.
-        val range = lMax - lMin
-        val maskPixels = IntArray(pixels.size)
-        for (i in pixels.indices) {
-            if (lValues[i] < 0f) { maskPixels[i] = 0; continue }
-            var alpha = ((lValues[i] - lMin) * 255f / range).toInt()
-            alpha = midToneBoost(alpha)
-            if (luminanceDelta != null && luminanceDelta < 0.0) alpha = 255 - alpha
-            alpha = alpha.coerceIn(0, 255)
-            maskPixels[i] = (alpha shl 24)
-        }
-
-        val mask = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        mask.setPixels(maskPixels, 0, w, 0, 0, w, h)
-        return mask
-    }
-
-    /** Finds a dominant plate connected to the bitmap edge. */
-    private fun detectEdgeBackground(pixels: IntArray, w: Int, h: Int): BooleanArray? {
-        if (w < 3 || h < 3) return null
-        val edgeSamples = ArrayList<Int>(2 * (w + h))
-        for (y in 0 until h) {
-            edgeSamples += pixels[y * w]
-            edgeSamples += pixels[y * w + w - 1]
-        }
-        for (x in 0 until w) {
-            edgeSamples += pixels[x]
-            edgeSamples += pixels[(h - 1) * w + x]
-        }
-        val opaqueEdge = edgeSamples.filter { ((it ushr 24) and 0xFF) >= 32 }
-        if (opaqueEdge.size < edgeSamples.size / 4) return null
-
-        val meanR = opaqueEdge.sumOf { (it ushr 16) and 0xFF }.toDouble() / opaqueEdge.size
-        val meanG = opaqueEdge.sumOf { (it ushr 8) and 0xFF }.toDouble() / opaqueEdge.size
-        val meanB = opaqueEdge.sumOf { it and 0xFF }.toDouble() / opaqueEdge.size
-        val edgeVariance = opaqueEdge.map {
-            val dr = ((it ushr 16) and 0xFF) - meanR
-            val dg = ((it ushr 8) and 0xFF) - meanG
-            val db = (it and 0xFF) - meanB
-            dr * dr + dg * dg + db * db
-        }.average()
-        val tolerance = maxOf(EDGE_COLOR_DISTANCE, sqrt(edgeVariance).toFloat() * 2.0f)
-
-        val background = BooleanArray(pixels.size)
-        val queue = IntArray(pixels.size)
-        var head = 0
-        var tail = 0
-        fun enqueue(index: Int) {
-            if (!background[index]) {
-                background[index] = true
-                queue[tail++] = index
-            }
-        }
-        fun nearEdgeColor(color: Int): Boolean {
-            val dr = ((color ushr 16) and 0xFF) - meanR
-            val dg = ((color ushr 8) and 0xFF) - meanG
-            val db = (color and 0xFF) - meanB
-            return sqrt((dr * dr + dg * dg + db * db).toFloat()) <= tolerance
-        }
-        for (y in 0 until h) {
-            if (nearEdgeColor(pixels[y * w])) enqueue(y * w)
-            if (nearEdgeColor(pixels[y * w + w - 1])) enqueue(y * w + w - 1)
-        }
-        for (x in 0 until w) {
-            if (nearEdgeColor(pixels[x])) enqueue(x)
-            val bottom = (h - 1) * w + x
-            if (nearEdgeColor(pixels[bottom])) enqueue(bottom)
-        }
-        while (head < tail) {
-            val index = queue[head++]
-            val x = index % w
-            val y = index / w
-            if (x > 0) {
-                val next = index - 1
-                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
-            }
-            if (x + 1 < w) {
-                val next = index + 1
-                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
-            }
-            if (y > 0) {
-                val next = index - w
-                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
-            }
-            if (y + 1 < h) {
-                val next = index + w
-                if (!background[next] && nearEdgeColor(pixels[next])) enqueue(next)
-            }
-        }
-
-        var opaque = 0
-        var edgeOpaque = 0
-        var foregroundOpaque = 0
-        for (i in pixels.indices) {
-            if (((pixels[i] ushr 24) and 0xFF) < 32) continue
-            opaque++
-            if (background[i]) edgeOpaque++ else foregroundOpaque++
-        }
-        if (opaque == 0) return null
-        val backgroundRatio = edgeOpaque.toDouble() / opaque.toDouble()
-        val foregroundRatio = foregroundOpaque.toDouble() / opaque.toDouble()
-        return if (backgroundRatio >= MIN_BACKGROUND_RATIO && foregroundRatio >= MIN_FOREGROUND_RATIO) background else null
+    /** Coverage and tone remain independent for generic HyperOS bitmaps as well. */
+    @Suppress("UNUSED_PARAMETER")
+    fun extractFromBitmap(
+        bitmap: Bitmap,
+        luminanceDelta: Double?,
+        borderRatio: Float = 1f,
+    ): Bitmap? {
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        if (pixels.none { (it ushr 24) >= 32 }) return null
+        return if (GeneratedMaskProcessor.isSingleTone(pixels)) {
+            MaskBitmapIO.create(ByteArray(pixels.size) { (pixels[it] ushr 24).toByte() }, width, height)
+        } else Bitmap.createBitmap(GeneratedMaskProcessor.tonal(pixels, width, height),
+            width, height, Bitmap.Config.ARGB_8888)
     }
 
     /**
@@ -227,8 +64,8 @@ object LabMonochromeExtractor {
      * background/foreground layers (bitmaps rendered from BitmapDrawable /
      * VectorDrawable / generic drawables).
      *
-     * 3-bin background-luminance estimation used ONLY to decide the
-     * direction — the mask pixels themselves always go through
+     * 3-bin background-luminance estimation decides the exterior plate's
+     * baseline polarity — artwork itself always goes through
      * [extractFromBitmap]:
      * - light background + darker foreground → negative delta (invert)
      * - dark background + lighter foreground → positive delta (standard)
@@ -316,7 +153,7 @@ object LabMonochromeExtractor {
         return (0.299 * r + 0.587 * g + 0.114 * b).toInt()
     }
 
-    // ── Mid-tone boost (used by the compatibility fallback only) ───────
+    // Retained as a reference curve for old baseline regression fixtures.
 
     internal fun midToneBoost(p: Int): Int {
         if (p > 128) return (255 - ((1.0 - (p - 128) / 128.0) * (255 - p))).toInt()

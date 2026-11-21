@@ -32,4 +32,5 @@ data class IconRenderResult(
 
     /** Convenience: whether the cache was hit. */
     val cacheHit: Boolean get() = maskResult.cacheHit
+    val tonal: Boolean get() = maskResult.tonal
 }

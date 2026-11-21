@@ -28,11 +28,18 @@ interface LawniconsBundle {
     /** `pkg/cls` 或 `pkg` → drawable 名。 */
     fun index(): Map<String, String>
 
-    /** `pkg` → drawable 名（手动别名，优先于 index）。 */
+    /** `pkg/cls` 或 `pkg` → drawable 名（手动别名，优先于 index）。 */
     fun aliases(): Map<String, String>
 
     /** 打开 `masks/<name>.png`；不存在返回 null。 */
     fun open(asset: String): InputStream?
+
+    /** Metadata check only; APK bundles override this without opening the PNG. */
+    fun containsAsset(asset: String): Boolean = try {
+        open(asset)?.use { true } ?: false
+    } catch (_: Throwable) {
+        false
+    }
 }
 
 /** 读取模块 APK 内 `assets/lawnicons/` 的实现。 */
@@ -41,12 +48,19 @@ internal class ApkAssetBundle(private val apkPath: String) : LawniconsBundle {
     private val versionValue: String
     private val indexMap: Map<String, String>
     private val aliasMap: Map<String, String>
+    private val availableAssets: Set<String>
 
     init {
         var parsedVersion = "unknown"
         val parsedIndex = HashMap<String, String>(1024)
         val parsedAliases = HashMap<String, String>(16)
+        val parsedAssets = HashSet<String>()
         ZipFile(apkPath).use { zip ->
+            zip.entries().asSequence().forEach { entry ->
+                if (!entry.isDirectory && entry.name.startsWith(MASKS_ENTRY_PREFIX) && entry.name.endsWith(".png")) {
+                    parsedAssets += entry.name.removePrefix(MASKS_ENTRY_PREFIX).removeSuffix(".png")
+                }
+            }
             zip.getEntry(INDEX_ENTRY)?.let { entry ->
                 zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).useLines { lines ->
                     lines.forEachIndexed { lineIndex, raw ->
@@ -80,8 +94,10 @@ internal class ApkAssetBundle(private val apkPath: String) : LawniconsBundle {
             }
         }
         versionValue = parsedVersion
-        indexMap = parsedIndex
-        aliasMap = parsedAliases
+        availableAssets = parsedAssets
+        val resources = LawniconsResourceIndex(parsedIndex, parsedAliases, availableAssets)
+        indexMap = resources.index
+        aliasMap = resources.aliases
     }
 
     override fun version(): String = versionValue
@@ -89,6 +105,8 @@ internal class ApkAssetBundle(private val apkPath: String) : LawniconsBundle {
     override fun index(): Map<String, String> = indexMap
 
     override fun aliases(): Map<String, String> = aliasMap
+
+    override fun containsAsset(asset: String): Boolean = asset in availableAssets
 
     override fun open(asset: String): InputStream? {
         val zip = ZipFile(apkPath)
@@ -120,7 +138,7 @@ internal class ApkAssetBundle(private val apkPath: String) : LawniconsBundle {
 }
 
 /**
- * Lawnicons 掩码查找层（Phase 8 分层：NATIVE → LAWNICONS → AOSP → LUMA）。
+ * Lawnicons 掩码查找层（LAWNICONS → NATIVE → AOSP → LUMA）。
  *
  * ## 几何约定（重要）
  * bundle 内的 PNG 由**原始 SVG**直接渲染为 768×768（内容占画布约 67–83%），
@@ -170,6 +188,21 @@ object LawniconsAssetSource {
     /** bundle 版本（未初始化/不可用时为 "none"）。 */
     fun version(): String = bundle?.version() ?: "none"
 
+    /** Packages whose mapped PNG actually exists; call [init] first. Never renders icons. */
+    fun availablePackages(): Set<String> {
+        val loaded = bundle ?: return emptySet()
+        return (loaded.index().entries + loaded.aliases().entries)
+            .filter { loaded.containsAsset(it.value) }
+            .mapTo(linkedSetOf()) { it.key.substringBefore('/') }
+    }
+
+    /** Uses exactly the runtime mapping, including aliases and component-only defaults. */
+    fun hasAvailableMask(identity: String?): Boolean {
+        val loaded = bundle ?: return false
+        val asset = resolveAsset(identity, loaded.index(), loaded.aliases()) ?: return false
+        return loaded.containsAsset(asset)
+    }
+
     /**
      * 懒初始化：由 [com.jerrey.monoicon.hook.IconThemeHook] 在拿到第一个
      * View context 时调用（与 `PixelMonetColorEngine.init` 同一位置）。
@@ -192,7 +225,7 @@ object LawniconsAssetSource {
                 }
                 val loaded = ApkAssetBundle(apkPath)
                 val entries = loaded.index().size
-                if (entries == 0) {
+                if (entries == 0 && loaded.aliases().isEmpty()) {
                     unavailable = true
                     logd(TAG, "empty index → tier disabled (apk=$apkPath)")
                     return
@@ -307,20 +340,13 @@ object LawniconsAssetSource {
         null
     }
 
-    /** 别名 → 组件级 → 包级；`unknown`/空身份不查。 */
+    /** 组件别名 → 包别名 → 组件级 → 包级；`unknown`/空身份不查。 */
     internal fun resolveAsset(
         identity: String?,
         index: Map<String, String>,
         aliases: Map<String, String>,
     ): String? {
-        val id = identity?.trim().orEmpty()
-        if (id.isEmpty() || id == "unknown") return null
-        val slash = id.indexOf('/')
-        val pkg = if (slash > 0) id.substring(0, slash) else id
-        if (pkg.isEmpty() || pkg == "unknown") return null
-        aliases[pkg]?.let { return it }
-        if (slash > 0) index[id]?.let { return it }
-        return index[pkg]
+        return LawniconsResourceIndex.resolve(identity, index, aliases)
     }
 
     /**

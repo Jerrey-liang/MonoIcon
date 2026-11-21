@@ -19,7 +19,10 @@ KernelSU's `FloatingBottomBar.kt` explicitly identifies its compose-miuix-ui ori
 | `ui/screens/SettingsScreen.kt` | `ui/MainActivity.kt`, `ui/component/bottombar/BottomBar.kt`, `BottomBarMiuix.kt` |
 | `ui/screens/OverviewScreen.kt`, `HomeSystemInfo.kt`, `HomeTopBarActions.kt` | `ui/screen/home/HomeMiuix.kt`, home view model, reboot popup |
 | `ui/screens/ModuleSettingsScreen.kt`, `ProfileSettings.kt` | `ui/screen/settings/SettingsMiuix.kt`, dialog components |
+| `ui/screens/ConfigurationRuntimeContent.kt` | `ui/screen/settings/SettingsMiuix.kt` card and preference layout |
 | `ui/screens/ThemeSettingsScreen.kt`, `ui/theme/Theme.kt` | `ui/screen/colorpalette/ColorPaletteScreenMiuix.kt`, `ui/theme/MiuixTheme.kt` |
+| `ui/screens/LawniconsAppsScreen.kt`, `AppIconSettingsScreen.kt`, `IconStyleScreen.kt`, `IconStyleParameterScreen.kt`, `IconStylePreview.kt` | `ui/screen/superuser/SuperUserMiuix.kt`, `ui/screen/settings/SettingsMiuix.kt`, `ui/screen/colorpalette/ColorPaletteScreenMiuix.kt`, Miuix preference components |
+| `ui/screens/KernelSearch.kt` | `ui/component/miuix/SuperSearchBar.kt`, `ui/component/SearchStatus.kt` |
 | `ui/screens/AboutScreen.kt`, `ui/settings/effect/` | `ui/screen/about/AboutMiuix.kt`, background effect components |
 | `ui/settings/SendLogDialog.kt` | `ui/component/miuix/SendLogDialog.kt` |
 | `ui/liquid/BlurredBar.kt` | `ui/util/BlurExt.kt` |
@@ -37,7 +40,7 @@ The APK includes the upstream licence and attribution alongside the artwork. The
 
 ## Material Color Utilities
 
-The Material 2025 colour implementation derives from Google's Material Color Utilities and retains its Apache-2.0 copyright notices in the source files. See the [upstream project](https://github.com/material-foundation/material-color-utilities) and the [Apache-2.0 licence](LICENSE).
+The Material 2025 and Material Design 3 colour implementations derive from Google's Material Color Utilities (2025 and 2021 specifications) and retain its Apache-2.0 copyright notices in the source files. See the [upstream project](https://github.com/material-foundation/material-color-utilities) and the [Apache-2.0 licence](LICENSE).
 
 ## Miuix and Material icons
 

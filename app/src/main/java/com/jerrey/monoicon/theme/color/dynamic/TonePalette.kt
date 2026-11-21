@@ -1,5 +1,7 @@
 package com.jerrey.monoicon.theme.color.dynamic
 
+import com.jerrey.monoicon.material2025.palettes.TonalPalette
+
 /**
  * A single HCT (Hue-Chroma-Tone) tonal palette — 13 shades derived
  * from one seed hue at fixed perceptual lightness steps (Phase 6.3).
@@ -17,6 +19,12 @@ class TonePalette private constructor(private val colors: IntArray) {
 
     companion object {
         const val COUNT = 13
+
+        /** Keep the selected Material specification's hue and chroma for every tone. */
+        internal fun fromMaterialPalette(palette: TonalPalette): TonePalette {
+            val tones = intArrayOf(0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100)
+            return TonePalette(IntArray(COUNT) { palette.tone(tones[it]) })
+        }
 
         /** Generate a 13-tone palette from [seedColor] using CAM16 HCT. */
         fun generate(seedColor: Int): TonePalette = try {

@@ -25,6 +25,8 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -49,11 +51,15 @@ import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.AppStrings
 import com.jerrey.monoicon.ui.MonoIconApp
+import com.jerrey.monoicon.ui.screens.ConfigurationDiagnosticsRepository
+import com.jerrey.monoicon.ui.screens.LauncherEngine
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
 import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
 import com.jerrey.monoicon.ui.settings.UiPreferences
 import com.jerrey.monoicon.ui.settings.UiSettings
+import com.jerrey.monoicon.ui.settings.AppUpdateChecker
+import com.jerrey.monoicon.ui.settings.UpdateState
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -70,6 +76,8 @@ class SettingsScreenComposeTest {
     val isolatedManagerSettings = object : ExternalResource() {
         private var savedPreferences: SharedPreferences? = null
         private lateinit var savedSettings: UiSettings
+        private var savedUpdateChecked = false
+        private lateinit var savedUpdateState: UpdateState
 
         override fun before() {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -79,9 +87,13 @@ class SettingsScreenComposeTest {
             val isolated = context.getSharedPreferences("settings_screen_test", Context.MODE_PRIVATE)
             isolated.edit().clear().commit()
             uiField("preferences").set(null, isolated)
-            // Exercise the requested default glass/pager behavior, regardless of
-            // user customization. Navigation tests need no network/update feed.
-            uiState().value = UiSettings(checkUpdate = false)
+            uiState().value = UiSettings()
+            // Keep the public release feed out of navigation assertions while
+            // exercising the same always-enabled manager settings as the app.
+            savedUpdateChecked = updateField("checkedThisSession").getBoolean(null)
+            savedUpdateState = updateState().value
+            updateField("checkedThisSession").setBoolean(null, true)
+            updateState().value = UpdateState()
         }
 
         override fun after() {
@@ -89,6 +101,8 @@ class SettingsScreenComposeTest {
             // every screen, so restoration cannot start an update/background job.
             uiField("preferences").set(null, savedPreferences)
             uiState().value = savedSettings
+            updateField("checkedThisSession").setBoolean(null, savedUpdateChecked)
+            updateState().value = savedUpdateState
         }
     }
 
@@ -110,22 +124,55 @@ class SettingsScreenComposeTest {
     }
 
     @Test
-    fun bottomBarOpensIndependentProfilePageAndSettings() {
+    fun bottomBarOpensConfigurationAndSettings() {
         val strings = currentStrings()
         composeRule.setContent { MonoIconApp() }
 
         tab(strings.configurationManagement).performClick()
         assertNavigation(strings, selectedIndex = 2)
-        composeRule.onNodeWithText(strings.profiles).assertIsDisplayed()
-        composeRule.onNodeWithText(strings.profileImport).assertIsDisplayed()
+        composeRule.onNodeWithTag("configuration-environment").assertIsDisplayed()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        if (ConfigurationDiagnosticsRepository.environment(context).engine == LauncherEngine.NATIVE) {
+            composeRule.waitUntil(20_000) {
+                composeRule.onAllNodes(hasText(strings.profileImport)).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText(strings.profiles).assertIsDisplayed()
+            composeRule.onNodeWithText(strings.profileImport).assertIsDisplayed()
+        } else {
+            composeRule.onNodeWithText(strings.profiles).assertIsNotDisplayed()
+            composeRule.onNodeWithText(strings.profileImport).assertIsNotDisplayed()
+        }
 
         tab(strings.moduleSettings).performClick()
         assertNavigation(strings, selectedIndex = 3)
-        composeRule.onNodeWithText(strings.masterSwitch).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(strings.about).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText(strings.profileImport).assertIsNotDisplayed()
 
         tab(strings.overview).performClick()
         assertNavigation(strings, selectedIndex = 0)
+    }
+
+    @Test
+    fun moduleSwitchIsOnlyAvailableOnHome() {
+        val strings = currentStrings()
+        composeRule.setContent { MonoIconApp() }
+
+        composeRule.onNodeWithText(strings.masterSwitch).performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodes(hasText(strings.masterSwitch)).assertCountEquals(1)
+        composeRule.onNode(isToggleable() and hasAnyAncestor(hasTestTag("main-page-0")))
+            .assertIsDisplayed().assertHasClickAction()
+
+        tab(strings.moduleSettings).performClick()
+        assertNavigation(strings, selectedIndex = 3)
+        composeRule.onAllNodes(hasText(strings.masterSwitch) and hasAnyAncestor(hasTestTag("main-page-3")))
+            .assertCountEquals(0)
+        composeRule.onAllNodes(isToggleable() and hasAnyAncestor(hasTestTag("main-page-3")))
+            .assertCountEquals(0)
+        composeRule.onNodeWithText(strings.masterSwitch).assertIsNotDisplayed()
+
+        tab(strings.overview).performClick()
+        assertNavigation(strings, selectedIndex = 0)
+        composeRule.onNodeWithText(strings.masterSwitch).assertIsDisplayed()
     }
 
     @Test
@@ -428,6 +475,11 @@ class SettingsScreenComposeTest {
     private fun uiState() = uiField("mutableState").get(null) as MutableStateFlow<UiSettings>
 
     private fun uiField(name: String) = UiPreferences::class.java.getDeclaredField(name).apply { isAccessible = true }
+
+    private fun updateField(name: String) = AppUpdateChecker::class.java.getDeclaredField(name).apply { isAccessible = true }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun updateState() = updateField("mutableState").get(null) as MutableStateFlow<UpdateState>
 
     @Test
     fun variantIdsMapToPaletteStyles() {

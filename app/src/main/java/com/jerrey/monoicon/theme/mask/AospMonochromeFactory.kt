@@ -7,15 +7,17 @@ import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.InsetDrawable
-import java.nio.ByteBuffer
 import kotlin.math.round
 
 /**
- * Faithful port of the AOSP android15-release monochrome mask core:
+ * AOSP android15 geometry and luminance baseline, followed by source-aware
+ * finishing in [GeneratedMaskProcessor]. Layers are inspected separately so
+ * uniform wrappers can be excluded without losing artwork in the background.
  *
  * 1. `MonochromeIconFactory` (iconloaderlib): the wrapped AdaptiveIcon is
  *    flattened into a square intermediate bitmap
@@ -50,17 +52,78 @@ object AospMonochromeFactory {
         return round(size * 2.0 * viewportScale).toInt().coerceAtLeast(1)
     }
 
-    /** Full pipeline: flatten → grayscale/stretch/edge-flip → clipped output. */
-    fun wrap(drawable: AdaptiveIconDrawable, targetSize: Int): Bitmap? {
+    /** Preserve source coverage and tone separately, then apply AOSP geometry. */
+    @Suppress("UNUSED_PARAMETER")
+    fun wrap(drawable: AdaptiveIconDrawable, targetSize: Int, borderRatio: Float = 1f): Bitmap? {
         val flatSize = flatSize(targetSize)
         val flat = renderFlat(drawable, flatSize) ?: return null
         var mono: Bitmap? = null
+        var foreground: Bitmap? = null
         return try {
-            mono = generateMono(flat, targetSize) ?: return null
-            rasterizeClipped(mono, targetSize)
+            val baseline = generateMono(flat, targetSize) ?: return null
+            mono = baseline
+            foreground = drawable.foreground?.let { renderLayer(it, flatSize) }
+            val foregroundPixels = foreground?.let(::readColors)
+            val artwork = if (hasBackgroundArtwork(drawable, targetSize)) {
+                // Adaptive layers can split one logo between foreground and
+                // background. Keep their real SRC_OVER composition, including
+                // partially transparent foreground pixels and background art.
+                readColors(flat)
+            } else if (foregroundPixels?.any { (it ushr 24) >= MIN_VISIBLE_ALPHA } == true) {
+                foregroundPixels
+            } else {
+                // Some APKs put all artwork in the background layer. It still
+                // needs white-detail protection; keep the AOSP flat-color result
+                // only when there is no tonal/color structure to extract.
+                readColors(flat).takeIf { pixels ->
+                    val first = pixels.firstOrNull { (it ushr 24) >= MIN_VISIBLE_ALPHA }
+                    first != null && pixels.any {
+                        (it ushr 24) >= MIN_VISIBLE_ALPHA && (it and 0xFFFFFF) != (first and 0xFFFFFF)
+                    }
+                }
+            }
+            val finished = if (artwork == null) baseline else {
+                val generated = if (GeneratedMaskProcessor.isSingleTone(artwork)) {
+                    MaskBitmapIO.create(ByteArray(artwork.size) { (artwork[it] ushr 24).toByte() }, flatSize, flatSize)
+                } else {
+                    Bitmap.createBitmap(GeneratedMaskProcessor.tonal(artwork, flatSize, flatSize),
+                        flatSize, flatSize, Bitmap.Config.ARGB_8888)
+                }
+                generated.also { baseline.recycle() }
+            }
+            mono = finished
+            rasterizeClipped(finished, targetSize)
         } finally {
+            foreground?.takeUnless { it.isRecycled }?.recycle()
             mono?.takeUnless { it.isRecycled }?.recycle()
             flat.takeUnless { it.isRecycled }?.recycle()
+        }
+    }
+
+    private fun readColors(bitmap: Bitmap): IntArray = IntArray(bitmap.width * bitmap.height).also {
+        bitmap.getPixels(it, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    }
+
+    /**
+     * Empty, uniform, and smooth opaque gradient backgrounds are plain plates.
+     * Color or alpha structure may carry artwork, including equal-luminance
+     * colors and partially transparent shapes. Hidden RGB in fully transparent
+     * pixels is ignored. If a layer cannot be inspected, preserve it rather than
+     * taking a foreground-only shortcut that could discard source information.
+     */
+    fun hasBackgroundArtwork(drawable: AdaptiveIconDrawable, targetSize: Int): Boolean {
+        val background = drawable.background ?: return false
+        val bitmap = runCatching { renderLayer(background, flatSize(targetSize)) }.getOrNull() ?: return true
+        return try {
+            val pixels = readColors(bitmap)
+            fun visibleColor(pixel: Int): Int = if ((pixel ushr 24) == 0) 0 else pixel
+            val first = visibleColor(pixels[0])
+            pixels.any { visibleColor(it) != first } &&
+                !GeneratedBackgroundPlate.isSmoothPlate(pixels, bitmap.width, bitmap.height)
+        } catch (_: Throwable) {
+            true
+        } finally {
+            bitmap.recycle()
         }
     }
 
@@ -74,16 +137,35 @@ object AospMonochromeFactory {
             val flat = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(flat)
             drawable.background?.let {
-                it.setBounds(0, 0, size, size)
-                it.draw(canvas)
+                drawLayer(it, canvas, size)
             }
             drawable.foreground?.let {
-                it.setBounds(0, 0, size, size)
-                it.draw(canvas)
+                drawLayer(it, canvas, size)
             }
             flat
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    private fun renderLayer(drawable: Drawable, size: Int): Bitmap? {
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        return try {
+            drawLayer(drawable, Canvas(bitmap), size)
+            bitmap
+        } catch (_: Throwable) {
+            bitmap.recycle()
+            null
+        }
+    }
+
+    private fun drawLayer(drawable: Drawable, canvas: Canvas, size: Int) {
+        val previous = Rect(drawable.bounds)
+        try {
+            drawable.setBounds(0, 0, size, size)
+            drawable.draw(canvas)
+        } finally {
+            drawable.bounds = previous
         }
     }
 
@@ -168,9 +250,7 @@ object AospMonochromeFactory {
         }
         // min == max: AOSP leaves the bytes unchanged (flat grayscale pass-through).
 
-        val mono = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
-        mono.copyPixelsFromBuffer(ByteBuffer.wrap(gray))
-        return mono
+        return MaskBitmapIO.create(gray, size, size)
     }
 
     /** AOSP flip predicate: (edgeAverage - min) / range > 0.5. */
@@ -188,7 +268,10 @@ object AospMonochromeFactory {
                 MonoBitmapDrawable(mono),
                 -AdaptiveIconDrawable.getExtraInsetFraction(),
             )
-            val result = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
+            // Generated tonal artwork carries source alpha AND grayscale RGB.
+            // Authored alpha masks retain their existing single-channel format.
+            val config = if (mono.config == Bitmap.Config.ALPHA_8) Bitmap.Config.ALPHA_8 else Bitmap.Config.ARGB_8888
+            val result = Bitmap.createBitmap(size, size, config)
             val canvas = Canvas(result)
             val maskPath = iconMaskPath(size)
             val save = if (maskPath != null) {
@@ -217,8 +300,7 @@ object AospMonochromeFactory {
         val raw: Bitmap = try {
             val bmp = Bitmap.createBitmap(flatSize, flatSize, Bitmap.Config.ALPHA_8)
             val canvas = Canvas(bmp)
-            drawable.setBounds(0, 0, flatSize, flatSize)
-            drawable.draw(canvas)
+            drawLayer(drawable, canvas, flatSize)
             bmp
         } catch (_: Throwable) {
             null
@@ -231,8 +313,7 @@ object AospMonochromeFactory {
             for (i in pixels.indices) {
                 mapped[i] = if (((pixels[i] ushr 24) and 0xFF) >= MIN_VISIBLE_ALPHA) 255.toByte() else 0
             }
-            mono = Bitmap.createBitmap(flatSize, flatSize, Bitmap.Config.ALPHA_8)
-            mono.copyPixelsFromBuffer(ByteBuffer.wrap(mapped))
+            mono = MaskBitmapIO.create(mapped, flatSize, flatSize)
             rasterizeClipped(mono, targetSize)
         } catch (_: Throwable) {
             null
@@ -246,16 +327,15 @@ object AospMonochromeFactory {
      * Foreground-layer structure used by the silhouette/B decision:
      * transparency fractions measured in flat space and inside the fg's own
      * bounding box, plus the grayscale standard deviation of its opaque
-     * content. Full-bleed artwork badges (high std) must not collapse into a
-     * flat silhouette block.
+     * content. The tonal processor's single-tone check also protects distinct
+     * colors with equal average RGB and details too small to raise the std.
      */
     fun foregroundStructure(drawable: Drawable, targetSize: Int): ForegroundStructure? {
         val flatSize = flatSize(targetSize)
         val bmp: Bitmap = try {
             val bitmap = Bitmap.createBitmap(flatSize, flatSize, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
-            drawable.setBounds(0, 0, flatSize, flatSize)
-            drawable.draw(canvas)
+            drawLayer(drawable, canvas, flatSize)
             bitmap
         } catch (_: Throwable) {
             null
@@ -288,6 +368,7 @@ object AospMonochromeFactory {
                     flatTransparentFraction = flatTransparentFraction,
                     bboxTransparentFraction = 0f,
                     grayStd = 0f,
+                    isSingleTone = true,
                 )
             }
 
@@ -315,6 +396,7 @@ object AospMonochromeFactory {
                 flatTransparentFraction = flatTransparentFraction,
                 bboxTransparentFraction = bboxTransparentFraction,
                 grayStd = grayStd,
+                isSingleTone = GeneratedMaskProcessor.isSingleTone(pixels),
             )
         } catch (_: Throwable) {
             null
@@ -328,11 +410,12 @@ object AospMonochromeFactory {
         val flatTransparentFraction: Float,
         val bboxTransparentFraction: Float,
         val grayStd: Float,
+        val isSingleTone: Boolean,
     ) {
         val useSilhouette: Boolean
             get() = flatTransparentFraction >= SILHOUETTE_MIN_TRANSPARENT_FRACTION &&
                 bboxTransparentFraction >= SILHOUETTE_MIN_TRANSPARENT_FRACTION &&
-                grayStd < SILHOUETTE_MAX_FG_GRAY_STD
+                grayStd < SILHOUETTE_MAX_FG_GRAY_STD && isSingleTone
     }
 
     /**

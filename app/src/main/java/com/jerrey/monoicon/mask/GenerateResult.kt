@@ -12,4 +12,6 @@ data class GenerateResult(
     val source: Int,
     val rawUsed: Boolean,
     val cacheHit: Boolean,
+    /** Generated grayscale RGB with true source alpha; authored alpha masks are false. */
+    val tonal: Boolean = false,
 )

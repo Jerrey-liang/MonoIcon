@@ -74,7 +74,8 @@ internal object SystemUiIconHooks {
                 ApplicationInfo::class.java,
                 PackageManager::class.java,
             )
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            HookRegistry.discoveryFailed("SystemUiDrawable", t)
             null
         }
         if (drawableMethod != null) {
@@ -88,7 +89,8 @@ internal object SystemUiIconHooks {
                 Int::class.javaPrimitiveType,
                 String::class.java,
             )
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            HookRegistry.discoveryFailed("SystemUiBitmap", t)
             null
         }
         if (bitmapMethod != null) {
@@ -116,16 +118,15 @@ internal object SystemUiIconHooks {
             arrayOf(Drawable::class.java),
             arrayOf(Drawable::class.java, java.lang.Boolean.TYPE),
         )
-        for (signature in signatures) {
+        for ((index, signature) in signatures.withIndex()) {
             val method = try {
                 customizer.getDeclaredMethod("generateIconStyleDrawable", *signature)
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                HookRegistry.discoveryFailed(if (index == 0) "SystemUiStyleDrawable" else "SystemUiStyleDrawableBoolean", t)
                 null
             } ?: continue
             api.deoptimize(method)
-            api.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain: Chain ->
+            HookRegistry.intercept(api, method) { chain: Chain ->
                     val argument = chain.getArg(0)
                     styledIconResult(argument, method.returnType) ?: chain.proceed()
                 }
@@ -160,9 +161,7 @@ internal object SystemUiIconHooks {
 
     private fun installDrawableHook(api: XposedInterface, method: java.lang.reflect.Method) {
         api.deoptimize(method)
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 ensureInitialised(chain.thisObject)
                 if (!active()) return@intercept chain.proceed()
 
@@ -187,9 +186,7 @@ internal object SystemUiIconHooks {
 
     private fun installBitmapHook(api: XposedInterface, method: java.lang.reflect.Method) {
         api.deoptimize(method)
-        api.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain: Chain ->
+        HookRegistry.intercept(api, method) { chain: Chain ->
                 ensureInitialised(chain.thisObject)
                 if (!active()) return@intercept chain.proceed()
 
@@ -240,8 +237,10 @@ internal object SystemUiIconHooks {
         if (width <= 0 || height <= 0) return null
 
         ensureInitialised(manager)
+        // Refresh before looking up a finished bitmap: a hit otherwise skips mask generation.
+        val preferences = ConfigManager.getEffectiveIconStyle(pkg)
         val colors = PixelMonetColorEngine.getIconColors()
-        val key = "$pkg|${width}x$height|${ConfigManager.iconShape()}|${ConfigManager.isLawniconsEnabled()}|${colors.foreground}|${colors.background}"
+        val key = "$pkg|${width}x$height|$preferences|${ConfigManager.permitsLawniconsFallback(pkg)}|${colors.foreground}|${colors.background}"
         bitmapCache[key]?.get()?.takeIf { !it.isRecycled }?.let { return it }
 
         val themed = themedDrawable(manager, pkg, null) ?: return null

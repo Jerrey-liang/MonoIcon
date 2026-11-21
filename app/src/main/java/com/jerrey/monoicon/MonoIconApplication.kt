@@ -7,6 +7,7 @@ import com.jerrey.monoicon.logging.LogStore
 import com.jerrey.monoicon.logging.LogcatLogger
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
 import com.jerrey.monoicon.ui.settings.PredictiveBackPreference
 import com.jerrey.monoicon.ui.settings.UiPreferences
 
@@ -50,6 +51,7 @@ class MonoIconApplication : Application() {
             .onFailure { loge(TAG, "config initialisation failed", it) }
 
         installCrashLogger()
+        PixelMonetColorEngine.init(this)
         HyperOs4PalettePublisher.init(this)
     }
 

@@ -2,6 +2,7 @@
 // main-thread pthread_create is another startup boundary before Flutter's UI
 // thread can run. Keep this hook inert in the spawner and all other processes.
 #include "hyperos4_icon_files.h"
+#include "hyperos4_diagnostics.h"
 #include <android/log.h>
 #include <cerrno>
 #include <cstring>
@@ -19,6 +20,7 @@ extern "C" uint32_t monoicon_hyos_palette_install();
 namespace {
 using CreateThread = int (*)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
 CreateThread originalCreate = nullptr;
+monoicon::hyos::diagnostics::HookPoint startupDiagnostic{"pthread_create"};
 thread_local bool entering = false;
 
 bool LauncherReady() {
@@ -63,7 +65,14 @@ extern "C" void monoicon_hyos_install_startup_hook(MonoiconNativeHook hook) {
     void* target = dlsym(RTLD_DEFAULT, "pthread_create");
     const int result = target ? hook(target, reinterpret_cast<void*>(Create),
                                      reinterpret_cast<void**>(&originalCreate)) : -1;
+    monoicon::hyos::diagnostics::Record(startupDiagnostic, target, reinterpret_cast<void*>(Create),
+        reinterpret_cast<void*>(originalCreate), result, static_cast<uint32_t>(getpid()),
+        !target ? "symbol-missing" : result != 0 ? "hook-failed" : originalCreate ? "installed" : "backup-missing");
     if (result != 0 || !originalCreate) {
         __android_log_print(ANDROID_LOG_WARN, "MonoIcon.HYOS", "startup thread hook unavailable: %d", result);
     }
+}
+
+extern "C" void monoicon_hyos_append_startup_diagnostics(std::string& output) {
+    monoicon::hyos::diagnostics::AppendHook(output, startupDiagnostic, "startup-hook");
 }

@@ -1,5 +1,7 @@
 package com.jerrey.monoicon
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -15,6 +17,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jerrey.monoicon.cache.MonochromeCache
 import com.jerrey.monoicon.color.IconDrawableCache
+import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.config.IconSourceStyle
 import com.jerrey.monoicon.image.DrawableConverter
 import com.jerrey.monoicon.material2025.hct.Hct
 import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
@@ -27,21 +31,21 @@ import com.jerrey.monoicon.theme.mask.LawniconsAssetSource
 import com.jerrey.monoicon.theme.mask.MaskStrategy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * AOSP android15-release mask pipeline tests (Phase 7).
+ * AOSP geometry and source-aware generated-mask regressions.
  *
- * The strict branches follow `MonochromeIconFactory` (black prefill,
- * equal-weight grayscale, min/max stretch, EDGE-STRIP polarity flip, no
- * mid-tone boost) + `ClippedMonoDrawable` geometry. Legacy icons are
- * wrapped with `IconNormalizer.getScale() * 0.4667` on a white plate.
- *
- * Known AOSP limitation covered by these tests: a colored plate with a
- * WHITE motif (fenbi-class) has the motif flipped to transparency.
+ * Generated artwork keeps RGB tone separate from source alpha coverage, with
+ * `ClippedMonoDrawable` geometry. Legacy icons retain the normalizer and wrapper
+ * geometry. Native/Lawnicons masks and the flat-color AOSP baseline retain their
+ * alpha-mask contract; source white artwork must not become transparency.
  */
 @RunWith(AndroidJUnit4::class)
 class PixelMaskPipelineInstrumentedTest {
@@ -63,8 +67,74 @@ class PixelMaskPipelineInstrumentedTest {
         )
 
         assertNotNull(mask)
-        assertTrue(Color.alpha(mask!!.getPixel(8, 32)) > 220)
+        assertEquals(Bitmap.Config.ALPHA_8, mask!!.config)
+        assertTrue(Color.alpha(mask.getPixel(8, 32)) > 220)
         assertTrue(Color.alpha(mask.getPixel(56, 32)) < 32)
+    }
+
+    @Test
+    fun bothNativePriorityChainsAndLawniconsFallbackPreserveSourceOrder() {
+        LawniconsAssetSource.init(InstrumentationRegistry.getInstrumentation().targetContext)
+        val identity = "com.tencent.mobileqq"
+        val native = AdaptiveIconDrawable(ColorDrawable(Color.WHITE),
+            SplitDrawable(64, 64, Color.BLACK), SplitDrawable(64, 64, Color.WHITE))
+        val noNative = AdaptiveIconDrawable(ColorDrawable(Color.WHITE), SplitDrawable(64, 64, Color.BLACK))
+        fun source(style: IconSourceStyle, icon: Drawable, pkg: String = identity): Int =
+            requireNotNull(AospMonochromeMaskStrategy(sourceStyle = style).generate(icon, pkg)).source
+        assertEquals(MaskStrategy.SOURCE_NATIVE, source(IconSourceStyle.NATIVE, native))
+        assertEquals(MaskStrategy.SOURCE_NATIVE, source(IconSourceStyle.NATIVE_GENERATED, native))
+        assertEquals(MaskStrategy.SOURCE_LAWNICONS, source(IconSourceStyle.NATIVE, noNative))
+        assertEquals(MaskStrategy.SOURCE_LAWNICONS, source(IconSourceStyle.LAWNICONS, native))
+        assertEquals(MaskStrategy.SOURCE_NATIVE, source(IconSourceStyle.LAWNICONS, native, "com.example.missing"))
+        val generated = source(IconSourceStyle.GENERATED, native)
+        assertTrue(generated != MaskStrategy.SOURCE_NATIVE && generated != MaskStrategy.SOURCE_LAWNICONS)
+        assertEquals("native layer cannot change the generated path", generated, source(IconSourceStyle.GENERATED, noNative))
+        assertEquals("native priority generates when neither authored resource is available",
+            generated, source(IconSourceStyle.NATIVE, noNative, "com.example.missing"))
+        assertEquals("direct native priority generates even when the package has a Lawnicons match",
+            generated, source(IconSourceStyle.NATIVE_GENERATED, noNative))
+        assertEquals("a compatibility flag cannot make direct native priority use Lawnicons",
+            generated, requireNotNull(AospMonochromeMaskStrategy(sourceStyle = IconSourceStyle.NATIVE_GENERATED,
+                allowLawniconsFallback = true).generate(noNative, identity)).source)
+        assertEquals("explicit fallback opt-out skips Lawnicons for the default native chain",
+            generated, requireNotNull(AospMonochromeMaskStrategy(sourceStyle = IconSourceStyle.NATIVE,
+                allowLawniconsFallback = false).generate(noNative, identity)).source)
+    }
+
+    @Test
+    fun cacheHitsPreserveTonalGeneratedAndNativeAlphaContracts() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val artwork = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.WHITE)
+            Canvas(this).drawRect(24f, 24f, 40f, 40f, Paint().apply { color = Color.BLACK })
+        }
+        try {
+            val generated = AdaptiveIconDrawable(ColorDrawable(Color.WHITE), BitmapDrawable(context.resources, artwork))
+            val native = AdaptiveIconDrawable(ColorDrawable(Color.WHITE), BitmapDrawable(context.resources, artwork),
+                SplitDrawable(64, 64, Color.WHITE))
+            for ((drawable, tonal) in listOf(generated to true, native to false)) {
+                val identity = "com.example.tonal-cache/$tonal"
+                val strategy = AospMonochromeMaskStrategy().apply { configureCache("tonal_contract", "instrumented") }
+                val first = requireNotNull(strategy.generate(drawable, identity))
+                val cached = requireNotNull(strategy.generate(drawable, identity))
+                assertFalse("first generated entry is new", first.cacheHit)
+                assertTrue("repeat generation uses the cache", cached.cacheHit)
+                assertEquals(tonal, first.tonal)
+                assertEquals("cache does not lose the RGB tone flag", first.tonal, cached.tonal)
+                assertEquals(first.source, cached.source)
+                val cachedMask = requireNotNull(cached.mask)
+                assertEquals(if (tonal) Bitmap.Config.ARGB_8888 else Bitmap.Config.ALPHA_8, cachedMask.config)
+                assertTrue(first.mask!!.sameAs(cachedMask))
+                if (tonal) {
+                    assertTrue("opaque dark motif retains coverage", alphaAt(cachedMask, 0.5f, 0.5f) > 220)
+                    assertTrue("tonal cache preserves RGB contrast", toneAt(cachedMask, 0.25f, 0.5f) >
+                        toneAt(cachedMask, 0.5f, 0.5f) + 180)
+                } else {
+                    assertEquals(MaskStrategy.SOURCE_NATIVE, cached.source)
+                    assertTrue("native holes are still alpha", alphaAt(cachedMask, 0.875f, 0.5f) < 32)
+                }
+            }
+        } finally { artwork.recycle() }
     }
 
     // ── AOSP adaptive (no mono) ────────────────────────────────────────
@@ -85,10 +155,9 @@ class PixelMaskPipelineInstrumentedTest {
     }
 
     @Test
-    fun adaptiveWithoutMonoUsesAospEdgeFlip() {
-        // White adaptive background + dark motif: the white edge strips must
-        // flip the polarity so the plate goes transparent and the motif is
-        // opaque.
+    fun adaptiveSingleToneForegroundUsesSourceCoverageWithoutItsWrapper() {
+        // The opaque background belongs to the wrapper; the black foreground
+        // is a single-tone silhouette with its own genuine transparency.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
             eraseColor(Color.TRANSPARENT)
@@ -102,13 +171,15 @@ class PixelMaskPipelineInstrumentedTest {
         val mask = AospMonochromeFactory.wrap(adaptive, 64)
 
         assertNotNull(mask)
-        assertTrue(Color.alpha(mask!!.getPixel(2, 2)) < 32)     // plate
+        assertEquals(Bitmap.Config.ALPHA_8, mask!!.config)
+        assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // wrapper excluded
         assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)    // motif
     }
 
     @Test
-    fun flatRedAdaptiveIconPassesThroughGrayscale() {
-        // min == max: AOSP leaves the grayscale bytes unchanged (red → 85).
+    fun unstructuredAdaptiveBackgroundRetainsTheAospFlatColorBaseline() {
+        // No foreground or tonal structure exists. This explicitly retained
+        // baseline keeps AOSP's min == max behavior (red -> alpha 85).
         val adaptive = AdaptiveIconDrawable(
             ColorDrawable(Color.RED),
             null,
@@ -150,21 +221,25 @@ class PixelMaskPipelineInstrumentedTest {
         assertNotNull(result.mask)
         val mask = result.mask!!
         assertEquals(MaskStrategy.SOURCE_AOSP_ADAPTIVE_SILHOUETTE, result.source)
+        assertFalse("a silhouette remains an alpha mask", result.tonal)
         // AdaptiveIconDrawable reports the visible 2/3 viewport as its
         // intrinsic size, not the foreground bitmap's 64-pixel size. Negative
         // inset then enlarges the glyph: (12,12) on a 64-grid is inside it.
         assertTrue(alphaAt(mask, 0.5f, 0.5f) > 220)     // glyph body
         assertTrue(alphaAt(mask, 0.125f, 0.125f) < 32)  // outside the enlarged glyph
         assertTrue(alphaAt(mask, 0.03125f, 0.03125f) < 32)
+        val cached = requireNotNull(strategy.generate(display, identity))
+        assertTrue(cached.cacheHit)
+        assertFalse("cached single-tone foreground remains an alpha silhouette", cached.tonal)
+        assertTrue(mask.sameAs(cached.mask))
         IconDrawableCache.remove(identity)
     }
 
     @Test
-    fun adaptiveInsetLayersFollowVisibleRingFlip() {
+    fun adaptiveInsetLayersKeepLightBodyAndDarkDetails() {
         // JMComic3 regression: both layers inset 8.35% (prefill ring), light
-        // badge with dark internal details. The visible-ring flip must make
-        // the dark details the glyph while the plate and the badge body stay
-        // transparent.
+        // badge with dark internal details. The badge itself is artwork;
+        // neither its light body nor its dark details may be punched out.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/adaptive-inset-layers"
         val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -195,17 +270,21 @@ class PixelMaskPipelineInstrumentedTest {
         assertNotNull(result.mask)
         val mask = result.mask!!
         assertEquals(MaskStrategy.SOURCE_AOSP_ADAPTIVE, result.source)
-        assertTrue(alphaAt(mask, 0.5f, 0.5f) > 200)       // dark details
-        assertTrue(alphaAt(mask, 0.1875f, 0.5f) < 64)    // badge body (haze-cleared)
+        assertTrue(result.tonal)
+        assertEquals(Bitmap.Config.ARGB_8888, mask.config)
+        assertTrue("dark details retain source coverage", alphaAt(mask, 0.5f, 0.5f) > 220)
+        assertTrue("light body retains source coverage", alphaAt(mask, 0.1875f, 0.5f) > 220)
+        val darkDetail = toneAt(mask, 0.5f, 0.5f)
+        val lightBody = toneAt(mask, 0.1875f, 0.5f)
+        assertTrue("body and details retain positive RGB tonal contrast", lightBody - darkDetail > 180)
         assertTrue(alphaAt(mask, 0.03125f, 0.03125f) < 32)
         IconDrawableCache.remove(identity)
     }
 
     @Test
-    fun adaptiveOpaqueForegroundFallsBackToVisibleRingFlip() {
-        // Opaque full-cell foreground (bright art + dark motif): no
-        // transparent structure, so the B core applies and the dark motif
-        // becomes the glyph.
+    fun adaptiveOpaqueForegroundPreservesBrightFieldAndDarkMotif() {
+        // An opaque bright field belongs to the source. It must retain coverage
+        // and remain brighter in RGB than the equally opaque dark motif.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/adaptive-opaque-fg"
         val fg = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -234,8 +313,10 @@ class PixelMaskPipelineInstrumentedTest {
         assertNotNull(result.mask)
         val mask = result.mask!!
         assertEquals(MaskStrategy.SOURCE_AOSP_ADAPTIVE, result.source)
-        assertTrue(alphaAt(mask, 0.5f, 0.5f) > 220)       // dark motif
-        assertTrue(alphaAt(mask, 0.1875f, 0.1875f) < 64)  // bright art (haze-cleared)
+        assertTrue(result.tonal)
+        assertTrue(alphaAt(mask, 0.5f, 0.5f) > 220)
+        assertTrue(alphaAt(mask, 0.1875f, 0.1875f) > 220)
+        assertTrue(toneAt(mask, 0.1875f, 0.1875f) - toneAt(mask, 0.5f, 0.5f) > 180)
         IconDrawableCache.remove(identity)
     }
 
@@ -318,9 +399,9 @@ class PixelMaskPipelineInstrumentedTest {
     }
 
     @Test
-    fun legacyWhitePlateIconExcludesPlateFromMask() {
-        // QQ-class legacy PNG: white plate + dark motif. The AOSP edge flip
-        // must exclude the plate and keep the dark motif opaque.
+    fun legacyWhiteFieldRetainsCoverageAndPositiveTone() {
+        // QQ-class legacy PNG: white source field and dark motif both retain
+        // coverage. Only the artificial wrapper outside the source is excluded.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/legacy-white-plate"
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -342,18 +423,18 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
+        assertTrue(result.tonal)
         assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // wrap border
-        assertTrue(Color.alpha(mask.getPixel(45, 22)) < 32)   // white plate
+        assertTrue(Color.alpha(mask.getPixel(45, 22)) > 220)  // opaque white source field
         assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // motif body
+        assertTrue(Color.red(mask.getPixel(45, 22)) - Color.red(mask.getPixel(32, 32)) > 180)
         IconDrawableCache.remove(identity)
     }
 
     @Test
-    fun coloredPlateLegacyIconFollowsAospEdgeFlip() {
-        // fenbi-class: solid blue plate + WHITE motif. The white motif and
-        // wrapper are the maximum gray; the blue plate is the minimum gray.
-        // Min/max stretch followed by flip makes the motif a hole and the
-        // blue plate opaque (there is no black pixel to anchor the range).
+    fun coloredPlateLegacyIconRetainsWhiteMotif() {
+        // Fenbi-class regression: the wrapper used to invert this white motif
+        // into a hole. Source-aware finishing keeps it brighter than the plate.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/legacy-colored-plate"
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -376,17 +457,19 @@ class PixelMaskPipelineInstrumentedTest {
         assertNotNull(result.mask)
         val mask = result.mask!!
         assertEquals(MaskStrategy.SOURCE_AOSP_LEGACY, result.source)
+        assertTrue(result.tonal)
         assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)       // wrap border
-        assertTrue(Color.alpha(mask.getPixel(32, 32)) < 32)     // white motif → HOLE (AOSP)
-        val blueAlpha = Color.alpha(mask.getPixel(45, 22))
-        assertTrue("blue plate alpha=$blueAlpha", blueAlpha > 220)
+        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)    // opaque white artwork
+        assertTrue("colored source field retains opaque coverage", Color.alpha(mask.getPixel(45, 22)) > 220)
+        assertTrue("white motif is brighter than colored source field in RGB",
+            Color.red(mask.getPixel(32, 32)) - Color.red(mask.getPixel(45, 22)) > 180)
         IconDrawableCache.remove(identity)
     }
 
     @Test
-    fun fullBleedBrightArtworkFollowsAospEdgeFlip() {
-        // gallery-class: bright full-bleed artwork + darker motif. The white
-        // wrap edge triggers the flip: bright surround → dark, motif → opaque.
+    fun fullBleedBrightArtworkKeepsPositiveToneAndSourceCoverage() {
+        // Gallery-class source: wrapper geometry must not reverse the source's
+        // bright surroundings and darker motif, or encode either in alpha.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/legacy-full-bleed"
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -410,17 +493,18 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
+        assertTrue(result.tonal)
         assertTrue(Color.alpha(mask.getPixel(2, 2)) < 32)     // wrap border
-        assertTrue(Color.alpha(mask.getPixel(45, 22)) < 100)  // bright surround → dark
+        assertTrue(Color.alpha(mask.getPixel(45, 22)) > 220)  // bright surround
         assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // dark motif
+        assertTrue(Color.red(mask.getPixel(45, 22)) - Color.red(mask.getPixel(32, 32)) > 180)
         IconDrawableCache.remove(identity)
     }
 
     @Test
-    fun transparentCornerColoredPlateFollowsAospEdgeFlip() {
-        // fenbi-class with transparent rounded corners: white corner spill
-        // and the white motif body are both flipped to transparency, the
-        // blue plate keeps mid alpha, the black outline stays opaque.
+    fun transparentCornerColoredPlateKeepsWhiteBodyAndActualTransparency() {
+        // The original transparent corners remain transparent, while an opaque
+        // white body and its dark outline remain artwork in the generated mask.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val identity = "test.pixel/legacy-transparent-corners"
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
@@ -455,22 +539,33 @@ class PixelMaskPipelineInstrumentedTest {
         assertTrue(result!!.rawUsed)
         assertNotNull(result.mask)
         val mask = result.mask!!
+        assertTrue(result.tonal)
         assertTrue(Color.alpha(mask.getPixel(12, 12)) < 32)   // transparent corner
-        assertTrue(Color.alpha(mask.getPixel(32, 32)) < 32)   // white body → HOLE (AOSP)
+        assertTrue(Color.alpha(mask.getPixel(32, 32)) > 220)  // white body stays visible
         val blueAlpha = Color.alpha(mask.getPixel(45, 22))
-        assertTrue("blue plate alpha=$blueAlpha", blueAlpha in 90..190)
+        assertTrue("opaque blue source field alpha=$blueAlpha", blueAlpha > 220)
+        assertTrue("white body stays brighter than blue source field",
+            Color.red(mask.getPixel(32, 32)) > Color.red(mask.getPixel(45, 22)) + 80)
         // Locate the outline after IconNormalizer + legacy viewport scaling;
-        // y=27 lies inside the white hole for this fixture on the real device.
-        val outlinePeak = (mask.height / 4 until mask.height / 2).maxOf { y ->
-            Color.alpha(mask.getPixel(mask.width / 2, y))
-        }
-        assertTrue("black outline peak=$outlinePeak", outlinePeak > 180)
+        // the exact pixel depends on the platform's normalizer geometry.
+        val outlineTone = (mask.height / 4 until mask.height / 2)
+            .map { y -> mask.getPixel(mask.width / 2, y) }
+            .filter { Color.alpha(it) > 220 }
+            .minOf { Color.red(it) }
+        assertTrue("the covered black outline retains dark RGB: $outlineTone", outlineTone < 40)
         IconDrawableCache.remove(identity)
     }
 
     // ── Compatibility fallback helpers ─────────────────────────────────
 
     private fun alphaAt(mask: Bitmap, x: Float, y: Float): Int = Color.alpha(
+        mask.getPixel(
+            (mask.width * x).toInt().coerceIn(0, mask.width - 1),
+            (mask.height * y).toInt().coerceIn(0, mask.height - 1),
+        ),
+    )
+
+    private fun toneAt(mask: Bitmap, x: Float, y: Float): Int = Color.red(
         mask.getPixel(
             (mask.width * x).toInt().coerceIn(0, mask.width - 1),
             (mask.height * y).toInt().coerceIn(0, mask.height - 1),
@@ -643,6 +738,69 @@ class PixelMaskPipelineInstrumentedTest {
             assertTrue("real bundle lookup resolves the packaged QQ glyph", mask.sameAs(expected))
         } finally {
             expected?.recycle()
+        }
+    }
+
+    @Test
+    fun selectedLawniconsOverridesNativeMonoAndOptOutRestoresNative() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("lawnicons_priority_test", Context.MODE_PRIVATE)
+        prefs.edit().clear().putBoolean("lawnicons_enabled", true).commit()
+        val names = listOf("remotePrefsProvider", "cachedLawniconsEnabled", "lastLawniconsValue",
+            "lastLawniconsRefreshMs", "cachedLawniconsDisabledPackages", "lastLawniconsPackagesRefreshMs")
+        val fields = names.associateWith { name ->
+            ConfigManager::class.java.getDeclaredField(name).apply { isAccessible = true }
+        }
+        val saved = fields.mapValues { (_, field) ->
+            when (val value = field.get(null)) {
+                is AtomicLong -> value.get()
+                is AtomicBoolean -> value.get()
+                else -> value
+            }
+        }
+        try {
+            val provider: () -> SharedPreferences? = { prefs }
+            fields.getValue("remotePrefsProvider").set(null, provider)
+            for (name in listOf("lastLawniconsRefreshMs", "lastLawniconsPackagesRefreshMs")) {
+                (fields.getValue(name).get(null) as AtomicLong).set(android.os.SystemClock.elapsedRealtime() - 1_000L)
+            }
+            LawniconsAssetSource.init(context)
+            val pkg = "com.tencent.mobileqq"
+            assertTrue(pkg in LawniconsAssetSource.availablePackages())
+            assertTrue(LawniconsAssetSource.hasAvailableMask(pkg))
+            val adaptive = AdaptiveIconDrawable(ColorDrawable(Color.WHITE),
+                SplitDrawable(64, 64, Color.BLACK), SplitDrawable(64, 64, Color.WHITE))
+            val strategy = AospMonochromeMaskStrategy()
+            val bundled = requireNotNull(strategy.generate(adaptive, pkg))
+            assertEquals(MaskStrategy.SOURCE_LAWNICONS, bundled.source)
+            assertFalse("author-drawn bundle stays an alpha mask", bundled.tonal)
+            val bundledCached = requireNotNull(strategy.generate(adaptive, pkg))
+            assertTrue(bundledCached.cacheHit)
+            assertFalse("cached bundle does not become generated tonal artwork", bundledCached.tonal)
+
+            prefs.edit().putStringSet("lawnicons_disabled_packages", setOf(pkg)).commit()
+            (fields.getValue("lastLawniconsPackagesRefreshMs").get(null) as AtomicLong)
+                .set(android.os.SystemClock.elapsedRealtime() - 1_000L)
+            val optedOut = strategy.generate(adaptive, pkg)
+            assertNotNull(optedOut)
+            assertEquals(MaskStrategy.SOURCE_NATIVE, optedOut!!.source)
+            assertFalse("native replacement also retains author alpha semantics", optedOut.tonal)
+            assertTrue(AospMonochromeMaskStrategy.hasUsableGlyph(optedOut.mask!!))
+
+            prefs.edit().putStringSet("lawnicons_disabled_packages", emptySet()).putBoolean("lawnicons_enabled", false).commit()
+            for (name in listOf("lastLawniconsRefreshMs", "lastLawniconsPackagesRefreshMs")) {
+                (fields.getValue(name).get(null) as AtomicLong).set(android.os.SystemClock.elapsedRealtime() - 1_000L)
+            }
+            assertEquals(MaskStrategy.SOURCE_NATIVE, strategy.generate(adaptive, pkg)!!.source)
+        } finally {
+            fields.forEach { (name, field) ->
+                when (val value = field.get(null)) {
+                    is AtomicLong -> value.set(saved.getValue(name) as Long)
+                    is AtomicBoolean -> value.set(saved.getValue(name) as Boolean)
+                    else -> field.set(null, saved[name])
+                }
+            }
+            prefs.edit().clear().commit()
         }
     }
 

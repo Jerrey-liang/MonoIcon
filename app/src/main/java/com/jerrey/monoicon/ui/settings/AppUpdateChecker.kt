@@ -27,7 +27,6 @@ object AppUpdateChecker {
 
     suspend fun check(context: Context, force: Boolean = false) {
         UiPreferences.init(context)
-        if (!UiPreferences.state.value.checkUpdate && !force) return
         lock.withLock {
             if (checkedThisSession && !force) return
             mutableState.value = mutableState.value.copy(checking = true, error = null)
