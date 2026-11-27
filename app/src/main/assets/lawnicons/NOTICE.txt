@@ -9,6 +9,8 @@ Copyright remains with the Lawnicons contributors. The upstream Apache-2.0
 license is included as `LICENSE.txt`.
 
 MonoIcon renders the vectors at 768×768. Asset names, component aliases, artwork
-and the proportional layout are retained. This notice accompanies the artwork
-in the APK; project documentation and full attribution are in
-`docs/THIRD_PARTY_NOTICES.md` in the source distribution.
+and the proportional layout are retained. The source distribution records the
+SVG and PNG hashes in `raster-sources.json` alongside these assets.
+
+MonoIcon's project licence and third-party notices are published at
+https://github.com/Jerrey-liang/MonoIcon/blob/main/docs/THIRD_PARTY_NOTICES.md

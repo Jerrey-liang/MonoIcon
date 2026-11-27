@@ -1,32 +1,47 @@
 # Offline real-icon replay
 
-`replay.py` compiles the current `GeneratedMaskProcessor.kt` and
-`GeneratedIconBorder.kt` directly with cached Kotlin compiler jars. It invokes no
-Gradle tasks, emulator, ADB, or APK installation and downloads nothing.
+`replay.py` runs captured icon images through MonoIcon's Kotlin mask and border
+code. It compiles the production files directly from cached Kotlin compiler
+jars and runs locally without Gradle, ADB, or an emulator.
 
-Requirements: JDK (Android Studio's bundled JBR works), cached Kotlin compiler
-dependencies, Python, Pillow. On this workstation `python` already has Pillow.
+## Run a replay
 
-```powershell
-python tools/icon_regression/replay.py external_resources/icon-regression-20261115/manifest.json
+Use Python 3.10 or later with Pillow 9.1 or later, a JDK that can run Java 17 class files,
+and cached Kotlin compiler dependencies. Android Studio's bundled JBR works.
+Pass `--java <java-executable>` or `--gradle-cache <modules-2/files-2.1>` if you
+keep either dependency outside its default location.
+
+From the repository root, create `captures/icon-replay/manifest.json` with the
+following contents. It uses the foreground PNG included in the instrumented
+test fixtures. Image paths are resolved relative to the manifest.
+
+```json
+{
+  "cases": [
+    {
+      "name": "Bilibili foreground alpha",
+      "source": "../../app/src/androidTest/assets/generated-border-bilibili/foreground.png",
+      "mode": "mask"
+    }
+  ]
+}
 ```
 
-For fixed historical results, `--source-dir <folder>` uses snapshots named
-`GeneratedMaskProcessor.kt` and `GeneratedIconBorder.kt` instead of current
-production files. Their actual hashes are recorded in the report.
+```powershell
+python tools/icon_regression/replay.py captures/icon-replay/manifest.json
+```
 
-`summarize_capture.py <capture-directory>` validates a device `cases.json` and all
-PNG exports, creates an actual-device original/before0/50/100 contact sheet, and
-generates `refine-manifest.json` from valid inputs. It only requests an exact
-device comparison when a matching `refined_preclip.png` reference exists. Missing
-or failed captures remain visible in its validation report.
+Open `replay-output/report.json` and `replay-output/contact-sheet.png` beside the
+manifest. Use `--out <directory>` to place the results elsewhere. With
+`--source-dir <directory>`, the runner uses snapshots named
+`GeneratedMaskProcessor.kt` and `GeneratedIconBorder.kt` from that directory.
+Tonal cases also compile the checkout's `GeneratedTonePalette.kt`. The report
+records the Kotlin input hashes.
 
-`fit_capture_zoom.py <capture-directory>` estimates observed zoom directly from
-actual before PNGs using centered bilinear image registration. It additionally
-requires NumPy. Its results are explicitly estimates; use captured alpha masks
-with `replay.py` for exact production Kotlin geometry coefficients.
+## Configure replay cases
 
-The manifest paths are relative to its directory. Example:
+This manifest shows how to supply your own PNGs, plate geometries and white
+border ratios from `0` (no border) to `1` (maximum border).
 
 ```json
 {
@@ -59,9 +74,9 @@ The manifest paths are relative to its directory. Example:
 }
 ```
 
-- `extract` precisely replays the pixel operation called by
-  `LabMonochromeExtractor.extractFromBitmap`. Supply its resolved inversion flag;
-  the driver does not guess the original drawable's background polarity.
+- `extract` replays the pixel operation called by
+  `LabMonochromeExtractor.extractFromBitmap`. Supply the resolved `inverted`
+  flag for the original drawable's background polarity.
 - `refine` requires the artwork RGBA and AOSP luminance baseline at the same
   intermediate dimensions, before `rasterizeClipped`. It replays that finishing
   step precisely. It does not reconstruct Android drawable layers from APK XML.
@@ -72,10 +87,9 @@ The manifest paths are relative to its directory. Example:
   dark mapped RGBA, verifies unchanged source alpha, neutral grayscale channels,
   monotonic source luminance/tone order, and palette alpha preservation. Genuine
   transparent holes stay transparent independently of white RGB.
-- Tonal previews use the center 2/3 AOSP viewport, resize to
-  `aosp_output_size` (default `[192, 192]`), and sample the documented AOSP default
-  squircle. This is approximate Pillow geometry, not the phone's Skia renderer or
-  a proof that its configured framework mask matches the documented fallback.
+- Tonal previews use the center two-thirds of the AOSP viewport, resize to
+  `aosp_output_size` (default `[192, 192]`), and approximate the AOSP default
+  squircle in Pillow. The device may use a different framework mask.
 - Optional manifest `preview_canvas_size` centers the requested first geometry
   inside a larger transparent preview canvas. For the captured 192-pixel before
   icons, a 176-pixel plate centered in `[192, 192]` retains their 8-pixel inset.
@@ -85,18 +99,19 @@ The manifest paths are relative to its directory. Example:
   Adaptive icons with a smooth opaque gradient and a nonempty foreground use
   foreground coverage and tone, allowing the outer theme plate to remain visible.
   Structured background artwork retains the combined layers. Without a captured
-  mask, geometry uses the processor output; `report.json` records this distinction.
-  This replay does not reconstruct Android's adaptive layer selection.
+  mask, geometry uses the processor output. `report.json` records which mask it
+  used. The PNG inputs reflect whichever adaptive layers were captured.
 - Alpha PNG inputs default to their alpha channel. Use `baseline_channel`,
   `border_mask_channel`, or `compare_mask_channel` set to `"luminance"` for
   grayscale intensity masks.
-- `crop: [left, top, right, bottom]` can select source pixels. A cropped
-  screenshot is useful for visual investigation but is not equivalent to the
-  original uncomposited drawable RGBA.
+- `crop: [left, top, right, bottom]` selects source pixels. Use uncomposited
+  drawable RGBA when testing the original artwork's alpha and tone.
 - Optional `compare_mask` records changed pixels and alpha error against a
   reference. Add `require_exact_comparison: true` to fail on any difference.
 - Optional per-case `probes` express reviewed expectations using pixel `x`, `y`,
   `min_alpha`, `max_alpha`, and an optional explanatory label.
+
+## Read the results
 
 Outputs include exact `.alpha` bytes and alpha PNGs, actual Kotlin border scales,
 ratio-invariance checks, bounds/coverage metrics, input/source SHA-256 hashes, and
@@ -108,17 +123,24 @@ to `0.7 * sqrt(375/576)` of the plate's shorter side, using the AOSP legacy squa
 baseline, capped by the complete artwork's containment limit. Scales can be below
 or above 1. At 0%, all nonzero source-alpha pixel cells fit inside the selected
 rounded plate, using one uniform scale about the authored center. Intermediate
-ratios interpolate toward this fit endpoint; source alpha remains unchanged.
+ratios interpolate toward this fit endpoint and preserve source alpha.
 
-The contact sheet and `*-preview.png` files are review aids composed in Pillow.
-They preserve the fixed outer plate and use the exact Kotlin enlargement scale,
-but Pillow filtering and antialiasing differ from Android Skia. They must not be
-described as pixel-identical Android renderings. Final Android drawables, resource
-rasterization, native layer loading, hooks, and device appearance still require a
-single final on-device verification.
+The contact sheet and `*-preview.png` files use Kotlin's computed scale and
+Pillow's filtering and antialiasing. Verify drawable rasterization, native layer
+loading, launcher hooks and final appearance on the target Android device.
 
-`review_tonal.py <fixtures> <tonal-replay-output>` produces all-icon and focus
-contact sheets comparing captured APK originals/before PNGs with new light/dark
-0/50/100 previews. APK resources and launcher's themed `getIcon0` results can have
-different artwork and cropping. This offline evidence does not establish that
-Hook 7 selects the correct raw APK source or explain every desktop size issue.
+## Review device captures
+
+- `summarize_capture.py <capture-directory>` reads `cases.json` and the per-app
+  PNGs, writes a contact sheet with `original`, `before_0`, `before_50` and
+  `before_100`, and creates `refine-manifest.json` from valid inputs. It adds an
+  exact comparison when a matching `refined_preclip.png` is available. Read
+  `capture-validation.json` for missing or failed captures.
+- `fit_capture_zoom.py <capture-directory>` uses NumPy and centered bilinear
+  image registration to estimate zoom from the `before` PNGs. Use captured
+  alpha masks with `replay.py` to calculate the production Kotlin scales.
+- `review_tonal.py <fixtures> <tonal-replay-output>` compares captures with
+  light and dark replay previews. Use package names for the case names and
+  include the 0%, 50% and 100% ratios in the replay. Check raw source selection
+  and desktop size on the launcher itself, where the themed `getIcon0` result
+  can use different artwork or cropping.
