@@ -166,6 +166,13 @@ internal fun ProfileSettings(isActive: Boolean = true) {
     }
 
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+        ArrowPreference(
+            title = strings.profileImport,
+            summary = strings.profileSummary,
+            startAction = { ProfilePreferenceIcon(Icons.Rounded.FileOpen, strings.profileImport) },
+            enabled = !busy,
+            onClick = { importer.launch(arrayOf("application/json", "text/*", "application/octet-stream")) },
+        )
         OverlayDropdownPreference(
             title = strings.profiles,
             summary = resolution?.reason ?: strings.profileChecking,
@@ -177,13 +184,6 @@ internal fun ProfileSettings(isActive: Boolean = true) {
                 val id = if (index == 0) null else profiles.getOrNull(index - 1)?.id
                 requestSelection(id)
             },
-        )
-        ArrowPreference(
-            title = strings.profileImport,
-            summary = strings.profileSummary,
-            startAction = { ProfilePreferenceIcon(Icons.Rounded.FileOpen, strings.profileImport) },
-            enabled = !busy,
-            onClick = { importer.launch(arrayOf("application/json", "text/*", "application/octet-stream")) },
         )
     }
 

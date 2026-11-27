@@ -39,6 +39,10 @@ fun ConfigurationScreen(
                 loading = true
                 runtime = runtime.copy(processes = runtime.processes.map { it.copy(current = false) })
                 try {
+                    // Show Profile actions without waiting for host diagnostics or root access.
+                    runtime = runtime.copy(environment = withContext(Dispatchers.IO) {
+                        ConfigurationDiagnosticsRepository.environment(context)
+                    })
                     runtime = withContext(Dispatchers.IO) { ConfigurationDiagnosticsRepository.load(context) }
                     error = ""
                 } catch (cancelled: CancellationException) {

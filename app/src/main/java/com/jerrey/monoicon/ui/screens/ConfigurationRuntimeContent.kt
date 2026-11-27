@@ -63,6 +63,9 @@ internal fun ConfigurationRuntimeContent(
             modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp))
     }
 
+    // Keep configuration actions above the potentially long per-hook reports.
+    if (environment.engine == LauncherEngine.NATIVE) profileContent()
+
     runtime.processes.forEach { process ->
         Card(Modifier.padding(top = 12.dp).fillMaxWidth().testTag("configuration-process-${process.name}")) {
             BasicComponent(title = process.name,
@@ -102,7 +105,6 @@ internal fun ConfigurationRuntimeContent(
             }
         }
     }
-    if (environment.engine == LauncherEngine.NATIVE) profileContent()
 }
 
 @Composable
