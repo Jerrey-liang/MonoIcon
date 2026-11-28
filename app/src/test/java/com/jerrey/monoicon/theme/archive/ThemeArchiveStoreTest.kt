@@ -8,6 +8,8 @@ import java.io.File
 import java.io.IOException
 import java.io.DataOutputStream
 import java.io.ByteArrayOutputStream
+import java.nio.file.Files
+import java.security.MessageDigest
 import java.util.zip.CRC32
 import java.util.zip.DeflaterOutputStream
 import java.util.zip.ZipEntry
@@ -22,9 +24,12 @@ class ThemeArchiveStoreTest {
     private val draw = "res/drawable-xxhdpi/"
     private val parent = "com.Example"
     private val child = "com.Example.pro"
+    private val defaultIcon = DefaultIconSetting(null)
 
-    private fun store(sync: (File) -> Unit = {}, refresh: () -> Boolean = { true }) =
-        ThemeArchiveStore(live, state, { _, _ -> }, sync, refresh)
+    private fun store(setting: DefaultIconSetting = defaultIcon, sync: (File) -> Unit = {},
+                      refresh: () -> Boolean = setting::refresh) =
+        ThemeArchiveStore(live, state, { _, _ -> }, sync, refresh,
+            readDefaultIcon = { setting.value }, writeDefaultIcon = setting::write)
 
     private fun png(value: Int) = temporary.newFile().apply {
         DataOutputStream(outputStream()).use { out ->
@@ -62,6 +67,134 @@ class ThemeArchiveStoreTest {
 
     private fun content(name: String): ByteArray = ZipFile(live).use { zip ->
         zip.getInputStream(zip.getEntry(name)).use { it.readBytes() }
+    }
+
+    private class DefaultIconSetting(var value: String?) {
+        val writes = mutableListOf<String?>()
+        val refreshValues = mutableListOf<String?>()
+        var refreshSucceeds = true
+        var writeFailure = false
+
+        fun write(newValue: String?) {
+            if (writeFailure) throw IOException("Settings provider unavailable")
+            writes.add(newValue)
+            value = newValue
+        }
+
+        fun refresh(): Boolean {
+            refreshValues.add(value)
+            return refreshSucceeds
+        }
+    }
+
+    @Test fun appliesThirdPartyModeBeforeRefreshAndRestoresTheOriginalValueExactly() {
+        val update = one(parent, png(1))
+        for (startingValue in listOf("0", null, "1")) {
+            val setting = DefaultIconSetting(startingValue)
+            assertTrue(store(setting).apply(update, true).refreshSucceeded)
+            assertEquals("1", setting.value)
+            assertFalse(store(setting).apply(update, true).changed)
+            assertTrue(store(setting).restore().refreshSucceeded)
+            assertEquals(startingValue, setting.value)
+            assertFalse(store(setting).restore().changed)
+            assertEquals(listOf("1", startingValue), setting.refreshValues)
+            assertEquals(if (startingValue == "1") emptyList() else listOf("1", startingValue), setting.writes)
+            assertFalse(live.exists())
+        }
+    }
+
+    private fun installWithLegacyJournal(update: File): ByteArray {
+        ThemeIconZip.merge(null, null, update, true, live)
+        val previousBytes = live.readBytes()
+        val sha = ThemeIconZip.hex(MessageDigest.getInstance("SHA-256").digest(previousBytes))
+        File(state, "state-v1").writeText("-\n$sha\n$sha\n0")
+        return previousBytes
+    }
+
+    @Test fun previousFourLineJournalUpgradesWithUnchangedPngs() {
+        val update = one(parent, png(1))
+        val previousBytes = installWithLegacyJournal(update)
+        val setting = DefaultIconSetting("0")
+        assertEquals(ThemeArchiveStatus.ACTIVE, store(setting).status())
+        assertTrue(store(setting).apply(update, true).refreshSucceeded)
+        assertArrayEquals(previousBytes, live.readBytes())
+        assertEquals(listOf("1"), setting.refreshValues)
+        assertFalse(store(setting).apply(update, true).changed)
+        assertEquals(listOf("1"), setting.refreshValues)
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertEquals(listOf("1", "0"), setting.writes)
+        assertEquals(listOf("1", "0"), setting.refreshValues)
+    }
+
+    @Test fun restoringLegacyInstallationLeavesUnmanagedSettingUntouched() {
+        installWithLegacyJournal(one(parent, png(1)))
+        val setting = DefaultIconSetting("1")
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertFalse(live.exists())
+        assertTrue(setting.writes.isEmpty())
+        assertEquals("1", setting.value)
+    }
+
+    @Test fun retriesRefreshOnBothTransitionsWithoutWritingTheSettingTwice() {
+        val update = one(parent, png(1))
+        val setting = DefaultIconSetting(null)
+        setting.refreshSucceeds = false
+        assertFalse(store(setting).apply(update, true).refreshSucceeded)
+        assertEquals("1", setting.value)
+        setting.refreshSucceeds = true
+        assertTrue(store(setting).apply(update, true).refreshSucceeded)
+        setting.refreshSucceeds = false
+        assertFalse(store(setting).restore().refreshSucceeded)
+        assertNull(setting.value)
+        setting.refreshSucceeds = true
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertEquals(listOf("1", null), setting.writes)
+        assertEquals(listOf("1", "1", null, null), setting.refreshValues)
+    }
+
+    @Test fun failedSettingWritesCanBeRetriedAfterReopeningTheStore() {
+        val update = one(parent, png(1))
+        val setting = DefaultIconSetting("0")
+        setting.writeFailure = true
+        assertThrows(IOException::class.java) { store(setting).apply(update, true) }
+        assertEquals("0", setting.value)
+        assertTrue(setting.refreshValues.isEmpty())
+        setting.writeFailure = false
+        assertTrue(store(setting).apply(update, true).refreshSucceeded)
+        setting.writeFailure = true
+        assertThrows(IOException::class.java) { store(setting).restore() }
+        assertEquals("1", setting.value)
+        assertEquals(listOf("1"), setting.refreshValues)
+        setting.writeFailure = false
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertEquals("0", setting.value)
+        assertEquals(listOf("1", "0"), setting.refreshValues)
+        assertEquals(listOf("1", "0"), setting.writes)
+        assertFalse(File(state, "state-v1").exists())
+    }
+
+    @Test fun unconfirmedSettingWriteKeepsThemeRefreshPending() {
+        val update = one(parent, png(1))
+        val setting = DefaultIconSetting(null)
+        val ignoredWrite = ThemeArchiveStore(live, state, { _, _ -> }, {}, setting::refresh,
+            readDefaultIcon = { setting.value }, writeDefaultIcon = {})
+        assertThrows(IOException::class.java) { ignoredWrite.apply(update, true) }
+        assertTrue(setting.refreshValues.isEmpty())
+        assertTrue(store(setting).apply(update, true).refreshSucceeded)
+        assertEquals(listOf("1"), setting.refreshValues)
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertNull(setting.value)
+    }
+
+    @Test fun restoresOriginalArchiveWhilePreservingAnExternalChangeToTheSetting() {
+        val baseline = original("metadata.xml" to "previous theme")
+        val setting = DefaultIconSetting(null)
+        store(setting).apply(one(parent, png(1)), true)
+        setting.value = "0"
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertEquals("0", setting.value)
+        assertEquals(listOf("1"), setting.writes)
+        assertArrayEquals(baseline, live.readBytes())
     }
 
     @Test fun partialUpdatesUseExactOwnersAndRestoreOriginalEntries() {
@@ -104,14 +237,16 @@ class ThemeArchiveStoreTest {
         assertFalse(File(state, "state-v1").exists())
     }
 
-    @Test fun disableAfterSystemRestoresStockAbsenceReleasesOnlyManagement() {
+    @Test fun disableAfterSystemRemovesTheArchiveRestoresTheOriginalSetting() {
         val s = store()
         s.apply(one(parent, png(1)), true)
         assertTrue(live.delete())
         assertEquals(ThemeArchiveStatus.CONFLICT, s.status())
         assertThrows(ThemeArchiveConflictException::class.java) { s.apply(one(parent, png(2)), true) }
-        val withoutRefresh = store { error("Already at baseline") }
-        assertEquals(ThemeArchiveResult(false, true), withoutRefresh.restore())
+        assertEquals(ThemeArchiveResult(true, true), store().restore())
+        assertNull(defaultIcon.value)
+        assertEquals(listOf("1", null), defaultIcon.writes)
+        assertEquals(listOf("1", null), defaultIcon.refreshValues)
         assertFalse(live.exists())
         assertFalse(File(state, "state-v1").exists())
         assertEquals(ThemeArchiveStatus.INACTIVE, s.status())
@@ -119,15 +254,45 @@ class ThemeArchiveStoreTest {
 
     @Test fun disableAfterUserRestoresOriginalBytesPreservesTheExistingInode() {
         val baseline = original("settings.xml" to "stock")
-        val s = store()
-        s.apply(one(parent, png(1)), true)
-        live.writeBytes(baseline)
-        val timestamp = 1_600_000_000_000
-        assertTrue(live.setLastModified(timestamp))
-        assertEquals(ThemeArchiveStatus.CONFLICT, s.status())
-        assertEquals(ThemeArchiveResult(false, true), store { error("Already at baseline") }.restore())
-        assertEquals(timestamp, live.lastModified())
-        assertArrayEquals(baseline, live.readBytes())
+        val update = one(parent, png(1))
+        for (externalValue in listOf("1", "0", null)) {
+            val setting = DefaultIconSetting("0")
+            val s = store(setting)
+            s.apply(update, true)
+            live.writeBytes(baseline)
+            val restored = Files.createLink(File(temporary.root, "restored-$externalValue").toPath(), live.toPath())
+            setting.value = externalValue
+            assertEquals(ThemeArchiveStatus.CONFLICT, s.status())
+            val needsWrite = externalValue == "1"
+            assertEquals(ThemeArchiveResult(needsWrite, true), s.restore())
+            val expectedChanges = if (needsWrite) listOf("1", "0") else listOf("1")
+            assertEquals(expectedChanges, setting.writes)
+            assertEquals(expectedChanges, setting.refreshValues)
+            assertEquals(if (needsWrite) "0" else externalValue, setting.value)
+            assertTrue(Files.isSameFile(restored, live.toPath()))
+            assertArrayEquals(baseline, live.readBytes())
+            assertEquals(ThemeArchiveStatus.INACTIVE, s.status())
+        }
+    }
+
+    @Test fun retriesSettingCleanupAfterExternalArchiveRemovalWithoutRecreatingTheArchive() {
+        val setting = DefaultIconSetting("0")
+        store(setting).apply(one(parent, png(1)), true)
+        assertTrue(live.delete())
+        setting.writeFailure = true
+        assertThrows(IOException::class.java) { store(setting).restore() }
+        assertEquals("1", setting.value)
+        assertEquals(listOf("1"), setting.refreshValues)
+        assertTrue(File(state, "state-v1").exists())
+        setting.writeFailure = false
+        setting.refreshSucceeds = false
+        assertFalse(store(setting).restore().refreshSucceeded)
+        assertEquals("0", setting.value)
+        setting.refreshSucceeds = true
+        assertTrue(store(setting).restore().refreshSucceeded)
+        assertEquals(listOf("1", "0"), setting.writes)
+        assertEquals(listOf("1", "0", "0"), setting.refreshValues)
+        assertFalse(live.exists())
         assertFalse(File(state, "state-v1").exists())
     }
 
@@ -154,6 +319,7 @@ class ThemeArchiveStoreTest {
         val s = store()
         s.apply(update, true)
         val external = original("new" to "selected theme")
+        defaultIcon.value = "0"
         assertEquals(ThemeArchiveStatus.CONFLICT, s.status())
         assertFalse(s.canRecoverMissingOriginal())
         assertThrows(ThemeArchiveConflictException::class.java) { s.recoverMissingOriginal() }
@@ -161,11 +327,15 @@ class ThemeArchiveStoreTest {
         assertThrows(ThemeArchiveConflictException::class.java) { s.apply(update, true) }
         assertArrayEquals(external, live.readBytes())
         s.acceptCurrentTheme()
+        assertEquals("0", defaultIcon.value)
+        assertEquals(listOf("1"), defaultIcon.writes)
         assertArrayEquals(old, File(state, "previous-original.icons").readBytes())
         assertEquals(ThemeArchiveStatus.INACTIVE, s.status())
         s.apply(update, true)
         assertEquals("selected theme", content("new").decodeToString())
         s.restore()
+        assertEquals("0", defaultIcon.value)
+        assertEquals(listOf("1", "1", "0"), defaultIcon.writes)
         assertArrayEquals(external, live.readBytes())
     }
 
@@ -286,7 +456,8 @@ class ThemeArchiveStoreTest {
 
     @Test fun metadataFailurePreservesOriginal() {
         val stock = original("data.xml" to "original")
-        val s = ThemeArchiveStore(live, state, { _, _ -> throw IOException("label unavailable") }, {}, { true })
+        val s = ThemeArchiveStore(live, state, { _, _ -> throw IOException("label unavailable") }, {},
+            { true }, { defaultIcon.value }, defaultIcon::write)
         assertThrows(IOException::class.java) { s.apply(one(parent, png(1)), true) }
         assertArrayEquals(stock, live.readBytes())
         assertEquals(ThemeArchiveStatus.INACTIVE, s.status())
@@ -297,7 +468,7 @@ class ThemeArchiveStoreTest {
         val s = ThemeArchiveStore(live, state, { _, staged ->
             assertEquals(state, staged.parentFile)
             assertEquals(listOf("icons"), theme.list()?.toList())
-        }, {}, { true })
+        }, {}, { true }, { defaultIcon.value }, defaultIcon::write)
         s.apply(one(parent, png(1)), true)
         val abandoned = File(state, "stage-12345.tmp").apply { writeText("interrupted") }
         val unrelated = File(state, "other-12345.tmp").apply { writeText("keep") }

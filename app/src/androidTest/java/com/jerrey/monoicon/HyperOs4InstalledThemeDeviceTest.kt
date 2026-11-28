@@ -1,6 +1,7 @@
 package com.jerrey.monoicon
 
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jerrey.monoicon.hook.HyperOs4Environment
@@ -46,6 +47,7 @@ class HyperOs4InstalledThemeDeviceTest {
                 [ "$live" != "$original" ] && [ "$live" = "$(sed -n '2p' "$journal")" ] &&
                     [ "$live" = "$(sed -n '3p' "$journal")" ] || problem "The active archive is not committed"
                 [ "$(sed -n '4p' "$journal")" = '0' ] || problem "Theme refresh is pending"
+                [ "$(settings get global is_default_icon)" = '1' ] || problem "Launcher still uses the default icon outline"
                 if [ "$original" = '-' ]; then
                     reference=$theme
                     mode=644
@@ -73,10 +75,16 @@ class HyperOs4InstalledThemeDeviceTest {
                         .use { it.readBytes() }
                     val digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
                     assertTrue("Wrong owner or image digest for $path", "$pkg\t$path\t$digest" in metadata)
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-                    assertEquals(192, options.outWidth)
-                    assertEquals(192, options.outHeight)
+                    val bitmap = checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    try {
+                        assertEquals(192, bitmap.width)
+                        assertEquals(192, bitmap.height)
+                        for (x in listOf(0, bitmap.width - 1)) for (y in listOf(0, bitmap.height - 1)) {
+                            assertEquals("Opaque corner in $path at $x,$y", 0, Color.alpha(bitmap.getPixel(x, y)))
+                        }
+                    } finally {
+                        bitmap.recycle()
+                    }
                 }
             }
         } finally { work.deleteRecursively() }

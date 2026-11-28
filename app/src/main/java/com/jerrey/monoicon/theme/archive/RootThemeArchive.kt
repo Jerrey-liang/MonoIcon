@@ -39,7 +39,7 @@ object RootThemeArchive {
                     // Persist the directory entry before the first journal can protect a rename.
                     if (!File(stateDir, "state-v1").exists()) syncDirectory(checkNotNull(stateDir.parentFile))
                     val store = ThemeArchiveStore(File(themeDir, "icons"), stateDir, ::preserveAttributes,
-                        ::syncDirectory) { refreshIcons(stateDir) }
+                        ::syncDirectory, { refreshIcons(stateDir) }, ::readDefaultIcon, ::writeDefaultIcon)
                     store.cleanInterruptedWork()
                     when (verb) {
                         "status" -> store.status().name
@@ -82,6 +82,36 @@ object RootThemeArchive {
 
     private fun encode(result: ThemeArchiveResult) =
         "${if (result.changed) 1 else 0} ${if (result.refreshSucceeded) 1 else 0}"
+
+    // HyperOS Theme Manager uses 1 for a third-party icon module. The launcher can then
+    // retain each PNG's own alpha outline when handing the returning app back to its icon.
+    private const val DEFAULT_ICON = "is_default_icon"
+
+    private fun readDefaultIcon(): String? = when (val value = iconSetting("get", "global", DEFAULT_ICON)) {
+        "null" -> null
+        "0", "1" -> value
+        else -> throw IOException("Unexpected $DEFAULT_ICON value: ${value.take(200)}")
+    }
+
+    private fun writeDefaultIcon(value: String?) {
+        if (value == null) iconSetting("delete", "global", DEFAULT_ICON)
+        else iconSetting("put", "global", DEFAULT_ICON, value)
+    }
+
+    private fun iconSetting(vararg arguments: String): String {
+        val process = ProcessBuilder("/system/bin/settings", *arguments).redirectErrorStream(true).start()
+        try {
+            process.outputStream.close()
+            if (!process.waitFor(10, TimeUnit.SECONDS)) throw IOException("Timed out accessing $DEFAULT_ICON")
+            val output = process.inputStream.use { it.readNBytes(512).decodeToString().trim() }
+            if (process.exitValue() != 0) {
+                throw IOException("Cannot access $DEFAULT_ICON: ${output.take(200)}")
+            }
+            return output
+        } finally {
+            if (process.isAlive) process.destroyForcibly()
+        }
+    }
 
     private fun preserveAttributes(reference: File, staged: File) {
         val attrs = Os.lstat(reference.path)

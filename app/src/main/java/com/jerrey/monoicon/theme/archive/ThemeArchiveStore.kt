@@ -21,12 +21,20 @@ internal class ThemeArchiveStore(
     private val preserveAttributes: (reference: File, staged: File) -> Unit,
     private val syncDirectory: (File) -> Unit,
     private val refresh: () -> Boolean,
+    private val readDefaultIcon: () -> String?,
+    private val writeDefaultIcon: (String?) -> Unit,
 ) {
     private val journal = File(stateDir, "state-v1")
     private val original = File(stateDir, "original.icons")
 
     // A dash identifies a missing icons module, including on a stock theme.
-    private data class Record(val original: String, val before: String, val after: String, val refresh: Boolean)
+    // A legacy four-line record has no setting backup. ABSENT records a verified missing key.
+    // Keep the setting operation separate from the refresh so a retry of a notification
+    // cannot overwrite a setting the user changed after our first notification.
+    private data class Record(
+        val original: String, val before: String, val after: String, val refresh: Boolean,
+        val originalSetting: String? = null, val settingPending: Boolean = false,
+    )
     private data class Snapshot(val live: String, val record: Record?, val status: ThemeArchiveStatus)
 
     fun status() = snapshot().status
@@ -94,7 +102,18 @@ internal class ThemeArchiveStore(
         val candidate = File.createTempFile("merge-", ".zip", stateDir)
         try {
             return when (ThemeIconZip.merge(baseline, target.takeIf { active != null }, patch, full, candidate)) {
-                ThemeIconZip.Change.NONE -> finish(current.record, false)
+                ThemeIconZip.Change.NONE -> {
+                    if (active != null && active.originalSetting == null) {
+                        // Pre-setting installations already have the correct PNGs. Upgrade
+                        // in place and leave the original archive and its backup untouched.
+                        val baselineSetting = captureSetting()
+                        val upgraded = active.copy(originalSetting = baselineSetting, settingPending = true,
+                            refresh = active.refresh || baselineSetting != THIRD_PARTY)
+                        verifyLive(current.live)
+                        writeRecord(upgraded)
+                        finish(upgraded, false)
+                    } else finish(current.record, false)
+                }
                 ThemeIconZip.Change.RESTORE -> restore(current)
                 ThemeIconZip.Change.INSTALL -> {
                     if (active == null && baseline != null) {
@@ -122,13 +141,24 @@ internal class ThemeArchiveStore(
 
     private fun restore(current: Snapshot): ThemeArchiveResult = when (current.status) {
         ThemeArchiveStatus.CONFLICT -> {
-            // The user or Theme Manager may already have restored the exact starting point.
-            // Acknowledge it on disable only; background apply must still respect that change.
-            if (current.live != current.record?.original || fingerprint(target) != current.live) {
-                throw ThemeArchiveConflictException()
+            val record = current.record ?: throw ThemeArchiveConflictException()
+            if (current.live != record.original) throw ThemeArchiveConflictException()
+            // The original ZIP is already back. Only release a setting we changed and
+            // that still has our value. Preserve another theme's choice and the live inode.
+            val restoreSetting = record.originalSetting != null && record.originalSetting != THIRD_PARTY &&
+                readDefaultIcon() == THIRD_PARTY
+            verifyLive(current.live)
+            if (restoreSetting) {
+                // Record the notification before a setter can succeed and its process exit.
+                // snapshot() retains this inactive record until finish delivers the refresh.
+                val pending = record.copy(before = current.live, after = current.live,
+                    settingPending = true, refresh = true)
+                writeRecord(pending)
+                finish(pending, false)
+            } else {
+                clearRecord()
+                ThemeArchiveResult(false, true)
             }
-            clearRecord()
-            ThemeArchiveResult(false, true)
         }
         ThemeArchiveStatus.INACTIVE -> finish(current.record, false)
         ThemeArchiveStatus.ACTIVE -> {
@@ -149,8 +179,13 @@ internal class ThemeArchiveStore(
         // After an interrupted explicit recovery, absence must still be a conflict until the
         // original was actually linked into place.
         val before = if (current.status == ThemeArchiveStatus.CONFLICT) checkNotNull(current.record).before else current.live
-        val record = Record(current.record?.original ?: current.live, before, desired,
-            current.record?.refresh == true)
+        val previous = current.record
+        val originalHash = previous?.original ?: current.live
+        val installing = desired != originalHash
+        val originalSetting = previous?.originalSetting ?: if (installing) captureSetting() else null
+        val settingPending = originalSetting != null && (previous?.settingPending == true ||
+            !installing || current.status != ThemeArchiveStatus.ACTIVE || previous?.originalSetting == null)
+        val record = Record(originalHash, before, desired, previous?.refresh == true, originalSetting, settingPending)
         // Theme Manager scans the live directory. Only the completed, labelled inode belongs
         // there. link/ATOMIC_MOVE fail without copying if the directories span mounts.
         val stage = contents?.let { File.createTempFile("stage-", ".tmp", stateDir) }
@@ -190,20 +225,54 @@ internal class ThemeArchiveStore(
         }
     }
 
-    private fun finish(record: Record?, changed: Boolean): ThemeArchiveResult {
-        if (record == null) return ThemeArchiveResult(changed, true)
+    private fun finish(pending: Record?, changed: Boolean): ThemeArchiveResult {
+        var record = pending ?: return ThemeArchiveResult(changed, true)
+        var settingChanged = false
+        if (record.settingPending) {
+            settingChanged = reconcileSetting(record)
+            record = record.copy(settingPending = false, refresh = record.refresh || settingChanged)
+            verifyLive(record.after)
+            writeRecord(record)
+        }
         if (record.refresh) {
+            verifyLive(record.after)
             val notified = refresh()
             // Theme services may reject or replace a module while handling its notification.
-            if (fingerprint(target) != record.after) throw ThemeArchiveConflictException()
-            if (!notified) return ThemeArchiveResult(changed, false)
+            verifyLive(record.after)
+            if (!notified) return ThemeArchiveResult(changed || settingChanged, false)
         }
         if (record.after == record.original) {
             clearRecord()
         } else if (record.refresh) {
             writeRecord(record.copy(refresh = false))
         }
-        return ThemeArchiveResult(changed, true)
+        return ThemeArchiveResult(changed || settingChanged, true)
+    }
+
+    private fun captureSetting(): String = when (val value = readDefaultIcon()) {
+        null -> ABSENT
+        "0", THIRD_PARTY -> value
+        else -> throw IOException("Unrecognized global icon theme setting")
+    }
+
+    private fun reconcileSetting(record: Record): Boolean {
+        val baseline = checkNotNull(record.originalSetting).takeUnless { it == ABSENT }
+        val installing = record.after != record.original
+        val desired = if (installing) THIRD_PARTY else baseline
+        val observed = readDefaultIcon()
+        if (observed == desired) return false
+        // On restoration we only own the third-party value. If Theme Manager or the user
+        // changed the setting alone, allow restoration of the ZIP and leave their value.
+        if (!installing && observed != THIRD_PARTY) return false
+        if (installing && observed != baseline) throw IOException("Global icon theme setting changed during installation")
+        verifyLive(record.after)
+        writeDefaultIcon(desired)
+        if (readDefaultIcon() != desired) throw IOException("Could not verify global icon theme setting")
+        return true
+    }
+
+    private fun verifyLive(expected: String) {
+        if (fingerprint(target) != expected) throw ThemeArchiveConflictException()
     }
 
     private fun snapshot(): Snapshot {
@@ -214,14 +283,23 @@ internal class ThemeArchiveStore(
         }
         require(Files.isRegularFile(journal.toPath(), NOFOLLOW_LINKS) && journal.length() in 1..256)
         val fields = journal.readText().trimEnd().split('\n')
-        require(fields.size == 4 && fields.take(3).all { it == ABSENT || HASH.matches(it) } &&
-            fields.last() in setOf("0", "1")) { "Invalid MonoIcon theme journal" }
-        var record = Record(fields[0], fields[1], fields[2], fields[3] == "1")
+        require((fields.size == 4 || fields.size == 6) && fields.take(3).all { it == ABSENT || HASH.matches(it) } &&
+            fields[3] in setOf("0", "1") && (fields.size == 4 ||
+            (fields[4] in setOf(ABSENT, "0", THIRD_PARTY) && fields[5] in setOf("0", "1")))) {
+            "Invalid MonoIcon theme journal"
+        }
+        var record = Record(fields[0], fields[1], fields[2], fields[3] == "1",
+            fields.getOrNull(4), fields.getOrNull(5) == "1")
         if (live != record.before && live != record.after) {
             return Snapshot(live, record, ThemeArchiveStatus.CONFLICT)
         }
         if (record.before != record.after) {
-            record = record.copy(before = live, after = live, refresh = live == record.after || record.refresh)
+            // An interrupted update can leave the *old* managed ZIP in place during a
+            // four-line upgrade. Its pending setting may still change. Queue the notification
+            // before a retried setter can succeed and its process exit before recording success.
+            val needsRefresh = live == record.after || record.refresh ||
+                (record.settingPending && live != record.original)
+            record = record.copy(before = live, after = live, refresh = needsRefresh)
             writeRecord(record)
         }
         if (live == record.original && !record.refresh) {
@@ -244,7 +322,12 @@ internal class ThemeArchiveStore(
         try {
             FileOutputStream(temp).use { out ->
                 val flag = if (record.refresh) "1" else "0"
-                out.write(listOf(record.original, record.before, record.after, flag).joinToString("\n").toByteArray())
+                val fields = mutableListOf(record.original, record.before, record.after, flag)
+                if (record.originalSetting != null) {
+                    fields += record.originalSetting
+                    fields += if (record.settingPending) "1" else "0"
+                }
+                out.write(fields.joinToString("\n").toByteArray())
                 out.fd.sync()
             }
             atomicReplace(temp, journal)
@@ -297,6 +380,7 @@ internal class ThemeArchiveStore(
 
     private companion object {
         const val ABSENT = "-"
+        const val THIRD_PARTY = "1"
         val HASH = Regex("[0-9a-f]{64}")
         val TEMPORARY = Regex("""(?:(?:stage|original|state|save)-[A-Za-z0-9_-]+\.tmp|(?:merge|patch)-[A-Za-z0-9_-]+\.zip|broadcast-[A-Za-z0-9_-]+\.txt)""")
     }
