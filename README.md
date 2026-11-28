@@ -4,6 +4,8 @@
 
 [下载最新版](https://github.com/Jerrey-liang/MonoIcon/releases/latest) · [发布说明](docs/RELEASE_NOTE.md) · [反馈问题](https://github.com/Jerrey-liang/MonoIcon/issues) · [English](#english)
 
+2.5.0 在 HyperOS 4 上自动同步普通应用图标和受支持的大图标，移除了旧版 Profile。升级后请检查 LSPosed 作用域并重启一次手机。[2.5.0 更新与升级步骤](docs/RELEASE_NOTE.md#250)
+
 ## 功能
 
 - 用 Material 2025 或 Material 3 从桌面壁纸取色，各有九种配色风格，跟随系统明暗模式。
@@ -42,6 +44,8 @@ MonoIcon 采用 **GPL-3.0-or-later**。 [项目许可声明](docs/LICENSE) · [�
 MonoIcon gives HyperOS apps monochrome icons that match your wallpaper.
 
 [Download](https://github.com/Jerrey-liang/MonoIcon/releases/latest) · [Release notes](docs/RELEASE_NOTE.md) · [Report an issue](https://github.com/Jerrey-liang/MonoIcon/issues)
+
+Version 2.5.0 automatically syncs regular app icons and supported large icons on HyperOS 4 and removes legacy profiles. After updating, check the LSPosed scopes and reboot once. [What's new in 2.5.0 and how to upgrade](docs/RELEASE_NOTE.md#250)
 
 ### Features
 

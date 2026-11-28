@@ -1,11 +1,24 @@
 # MonoIcon 发布说明 / Release notes
 
-## 未发布 / Unreleased
+## 2.5.0
 
-- **HyperOS 4 普通应用图标**通过 Root 写入系统主题归档。更换系统主题后，可在「运行诊断」将 MonoIcon 应用到当前主题。系统移除归档且备份仍有效时，可以停用 MonoIcon 并恢复原图标。
-- **HyperOS 4 大图标**使用系统主题资源，支持桌面正在使用的 2×1、1×2 和 2×2 单应用静态图标。移除了 NativeHook 和对应的 Profile。 [使用与兼容性](hyperos4.md#large-icons)
-- **Regular app icons on HyperOS 4** use the system theme archive, which MonoIcon updates with root access. After switching themes, use **Diagnostics** to apply MonoIcon to the current theme. If the system removes the archive and a valid backup remains, you can turn off MonoIcon and restore the original icons.
-- **Large icons on HyperOS 4** use system theme resources for static, single-app 2×1, 1×2 and 2×2 icons already in use on the home screen. NativeHook and its profiles have been removed. [Setup and compatibility (Chinese)](hyperos4.md#large-icons)
+versionCode 7 · [GitHub Release](https://github.com/Jerrey-liang/MonoIcon/releases/tag/v2.5.0) · [LSPosed Release](https://github.com/Xposed-Modules-Repo/com.jerrey.monoicon/releases/tag/7-2.5.0)
+
+### 中文
+
+- HyperOS 4 主用户授予 Root 权限后，普通应用图标会随壁纸、图标设置和应用变更自动同步到系统主题。旧版 NativeHook 和 Profile 已移除，升级后无需导入配置。
+- 支持当前主题已提供、桌面正在使用的 2×1、1×2 和 2×2 单应用静态大图标。动态和配对大图标保留主题原样。
+- 修复从应用返回桌面时图标圆角短暂变化的问题。
+
+在 HyperOS 4 上从旧版升级时，在 LSPosed 勾选「系统界面」和「系统框架」，打开 MonoIcon 授予 Root 权限，然后重启一次手机。更换系统主题后，可在「运行诊断」将 MonoIcon 应用到当前主题。卸载或在 LSPosed 停用前，先在 MonoIcon 内关闭「启用模块」，等原主题图标恢复。[使用、兼容性与恢复](hyperos4.md)
+
+### English
+
+- On HyperOS 4, regular app icons sync to the system theme when wallpaper, icon settings or installed apps change. Grant root access in the primary Android user. This release removes NativeHook and legacy profiles, so upgrades no longer require importing a profile.
+- Supports static, single-app large icons in 2×1, 1×2 and 2×2 when the current theme provides them and they are already in use on the home screen. Dynamic and paired-app large icons keep the theme artwork.
+- Fixed a brief change in icon corner shape when returning to the home screen from an app.
+
+When upgrading on HyperOS 4, select **System UI** and **System Framework** in LSPosed, open MonoIcon to grant root access, then reboot once. After changing system themes, use **Diagnostics** to apply MonoIcon to the current theme. Before uninstalling or disabling MonoIcon in LSPosed, turn off **Enable module** in MonoIcon and wait for the original theme icons to be restored. [Setup, compatibility and recovery (Chinese)](hyperos4.md)
 
 ## 2.4.0
 
