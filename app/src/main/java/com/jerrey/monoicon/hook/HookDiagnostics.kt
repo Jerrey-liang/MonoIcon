@@ -39,7 +39,6 @@ object HookDiagnostics {
     @Volatile private var hookContext: Context? = null
     @Volatile private var packageName = ""
     @Volatile private var processName = ""
-    @Volatile private var mode = "java"
     @Volatile private var requestNonce: String? = null
     private var startedElapsedMs = 0L
     private var processStartTicks: Long? = null
@@ -54,7 +53,6 @@ object HookDiagnostics {
         val capturedElapsedMs: Long,
         val capturedAtMillis: Long,
         val moduleVersion: String,
-        val mode: String,
         val systemBootId: String?,
         val processStartTicks: Long?,
         val requestNonce: String?,
@@ -62,11 +60,10 @@ object HookDiagnostics {
     )
 
     /** Called before enabled/safety gates so a skipped point is still observable. */
-    internal fun start(api: XposedInterface, pkg: String, process: String, nativeLauncher: Boolean) {
+    internal fun start(api: XposedInterface, pkg: String, process: String) {
         if (!started.compareAndSet(false, true)) return
         packageName = pkg
         processName = process
-        mode = if (nativeLauncher) "native" else "java"
         startedElapsedMs = SystemClock.elapsedRealtime()
         processStartTicks = runCatching {
             File("/proc/self/stat").readText().substringAfterLast(") ").split(' ')[19].toLong()
@@ -74,7 +71,7 @@ object HookDiagnostics {
         systemBootId = currentBootId()
         // Framework-owned metadata avoids package-visibility restrictions in the host app.
         moduleUid = runCatching { api.moduleApplicationInfo.uid }.getOrDefault(-1)
-        HookRegistry.configure(pkg, nativeLauncher)
+        HookRegistry.configure(pkg)
         HookRegistry.install("DiagnosticsPublisher", required = false) {
             val attach = Application::class.java.getDeclaredMethod("attach", Context::class.java)
             HookRegistry.intercept(api, attach) { chain ->
@@ -123,7 +120,7 @@ object HookDiagnostics {
                 runCatching {
                     val snapshot = Snapshot(packageName, processName, Process.myPid(), startedElapsedMs,
                         SystemClock.elapsedRealtime(), System.currentTimeMillis(), BuildConfig.VERSION_NAME,
-                        mode, systemBootId, processStartTicks, requestNonce, HookRegistry.snapshot())
+                        systemBootId, processStartTicks, requestNonce, HookRegistry.snapshot())
                     val encoded = encode(snapshot)
                     if (encoded.length <= MAX_BYTES) {
                         context.contentResolver.call(Uri.parse("content://$AUTHORITY"), METHOD_REPORT, null,
@@ -135,10 +132,10 @@ object HookDiagnostics {
     }
 
     /** Requests a fresh report from a running scope; absence of a response remains unknown/stale. */
-    fun requestSnapshots(context: Context): String {
+    fun requestSnapshots(context: Context, packages: List<String>): String {
         val nonce = UUID.randomUUID().toString()
         val options = BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle()
-        listOf("com.miui.home", "com.android.systemui").forEach { pkg ->
+        packages.forEach { pkg ->
             runCatching {
                 context.sendBroadcast(Intent(ACTION_REQUEST).setPackage(pkg).putExtra(EXTRA_NONCE, nonce), null, options)
             }
@@ -169,7 +166,7 @@ object HookDiagnostics {
         put("capturedElapsedMs", snapshot.capturedElapsedMs)
         put("capturedAtMillis", snapshot.capturedAtMillis)
         put("moduleVersion", snapshot.moduleVersion)
-        put("mode", snapshot.mode)
+        put("mode", "java")
         put("bootId", snapshot.systemBootId)
         put("processStartTicks", snapshot.processStartTicks)
         put("requestNonce", snapshot.requestNonce)
@@ -185,7 +182,7 @@ object HookDiagnostics {
     internal fun decode(encoded: String): Snapshot {
         require(encoded.length <= MAX_BYTES)
         val json = JSONObject(encoded)
-        require(json.getInt("schema") == 1)
+        require(json.getInt("schema") == 1 && json.getString("mode") == "java")
         val array = json.getJSONArray("points")
         require(array.length() <= 96)
         val points = (0 until array.length()).map { index ->
@@ -198,7 +195,7 @@ object HookDiagnostics {
         fun optionalString(key: String) = if (json.isNull(key)) null else json.getString(key).take(80)
         return Snapshot(json.getString("package"), json.getString("process").take(160), json.getInt("pid"),
             json.getLong("startedElapsedMs"), json.getLong("capturedElapsedMs"), json.getLong("capturedAtMillis"),
-            json.getString("moduleVersion").take(80), json.getString("mode"), optionalString("bootId"),
+            json.getString("moduleVersion").take(80), optionalString("bootId"),
             if (json.isNull("processStartTicks")) null else json.getLong("processStartTicks"),
             optionalString("requestNonce"), points)
     }

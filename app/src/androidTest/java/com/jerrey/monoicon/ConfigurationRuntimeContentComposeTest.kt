@@ -15,7 +15,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
-import com.jerrey.monoicon.ui.screens.ConfigurationDiagnosticsRepository
+import com.jerrey.monoicon.ui.screens.RuntimeHookPoint
 import com.jerrey.monoicon.ui.screens.ConfigurationRuntime
 import com.jerrey.monoicon.ui.screens.ConfigurationRuntimeContent
 import com.jerrey.monoicon.ui.screens.LauncherEngine
@@ -27,7 +27,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.json.JSONObject
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 @RunWith(AndroidJUnit4::class)
@@ -41,17 +40,15 @@ class ConfigurationRuntimeContentComposeTest {
     }
 
     @Test
-    fun hyperOs4ShowsThemeStatusWithoutBuiltInLauncherMatch() {
+    fun hyperOs4ShowsThemeStatus() {
         setContent(
             ConfigurationRuntime(
                 environment = environment(LauncherEngine.NATIVE).copy(isHyperOs4 = true, themeArchiveAvailable = true),
-                nativeExtensionMatched = false,
             ),
             themeStatus = "active",
         )
         composeRule.onNodeWithText("System theme icons").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Theme icons synced").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("This launcher has no matching built-in large icon support").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Apply MonoIcon to the current theme").assertDoesNotExist()
         composeRule.onNodeWithText("Restore original theme icons").assertDoesNotExist()
     }
@@ -93,24 +90,17 @@ class ConfigurationRuntimeContentComposeTest {
 
     @Test
     fun historicalReportNeverClaimsCurrentAndKeepsPointOutcomes() {
-        val historicalReport = JSONObject("""
-            {
-              "points": [
-                {"id": "pthread_create", "kind": "startup-hook", "state": "installed"},
-                {"id": "open", "kind": "libc-hook", "state": "hook-failed"},
-                {"id": "madvise", "kind": "libc-hook", "state": "installed"},
-                {"id": "legacy-patch", "kind": "profile-patch", "state": "verified"}
-              ]
-            }
-        """.trimIndent())
         val runtime = ConfigurationRuntime(
             environment = environment(LauncherEngine.NATIVE),
             enabled = true,
             processes = listOf(RuntimeHookProcess(
-                name = "com.miui.home (Native)",
+                name = "com.android.systemui (Java)",
                 pid = 4321,
                 current = false,
-                points = ConfigurationDiagnosticsRepository.nativeHookPoints(historicalReport),
+                points = listOf(
+                    RuntimeHookPoint("SystemUiDrawable", "SystemUiNotificationIcons", "getAppIconInner", "INSTALLED"),
+                    RuntimeHookPoint("SystemUiBitmap", "SystemUiNotificationIcons", "getAppIconBitmap", "FAILED"),
+                ),
             )),
         )
         setContent(runtime)
@@ -119,9 +109,7 @@ class ConfigurationRuntimeContentComposeTest {
         composeRule.onNodeWithText("No current reply", substring = true).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Previous: Installed").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Previous: Installation failed").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("openat").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("madvise").assertDoesNotExist()
-        composeRule.onNodeWithText("legacy-patch").assertDoesNotExist()
+        composeRule.onNodeWithText("SystemUiBitmap").performScrollTo().assertIsDisplayed()
     }
 
     private fun setContent(

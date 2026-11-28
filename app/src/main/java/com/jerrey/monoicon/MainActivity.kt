@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.jerrey.monoicon.hook.HyperOs4ThemeSync
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.theme.color.dynamic.PixelMonetColorEngine
@@ -54,11 +55,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         com.jerrey.monoicon.theme.wallpaper.WallpaperSourceRepository.refresh(force = true)
-        if (HyperOs4ThemeSync.needsReconcile(this) &&
+        if (HyperOs4Environment.isSupported(this) &&
             (ConfigManager.xposedService() != null || !ConfigManager.isEnabledFromUi())) {
-            HyperOs4ThemeSync.enqueue(this, HyperOs4ThemeSync.SCAN)
+            HyperOs4ThemeSync.enqueue(this, if (HyperOs4ThemeSync.needsReconcile(this))
+                HyperOs4ThemeSync.SCAN else HyperOs4ThemeSync.LARGE)
         }
-        com.jerrey.monoicon.safety.LauncherSafety.refreshAndPublish(applicationContext)
+        com.jerrey.monoicon.safety.LauncherSafety.refresh(applicationContext)
     }
 
     override fun onDestroy() {

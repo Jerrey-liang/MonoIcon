@@ -27,11 +27,10 @@ object HookRegistry {
     val size: Int get() = entries.size
     val installedCount: Int get() = entries.values.count { it.installed }
 
-    internal fun configure(packageName: String, nativeLauncher: Boolean) {
+    internal fun configure(packageName: String) {
         entries.clear()
         val catalog = expectedPoints(packageName)
         catalog.forEach { entries[it.name] = it }
-        if (nativeLauncher) skipPending("Native launcher has no Java icon pipeline")
     }
 
     internal fun skipPending(reason: String) {

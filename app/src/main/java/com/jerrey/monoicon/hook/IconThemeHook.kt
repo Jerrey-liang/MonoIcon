@@ -130,10 +130,6 @@ class IconThemeHook : XposedModule() {
         }
     }
 
-    override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
-        HyperOs4NativeHooks.onPackageReady(this, param, isLauncherMainProcess)
-    }
-
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         val pkg = param.packageName
         // Phase 11: the module now runs in two processes — the launcher (desktop /
@@ -142,15 +138,12 @@ class IconThemeHook : XposedModule() {
         if (pkg != "com.miui.home" && pkg != "com.android.systemui") return
         if (pkg == "com.miui.home" && (!isLauncherMainProcess || !param.isFirstPackage)) return
 
-        HookDiagnostics.start(this, pkg, runtimeProcessName,
-            pkg == "com.miui.home" && param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0)
-
-        // The no-DEX launcher is handled by onPackageReady; its Java icon classes
-        // do not exist. Preserve the legacy and SystemUI hook paths below.
+        // HyperOS 4 gets launcher icons from its installed theme.
         if (pkg == "com.miui.home" &&
             (param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0 || HyperOs4Environment.isVersion4())
         ) return
 
+        HookDiagnostics.start(this, pkg, runtimeProcessName)
         // Phase 4.1: load configuration before installing hooks — a disabled
         // module installs nothing and leaves the host process untouched.
         ConfigManager.initForHooks(this)

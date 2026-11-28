@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.logging.logi
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.safety.LauncherSafety
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.LocalStrings
@@ -103,6 +104,7 @@ fun OverviewScreen(
     var safetyError by remember { mutableStateOf(false) }
     var restartHint by rememberSaveable { mutableStateOf(false) }
     val chinese = strings.masterSwitch == stringsFor(AppLanguage.CHINESE, true).masterSwitch
+    val systemTheme = HyperOs4Environment.isVersion4()
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         val listener: (String?) -> Unit = {
@@ -127,7 +129,7 @@ fun OverviewScreen(
             safetyBlocked = ConfigManager.isSafetyBlockedFromUi()
             launch {
                 systemInfo = withContext(Dispatchers.IO) { HomeSystemInfo.load() }
-                scopeApps = withContext(Dispatchers.IO) { ScopeApp.load(context, XposedState.REQUIRED_SCOPE) }
+                scopeApps = withContext(Dispatchers.IO) { ScopeApp.load(context, XposedState.requiredScope) }
             }
             ConfigManager.serviceState.collectLatest { service ->
                 repeat(6) { attempt ->
@@ -150,7 +152,10 @@ fun OverviewScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             SwitchPreference(
                 title = strings.masterSwitch,
-                summary = if (safetyBlocked) {
+                summary = if (safetyBlocked && systemTheme) {
+                    if (chinese) "启动保护曾停用模块。重新开启后将同步系统主题图标。"
+                    else "Startup protection previously disabled MonoIcon. Turn it on to sync theme icons."
+                } else if (safetyBlocked) {
                     if (chinese) "安全模式已自动停用模块：检测到桌面短命重启。重新开启主开关并重启作用域可重试。"
                     else "Safety mode disabled the module after an early launcher restart. Enable the master switch and restart the scope to retry."
                 } else strings.masterSwitchSummary,
@@ -186,7 +191,7 @@ fun OverviewScreen(
                     }
                 },
             )
-            Text(
+            if (!systemTheme) Text(
                 text = if (chinese) "启动保护始终开启：启用后桌面未能存活 30 秒，将在下次启动时自动停用模块。"
                     else "Startup protection is always on: if the launcher exits within 30 seconds of activation, the module is disabled on the next start.",
                 style = MiuixTheme.textStyles.footnote1,
@@ -199,7 +204,10 @@ fun OverviewScreen(
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
             )
             if (restartHint) Text(
-                text = strings.restartHint,
+                text = if (systemTheme) {
+                    if (chinese) "桌面主题图标将自动同步。如果通知图标未更新，请重启系统界面。"
+                    else "Launcher theme icons sync automatically. Restart System UI if notification icons have not updated."
+                } else strings.restartHint,
                 style = MiuixTheme.textStyles.footnote1,
                 color = colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
@@ -215,11 +223,12 @@ fun OverviewScreen(
     ) {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
             if (!status.active) Text(labels.activateHint)
-            XposedState.REQUIRED_SCOPE.forEach { packageName ->
+            XposedState.requiredScope.forEach { packageName ->
                 BasicComponent(
                     title = when (packageName) {
                         "com.miui.home" -> strings.scopeAppLauncher
                         "com.android.systemui" -> strings.scopeAppSystemUi
+                        "system" -> if (chinese) "系统框架" else "System Framework"
                         else -> packageName
                     },
                     summary = "$packageName\n${scopeApps.firstOrNull { it.packageName == packageName }?.versionLabel(strings.versionPrefix) ?: ScopeApp.VERSION_UNAVAILABLE}",
@@ -232,7 +241,7 @@ fun OverviewScreen(
                     },
                 )
             }
-            val missing = XposedState.REQUIRED_SCOPE.filterNot(status::hasScope)
+            val missing = XposedState.requiredScope.filterNot(status::hasScope)
             if (missing.isNotEmpty() && status.bound) {
                 TextButton(
                     text = if (scopeRequested) strings.scopeRequested else strings.requestScope,

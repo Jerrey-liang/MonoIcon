@@ -27,6 +27,7 @@ internal object HyperOs4ThemeSync {
     const val PACKAGE = "package"
     const val VALIDATION = "validation"
     const val CHECK = "integrity"
+    const val LARGE = "large-icons"
     private const val RECOVER = "recover"
     private const val ADOPT = "adopt"
     private const val PREFS = "hyperos4-theme-sync"
@@ -118,16 +119,20 @@ internal object HyperOs4ThemeSync {
             if (RECOVER in requests && state == ThemeArchiveStatus.CONFLICT &&
                 ThemeArchiveInstaller.canRecoverMissingOriginal(context)) {
                 ConfigManager.setEnabled(false)
+                val large = ThemeArchiveInstaller.restoreLargeIcons(context)
                 val result = ThemeArchiveInstaller.recoverMissingOriginal(context)
                 prefs.clearSyncState()
-                report(context, if (result.refreshSucceeded) "inactive" else "refresh")
-                return result.refreshSucceeded
+                val refreshed = result.refreshSucceeded && large.refreshSucceeded
+                report(context, if (refreshed) "inactive" else "refresh")
+                return refreshed
             }
             if (!inspectOnly && !ConfigManager.isEnabledFromUi()) {
+                val large = ThemeArchiveInstaller.restoreLargeIcons(context)
                 val result = ThemeArchiveInstaller.restore(context)
                 prefs.clearSyncState()
-                report(context, if (result.refreshSucceeded) "inactive" else "refresh")
-                return result.refreshSucceeded
+                val refreshed = result.refreshSucceeded && large.refreshSucceeded
+                report(context, if (refreshed) "inactive" else "refresh")
+                return refreshed
             }
             if (ADOPT in requests) {
                 if (state == ThemeArchiveStatus.CONFLICT) ThemeArchiveInstaller.acceptCurrentTheme(context)
@@ -137,17 +142,20 @@ internal object HyperOs4ThemeSync {
                 // verified, now-missing baseline (or relinquish an already-restored baseline).
                 // Persist the pause first so a process death cannot reinstall the rejected ZIP.
                 prefs.save { putBoolean("pausedByValidation", true); remove("signature") }
+                val large = ThemeArchiveInstaller.restoreLargeIcons(context)
                 val rollback = if (ThemeArchiveInstaller.canRecoverMissingOriginal(context))
                     ThemeArchiveInstaller.recoverMissingOriginal(context) else ThemeArchiveInstaller.restore(context)
                 report(context, "rejected")
-                return rollback.refreshSucceeded
+                return rollback.refreshSucceeded && large.refreshSucceeded
             } else if (state == ThemeArchiveStatus.CONFLICT) {
+                val large = ThemeArchiveInstaller.restoreLargeIcons(context)
                 report(context, "conflict", if (mutableConflict.value) mutableStatus.value.substringAfter('\n', "") else "")
-                return true
+                return large.refreshSucceeded
             } else if (prefs.getBoolean("pausedByValidation", false)) {
                 // Finish any pending refresh from a recovered transaction. An external new
                 // theme stays untouched until the user asks to apply MonoIcon to it.
-                val complete = state != ThemeArchiveStatus.INACTIVE || ThemeArchiveInstaller.restore(context).refreshSucceeded
+                val complete = ThemeArchiveInstaller.restoreLargeIcons(context).refreshSucceeded &&
+                    (state != ThemeArchiveStatus.INACTIVE || ThemeArchiveInstaller.restore(context).refreshSucceeded)
                 report(context, "rejected")
                 return complete
             }
@@ -162,23 +170,31 @@ internal object HyperOs4ThemeSync {
             val signature = HyperOs4ThemeRenderer.signature(context)
             val full = needsReconcile(context) || state != ThemeArchiveStatus.ACTIVE || SCAN in requests || ADOPT in requests ||
                 prefs.getString("signature", null) != signature
-            if (!full && packages.isEmpty() && mutableStatus.value == "active") return true
+            val updateArchive = full || packages.isNotEmpty() || mutableStatus.value != "active"
+            if (!updateArchive && LARGE !in requests) return true
             if (!active()) return false
             val directory = File(context.cacheDir, "theme-archive-render-" + UUID.randomUUID())
             try {
                 check(directory.mkdir())
-                val icons = HyperOs4ThemeRenderer.render(context, directory, if (full) null else packages, active)
-                    ?: return false
-                if (!active() || signature != HyperOs4ThemeRenderer.signature(context) || !ConfigManager.isEnabledFromUi()) return false
-                val result = ThemeArchiveInstaller.apply(context, icons, full)
-                if (result.refreshSucceeded) {
+                fun current() = active() && ConfigManager.isEnabledFromUi()
+                if (updateArchive) {
+                    val icons = HyperOs4ThemeRenderer.render(context, directory, if (full) null else packages, active)
+                        ?: return false
+                    if (!current() || signature != HyperOs4ThemeRenderer.signature(context)) return false
+                    if (!ThemeArchiveInstaller.apply(context, icons, full).refreshSucceeded) {
+                        report(context, "refresh")
+                        return false
+                    }
+                }
+                val large = HyperOs4ThemeLargeIcons.apply(context, directory, ::current) ?: return false
+                if (large.refreshSucceeded) {
                     prefs.save {
                         putString("signature", signature)
                         if (full) remove("needsScan")
                     }
                     report(context, "active")
                 } else report(context, "refresh")
-                result.refreshSucceeded
+                large.refreshSucceeded
             } finally {
                 directory.deleteRecursively()
             }

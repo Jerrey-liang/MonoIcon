@@ -2,7 +2,6 @@ package com.jerrey.monoicon
 
 import android.app.Application
 import com.jerrey.monoicon.config.ConfigManager
-import com.jerrey.monoicon.hook.HyperOs4LargeIconPublisher
 import com.jerrey.monoicon.logging.LogStore
 import com.jerrey.monoicon.logging.LogcatLogger
 import com.jerrey.monoicon.logging.loge
@@ -53,7 +52,6 @@ class MonoIconApplication : Application() {
         installCrashLogger()
         PixelMonetColorEngine.init(this)
         com.jerrey.monoicon.hook.HyperOs4ThemeSync.init(this)
-        HyperOs4LargeIconPublisher.init(this)
     }
 
     /**

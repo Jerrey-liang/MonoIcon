@@ -14,22 +14,22 @@
 
 需要 Android 15 或更高版本、Root 权限和支持 API 102 的 LSPosed。
 
-HyperOS 3 沿用 Java 桌面的图标处理。HyperOS 4 的普通应用图标通过主用户的系统主题归档应用，大图标在匹配内置支持的桌面上自动启用。 [HyperOS 4 兼容范围](docs/hyperos4.md#compatibility)
+HyperOS 3 使用 Java 桌面的图标处理。HyperOS 4 在 Android 主用户下同步系统主题图标，包括当前主题已提供、桌面正在使用的单应用静态大图标。 [HyperOS 4 兼容范围](docs/hyperos4.md#compatibility)
 
 ## 安装与使用
 
 1. 从发布页下载并安装 APK。
-2. 在 LSPosed 中启用 MonoIcon，勾选「系统桌面」和「系统界面」两个作用域。
-3. 打开 MonoIcon，按 Root 管理器提示授权。「启用模块」默认开启。如需让已运行的作用域加载模块，可通过右上角电源菜单重启作用域。
-4. 在「图标样式」选择配色和形状。HyperOS 4 的普通图标会自动同步，进度可在「运行诊断」查看。
+2. 在 LSPosed 中启用 MonoIcon。HyperOS 4 勾选「系统界面」和「系统框架」。HyperOS 3 勾选「系统桌面」和「系统界面」。
+3. 打开 MonoIcon，按 Root 管理器提示授权。「启用模块」默认开启。需要重新加载桌面和系统界面时，可使用右上角电源菜单。HyperOS 4 选择「重启桌面和系统界面」，HyperOS 3 选择「重启作用域」。
+4. 在「图标样式」选择配色和形状。HyperOS 4 会自动同步图标，进度可在「运行诊断」查看。
 
 ## 已知限制与排查
 
-- 日历和时钟使用静态图案。大图标更换形状后，可能需要重启桌面。关闭模块后，检查「运行诊断」中的恢复状态。
+- 日历和时钟的普通图标使用静态图案。大图标更换形状后，可能需要重启桌面。关闭模块后，检查「运行诊断」中的恢复状态。
 - 在 HyperOS 4 上卸载 MonoIcon 或在 LSPosed 停用它之前，先在 MonoIcon 内关闭「启用模块」，等系统主题图标恢复。卸载会移除执行恢复操作的应用。
 - 动态壁纸无法读取时会使用上次读取的壁纸或默认背景。
 - 图标没有变化时，检查 LSPosed 作用域、Root 授权和「启用模块」。使用 HyperOS 4 时，也可以在「运行诊断」检查主题同步状态。 [排查与恢复](docs/hyperos4.md#troubleshooting)
-- 桌面启动失败时，启动保护可能自动停用模块。要重试，在主页重新开启「启用模块」，再点「重启作用域」。
+- HyperOS 3 桌面启动失败时，启动保护可能自动停用模块。要重试，在主页重新开启「启用模块」，再点「重启作用域」。
 
 ## 许可
 
@@ -53,22 +53,22 @@ MonoIcon gives HyperOS apps monochrome icons that match your wallpaper.
 
 You need Android 15 or newer, root access and an LSPosed build that supports API 102.
 
-HyperOS 3 keeps its Java launcher icon processing. On HyperOS 4, MonoIcon applies regular app icons through the system theme archive for the primary Android user. It automatically enables large icons on launcher builds with matching built-in support. [HyperOS 4 compatibility (Chinese)](docs/hyperos4.md#compatibility)
+HyperOS 3 uses Java launcher icon processing. On HyperOS 4, MonoIcon syncs system theme icons for the primary Android user, including static, single-app large icons already in use from the current theme. [HyperOS 4 compatibility (Chinese)](docs/hyperos4.md#compatibility)
 
 ### Installation and setup
 
 1. Download and install the APK from the release page.
-2. Enable MonoIcon in LSPosed and select both **System launcher** and **System UI**.
-3. Open MonoIcon and grant root access when prompted. **Enable module** is on by default. If the scoped processes need to load the module, restart them from the top-right power menu.
-4. Choose your colours and shape under **Icon style**. On HyperOS 4, regular icons sync automatically. Open **Diagnostics** to check progress.
+2. Enable MonoIcon in LSPosed. On HyperOS 4, select **System UI** and **System Framework**. On HyperOS 3, select **System launcher** and **System UI**.
+3. Open MonoIcon and grant root access when prompted. **Enable module** is on by default. To reload the launcher and System UI, open the top-right power menu. Select **Restart launcher and System UI** on HyperOS 4 or **Restart scope** on HyperOS 3.
+4. Choose your colours and shape under **Icon style**. On HyperOS 4, icons sync automatically. Open **Diagnostics** to check progress.
 
 ### Known limits and troubleshooting
 
-- Calendar and Clock use static artwork. Changing the shape of large icons may require a launcher restart. After turning off the module, check the restoration status in **Diagnostics**.
+- Regular Calendar and Clock icons use static artwork. Changing the shape of large icons may require a launcher restart. After turning off the module, check the restoration status in **Diagnostics**.
 - On HyperOS 4, turn off **Enable module** in MonoIcon and wait for your theme icons to be restored before uninstalling the app or disabling it in LSPosed. Uninstalling removes the app that performs the restoration.
 - If MonoIcon cannot read a live wallpaper, it uses the last retrieved wallpaper or the default background.
 - If icons stay unchanged, check the LSPosed scopes, root permission and **Enable module**. On HyperOS 4, also check the theme sync status under **Diagnostics**. [Troubleshooting and recovery (Chinese)](docs/hyperos4.md#troubleshooting)
-- Startup protection may disable the module if the launcher fails to start. To retry, turn **Enable module** back on and select **Restart scope**.
+- On HyperOS 3, startup protection may disable the module if the launcher fails to start. To retry, turn **Enable module** back on and select **Restart scope**.
 
 ### Licence
 

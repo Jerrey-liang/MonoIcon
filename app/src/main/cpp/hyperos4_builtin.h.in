@@ -1,7 +1,0 @@
-#pragma once
-
-namespace monoicon::profile {
-inline constexpr char kLargeIconFirmware[] = "@LARGE_ICON_FIRMWARE@";
-inline constexpr char kLargeIconDigest[] = "@LARGE_ICON_DIGEST@";
-inline constexpr char kLargeIconDescriptor[] = R"MONOICON(@LARGE_ICON_DESCRIPTOR@)MONOICON";
-}

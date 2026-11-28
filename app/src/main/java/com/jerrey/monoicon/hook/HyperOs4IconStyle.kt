@@ -6,7 +6,7 @@ import com.jerrey.monoicon.config.AppIconOverridesCodec
 import com.jerrey.monoicon.config.IconSourceStyle
 import java.security.MessageDigest
 
-/** Binds exported glyphs to settings that the native palette protocol cannot express. */
+/** Settings included in the theme renderer's cache signature. */
 internal data class HyperOs4IconStyle(
     val theme: String,
     val engine: String,

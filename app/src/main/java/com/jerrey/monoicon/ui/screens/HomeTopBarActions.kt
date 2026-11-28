@@ -26,8 +26,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.ui.LocalStrings
-import com.jerrey.monoicon.ui.XposedState
 import com.jerrey.monoicon.ui.restartScopedApps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,7 +43,7 @@ import top.yukonga.miuix.kmp.icon.extended.Close2
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** KernelSU's power menu, applied to MonoIcon's actual hooked processes. */
+/** KernelSU's power menu for restarting the launcher and SystemUI. */
 @Composable
 internal fun HomeTopBarActions(modifier: Modifier = Modifier) {
     val service by ConfigManager.serviceState.collectAsState()
@@ -56,8 +56,9 @@ internal fun HomeTopBarActions(modifier: Modifier = Modifier) {
     LaunchedEffect(service) {
         if (service == null) showMenu = false
     }
+    val restartBoth = if (HyperOs4Environment.isVersion4()) strings.restartLauncherAndSystemUi else strings.scopeRestart
     val options = listOf(
-        strings.scopeRestart to XposedState.REQUIRED_SCOPE,
+        restartBoth to listOf("com.miui.home", "com.android.systemui"),
         "${strings.restart} ${strings.scopeAppLauncher}" to listOf("com.miui.home"),
         "${strings.restart} ${strings.scopeAppSystemUi}" to listOf("com.android.systemui"),
     )
@@ -69,7 +70,7 @@ internal fun HomeTopBarActions(modifier: Modifier = Modifier) {
     ) {
         Icon(
             imageVector = MiuixIcons.Regular.Close2,
-            contentDescription = if (busy) strings.restarting else strings.scopeRestart,
+            contentDescription = if (busy) strings.restarting else restartBoth,
             tint = MiuixTheme.colorScheme.onBackground.copy(alpha = if (enabled) 1f else 0.5f),
         )
     }

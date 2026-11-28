@@ -196,8 +196,4 @@ bool Begin() {
     gAllowed.store(true, std::memory_order_release);
     return true;
 }
-
-bool IsBlocked() {
-    return gOwner.load(std::memory_order_acquire) == getpid() && !gAllowed.load(std::memory_order_acquire);
-}
 } // namespace monoicon::safety

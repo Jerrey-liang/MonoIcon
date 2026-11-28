@@ -93,12 +93,7 @@ android {
 
     defaultConfig {
         ndk {
-            // The HyperOS 4 HYOS launcher ships arm64-only libapp.so /
-            // libapp_launcher.so, and LSPosed's native_init payload therefore only
-            // builds for arm64-v8a. Filtering here keeps the requested ABI set and
-            // the packaged native set identical, so native_init.list never names a
-            // library that is missing for the running ABI. The older Java launcher
-            // and SystemUI paths are 64-bit only as well.
+            // The Java launcher loads its startup guard through JNI.
             abiFilters += "arm64-v8a"
         }
     }

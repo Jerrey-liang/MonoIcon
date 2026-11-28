@@ -60,7 +60,7 @@ internal fun ConfigurationRuntimeContent(
         ArrowPreference(
             title = word("刷新运行信息", "Refresh runtime information"),
             summary = if (loading) word("正在请求宿主进程状态…", "Requesting host process reports…")
-                else word("逐点报告来自桌面和 SystemUI 的实际运行进程", "Point reports come from the actual launcher and SystemUI processes"),
+                else word("查看当前运行的 Hook 安装与触发情况", "See which hooks are installed and which have run"),
             startAction = { Icon(Icons.Rounded.Refresh, null, Modifier.padding(end = 6.dp),
                 tint = MiuixTheme.colorScheme.onBackground) },
             enabled = !loading,
@@ -95,14 +95,6 @@ internal fun ConfigurationRuntimeContent(
                     onClick = onAcceptTheme,
                 )
             }
-            BasicComponent(
-                title = word("大图标支持", "Large icon support"),
-                summary = when (runtime.nativeExtensionMatched) {
-                    true -> word("当前桌面匹配内置大图标支持", "This launcher matches built-in large icon support")
-                    false -> word("当前桌面未匹配内置大图标支持", "This launcher has no matching built-in large icon support")
-                    null -> word("尚未确认桌面兼容性", "Launcher compatibility pending")
-                },
-            )
         }
     }
 
@@ -117,12 +109,11 @@ internal fun ConfigurationRuntimeContent(
                         DateFormat.getDateTimeInstance().format(Date(process.capturedAtMillis)))
                     if (process.detail.isNotBlank()) append("\n${process.detail}")
                 })
-            if (process.fields.isNotEmpty()) DiagnosticFields(process.fields, chinese)
             process.points.forEach { point ->
                 val status = (if (!process.current && point.status.lowercase() != "unknown")
                     word("历史：", "Previous: ") else "") + hookStatusText(point.status, point.hit, chinese)
-                val bad = point.status.lowercase() in setOf("failed", "hook-failed", "backup-missing", "mismatch", "read-failed", "symbol-missing")
-                val successful = point.status.lowercase() in setOf("installed", "verified", "alias")
+                val bad = point.status.equals("failed", ignoreCase = true)
+                val successful = point.status.equals("installed", ignoreCase = true)
                 val color = when {
                     !process.current -> MiuixTheme.colorScheme.onSurfaceVariantSummary
                     bad -> MiuixTheme.colorScheme.error
@@ -132,19 +123,12 @@ internal fun ConfigurationRuntimeContent(
                 Column(Modifier.testTag("configuration-hook-${process.name}-${point.group}-${point.id}")) {
                     BasicComponent(title = point.id,
                         summary = buildString {
-                            append(when (point.group) {
-                                "startup-hook" -> word("启动", "Startup")
-                                "libc-hook" -> word("大图标文件读取", "Large icon file access")
-                                else -> point.group
-                            })
+                            append(point.group)
                             if (point.member.isNotBlank() && point.member != point.id) append("\n${point.member}")
                             if (point.detail.isNotBlank()) append("\n${point.detail}")
                         },
                         endActions = { Text(status, color = color, style = MiuixTheme.textStyles.footnote1) })
-                    val nativePoint = point.group == "startup-hook" || point.group == "libc-hook"
-                    val fields = if (nativePoint && point.fields.none { it.first == "target" })
-                        point.fields + ("target" to word("未解析", "Unresolved")) else point.fields
-                    if (fields.isNotEmpty()) DiagnosticFields(fields, chinese)
+                    if (point.fields.isNotEmpty()) DiagnosticFields(point.fields, chinese)
                 }
             }
         }
@@ -177,26 +161,12 @@ private fun DiagnosticFields(fields: List<Pair<String, String>>, chinese: Boolea
 }
 
 private fun fieldLabel(key: String, chinese: Boolean): String {
-    if (!chinese) return when (key) {
-        "iconsEnabled" -> "Large icon file access enabled"
-        "profileId" -> "Large icon configuration"
-        "profileDigest" -> "Large icon configuration digest"
-        "requestedProfileDigest" -> "Requested large icon configuration digest"
+    if (!chinese) return key
+    return when (key) {
+        "required" -> "必需点位"
+        "firstHitElapsedMs" -> "首次触发（开机毫秒）"
         else -> key
     }
-    if (" / " in key) return key.substringBefore(" / ") + " / " + fieldLabel(key.substringAfter(" / "), true)
-    return mapOf("library" to "动态库", "offset" to "函数偏移",
-        "target" to "目标地址", "loadBias" to "加载基址", "original" to "原函数",
-        "required" to "必需点位", "installerStopped" to "安装器已停止", "iconsEnabled" to "大图标文件读取已启用",
-        "requestedProfileDigest" to "请求的大图标配置摘要",
-        "reason" to "运行结果原因",
-        "replacement" to "拦截函数", "aliasOf" to "共用点位",
-        "originPid" to "安装进程 PID", "resultCode" to "安装结果码", "profileId" to "运行的大图标配置",
-        "profileDigest" to "大图标配置摘要", "phase" to "运行阶段", "result" to "运行结果码",
-        "startTicks" to "进程启动标识", "apiVersion" to "Native API 版本", "hookAvailable" to "Hook API 可用",
-        "unhookAvailable" to "Unhook API 可用", "spawner" to "Spawner 初始化", "child" to "子进程初始化",
-        "sequence" to "初始化序号", "entryPoint" to "已解析入口地址", "path" to "映射路径",
-        "fileOffset" to "文件映射偏移", "inode" to "文件 inode", "firstHitElapsedMs" to "首次触发（开机毫秒）")[key] ?: key
 }
 
 internal fun hookStatusText(status: String, hit: Boolean?, chinese: Boolean): String {
@@ -207,16 +177,8 @@ internal fun hookStatusText(status: String, hit: Boolean?, chinese: Boolean): St
             false -> word("已安装，尚未触发", "Installed, awaiting first hit")
             null -> word("已安装", "Installed")
         }
-        "verified" -> word("已验证", "Verified")
-        "alias" -> word("共用已安装拦截", "Installed alias")
-        "failed", "hook-failed" -> word("安装失败", "Installation failed")
-        "symbol-missing" -> word("符号未找到", "Symbol missing")
-        "backup-missing" -> word("原函数缺失", "Original function missing")
-        "mismatch" -> word("校验不一致", "Verification mismatch")
-        "read-failed" -> word("读取失败", "Read failed")
+        "failed" -> word("安装失败", "Installation failed")
         "skipped" -> word("未启用 / 已跳过", "Disabled / skipped")
-        "blocked" -> word("已阻断 / 未通过验证", "Blocked / unverified")
-        "not-attempted" -> word("未尝试安装", "Not attempted")
         else -> word("未知 / 未上报", "Unknown / unreported")
     }
 }

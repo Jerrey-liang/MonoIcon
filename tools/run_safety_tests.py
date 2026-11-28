@@ -4,9 +4,25 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
-from run_profile_tests import compiler_path
+
+def compiler_path(requested: str | None) -> Path:
+    if requested:
+        found = shutil.which(requested) or (requested if Path(requested).is_file() else None)
+        if found:
+            return Path(found).resolve()
+        raise SystemExit(f"C++ compiler not found: {requested}")
+    for name in ("g++", "clang++"):
+        found = shutil.which(name)
+        if found:
+            return Path(found).resolve()
+    if os.name == "nt":
+        codeblocks = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "CodeBlocks/MinGW/bin/g++.exe"
+        if codeblocks.is_file():
+            return codeblocks
+    raise SystemExit("Install a host C++17 compiler or set CXX.")
 
 
 def main() -> None:

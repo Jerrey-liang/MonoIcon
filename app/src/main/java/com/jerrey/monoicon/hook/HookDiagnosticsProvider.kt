@@ -31,7 +31,6 @@ class HookDiagnosticsProvider : ContentProvider() {
             throw SecurityException("Diagnostics caller does not own this scope/process")
         }
         require(snapshot.processName == snapshot.packageName || snapshot.processName.startsWith("${snapshot.packageName}:"))
-        require(snapshot.mode == "java" || snapshot.mode == "native")
         require(snapshot.startedElapsedMs > 0 && snapshot.capturedElapsedMs >= snapshot.startedElapsedMs)
         val identity = Binder.clearCallingIdentity()
         try {

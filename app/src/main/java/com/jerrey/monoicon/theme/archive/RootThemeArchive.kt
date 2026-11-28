@@ -20,7 +20,8 @@ object RootThemeArchive {
         val answer = try {
             require(Process.myUid() == 0)
             val verb = args.single()
-            require(verb in setOf("full", "update", "restore", "status", "accept", "recoverable", "recover"))
+            require(verb in setOf("full", "update", "restore", "status", "accept", "recoverable", "recover",
+                "large-list", "large-apply", "large-restore"))
             val themeDir = File("/data/system/theme")
             require(themeDir.canonicalFile == themeDir && themeDir.isDirectory) { "HyperOS theme directory unavailable" }
             val stateDir = File("/data/system/monoicon-theme")
@@ -36,12 +37,18 @@ object RootThemeArchive {
             require(!Files.exists(lock.toPath(), NOFOLLOW_LINKS) || Files.isRegularFile(lock.toPath(), NOFOLLOW_LINKS))
             RandomAccessFile(lock, "rw").use { file ->
                 file.channel.lock().use {
+                    try {
+                        retireLegacyLauncherIcons()
+                    } catch (e: Exception) {
+                        println(ThemeArchiveInstaller.WARNING + "Could not retire previous launcher icons: " + e.javaClass.simpleName)
+                    }
                     // Persist the directory entry before the first journal can protect a rename.
                     if (!File(stateDir, "state-v1").exists()) syncDirectory(checkNotNull(stateDir.parentFile))
                     val store = ThemeArchiveStore(File(themeDir, "icons"), stateDir, ::preserveAttributes,
                         ::syncDirectory, { refreshIcons(stateDir) }, ::readDefaultIcon, ::writeDefaultIcon)
                     store.cleanInterruptedWork()
                     when (verb) {
+                        "large-list", "large-apply", "large-restore" -> largeIcons(verb, stateDir, store)
                         "status" -> store.status().name
                         "accept" -> {
                             store.acceptCurrentTheme()
@@ -82,6 +89,37 @@ object RootThemeArchive {
 
     private fun encode(result: ThemeArchiveResult) =
         "${if (result.changed) 1 else 0} ${if (result.refreshSucceeded) 1 else 0}"
+
+    private fun largeIcons(verb: String, stateDir: File, archive: ThemeArchiveStore): String {
+        val desktop = File(LargeIconResources.DESKTOP)
+        val store = LargeIconFileStore(desktop, File(stateDir, "large-files"), ::preserveAttributes, ::syncDirectory)
+        if (verb == "large-restore") {
+            store.restoreExcept(emptySet())
+        } else {
+            if (archive.status() != ThemeArchiveStatus.ACTIVE) throw ThemeArchiveConflictException()
+            val catalog = LargeIconResources.scan(desktop)
+            if (verb == "large-list") {
+                catalog.forEach { println(ThemeArchiveInstaller.ASSET + LargeIconPatch.describe(it)) }
+                return catalog.size.toString()
+            }
+            // Private fixed scratch directory, shared only by serialized root operations.
+            val work = File(stateDir, "large-patch")
+            if (work.exists()) check(work.deleteRecursively())
+            check(work.mkdir())
+            try {
+                LargeIconPatch.apply(System.`in`, catalog, store, work) {
+                    if (archive.status() != ThemeArchiveStatus.ACTIVE) throw ThemeArchiveConflictException()
+                    check(catalog == LargeIconResources.scan(desktop)) { "Large-icon selection changed" }
+                }
+            } finally {
+                work.deleteRecursively()
+            }
+        }
+        val pending = store.needsRefresh()
+        val refreshed = !pending || refreshIcons(stateDir)
+        if (pending && refreshed) store.markRefreshed()
+        return encode(ThemeArchiveResult(pending, refreshed))
+    }
 
     // HyperOS Theme Manager uses 1 for a third-party icon module. The launcher can then
     // retain each PNG's own alpha outline when handing the returning app back to its icon.

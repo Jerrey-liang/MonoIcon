@@ -5,5 +5,4 @@ namespace monoicon::safety {
 // No spawner or secondary process can arm this guard. A false result remains
 // latched in this process, even after an explicit retry token is published.
 bool Begin();
-bool IsBlocked();
 }

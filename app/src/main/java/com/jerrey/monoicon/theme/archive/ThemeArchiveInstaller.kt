@@ -27,13 +27,29 @@ object ThemeArchiveInstaller {
     fun canRecoverMissingOriginal(context: Context): Boolean = call(context, "recoverable") == "1"
     fun recoverMissingOriginal(context: Context): ThemeArchiveResult = result(call(context, "recover"))
 
+    internal fun largeIconCatalog(context: Context): List<LargeIconResources.Asset> {
+        val assets = mutableListOf<LargeIconResources.Asset>()
+        val count = call(context, "large-list", inspect = { file ->
+            check(file.length() <= 4L * 1024 * 1024)
+            file.useLines { lines -> lines.filter { it.startsWith(ASSET) }.forEach {
+                check(assets.size < LargeIconResources.MAX_FILES)
+                assets += LargeIconPatch.parse(it.removePrefix(ASSET))
+            } }
+        }).toInt()
+        check(count == assets.size)
+        return assets
+    }
+
+    internal fun applyLargeIcons(context: Context, patch: File) = result(call(context, "large-apply", patch))
+    internal fun restoreLargeIcons(context: Context) = result(call(context, "large-restore"))
+
     private fun result(value: String): ThemeArchiveResult {
         val flags = value.split(' ')
         if (flags.size != 2 || flags.any { it != "0" && it != "1" }) throw IOException("Invalid theme result")
         return ThemeArchiveResult(flags[0] == "1", flags[1] == "1")
     }
 
-    private fun call(context: Context, verb: String, patch: File? = null): String {
+    private fun call(context: Context, verb: String, patch: File? = null, inspect: ((File) -> Unit)? = null): String {
         if (Process.myUid() / 100000 != 0) throw IOException("The global system theme belongs to Android user 0")
         val apk = context.applicationInfo.sourceDir
         require(apk.startsWith("/data/app/") && apk.endsWith("/base.apk") && File(apk).canonicalPath == apk)
@@ -58,6 +74,7 @@ object ThemeArchiveInstaller {
                 val detail = reply?.removePrefix("ERROR ") ?: lines.trim().takeLast(240)
                 throw IOException("Root theme operation failed (exit $code) $detail".trimEnd())
             }
+            inspect?.invoke(output)
             return reply
         } finally {
             output.delete()
@@ -85,4 +102,5 @@ object ThemeArchiveInstaller {
     private const val ENTERED = "MONOICON_THEME_ROOT_ENTERED"
     internal const val MARKER = "MONOICON_THEME_V1 "
     internal const val WARNING = "MONOICON_THEME_WARNING "
+    internal const val ASSET = "MONOICON_LARGE_ASSET "
 }

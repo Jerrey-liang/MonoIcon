@@ -10,7 +10,6 @@
 - [适配范围](hyperos4.md#compatibility)
 
 <a id="device"></a>
-<a id="large-icons"></a>
 
 - [启用与检查](hyperos4.md#device)
 
@@ -28,5 +27,6 @@
 <a id="handoff"></a>
 <a id="sharing"></a>
 <a id="source-index"></a>
+<a id="large-icons"></a>
 
-- [大图标技术参考](HyperOS4-profile-reference.md)
+- [大图标说明](hyperos4.md#large-icons)

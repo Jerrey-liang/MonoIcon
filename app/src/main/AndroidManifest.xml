@@ -185,7 +185,7 @@
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <service
-            android:name=".hook.HyperOs4RefreshJob"
+            android:name=".hook.LauncherSafetyJob"
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 

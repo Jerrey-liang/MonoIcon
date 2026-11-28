@@ -24,7 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The native-launcher exporter uses the same getters as in-process icon rendering. */
+/** The theme renderer uses the same getters as in-process icon rendering. */
 @RunWith(AndroidJUnit4::class)
 class ConfigManagerUiBridgeInstrumentedTest {
     private lateinit var local: SharedPreferences
@@ -40,7 +40,7 @@ class ConfigManagerUiBridgeInstrumentedTest {
         remote = context.getSharedPreferences("config_bridge_remote_test", Context.MODE_PRIVATE)
         local.edit().clear().commit()
         remote.edit().clear().commit()
-        // Application registers the native publisher in production. Preference
+        // Application registers theme synchronization in production. Preference
         // assertions must never publish the test values to the user's launcher.
         savedListeners = configListeners().toSet()
         configListeners().clear()

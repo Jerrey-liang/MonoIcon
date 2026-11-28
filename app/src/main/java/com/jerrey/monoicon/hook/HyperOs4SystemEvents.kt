@@ -49,7 +49,10 @@ internal object HyperOs4SystemEvents {
     fun register(context: Context) {
         if (Application.getProcessName() != "com.android.systemui" || !registered.compareAndSet(false, true)) return
         val app = context.applicationContext ?: context
-        LauncherSafety.launcherUid(app)?.let { HyperOs4LauncherMonitor.start(app, it) }
+        if (!HyperOs4Environment.isVersion4()) {
+            LauncherSafety.launcherUid(app)?.let { LauncherSafetyMonitor.start(app, it) }
+            return
+        }
         if (!HyperOs4Environment.isSupported(app)) return
 
         val handler = Handler(Looper.getMainLooper())
@@ -98,29 +101,29 @@ internal object HyperOs4SystemEvents {
 /** The manifest restricts delivery to privileged system senders. */
 class HyperOs4RefreshReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != HyperOs4LauncherMonitor.ACTION_RESTARTED) {
+        if (intent.action != LauncherSafetyMonitor.ACTION_RESTARTED) {
             val reason = intent.action ?: HyperOs4ThemeSync.SCAN
             if (reason in setOf(HyperOs4ThemeSync.SCAN, HyperOs4ThemeSync.STYLE, HyperOs4ThemeSync.WALLPAPER,
-                    HyperOs4ThemeSync.CHECK, HyperOs4ThemeSync.VALIDATION, HyperOs4ThemeSync.PACKAGE)) {
+                    HyperOs4ThemeSync.CHECK, HyperOs4ThemeSync.VALIDATION, HyperOs4ThemeSync.PACKAGE, HyperOs4ThemeSync.LARGE)) {
                 HyperOs4ThemeSync.enqueue(context, reason, intent.getStringExtra("package"))
-                if (reason != HyperOs4ThemeSync.CHECK && reason != HyperOs4ThemeSync.VALIDATION) HyperOs4LargeIconPublisher.publish(context)
             }
             return
         }
+        if (HyperOs4Environment.isVersion4()) return
         val extras = android.os.PersistableBundle().apply { putInt("launcher_pid", intent.getIntExtra("launcher_pid", 0)) }
         val scheduler = context.getSystemService(JobScheduler::class.java)
-        scheduler.schedule(JobInfo.Builder(0x4d494350, ComponentName(context, HyperOs4RefreshJob::class.java))
+        scheduler.schedule(JobInfo.Builder(0x4d494350, ComponentName(context, LauncherSafetyJob::class.java))
             .setExtras(extras).setOverrideDeadline(0).build())
     }
 }
 
-/** Separate from the theme job so optional launcher work cannot hold up ordinary icons. */
-class HyperOs4RefreshJob : JobService() {
+/** Reads the startup guard of the Java launcher after a restart. */
+class LauncherSafetyJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
+        if (HyperOs4Environment.isVersion4()) return false
         Thread({
             try {
                 LauncherSafety.synchronizeStartup(applicationContext, params.extras.getInt("launcher_pid"))
-                HyperOs4LargeIconPublisher.publish(applicationContext)
                 jobFinished(params, false)
             } catch (e: Exception) {
                 logw("MonoIcon.Launcher", "Startup check failed: ${e.message}")

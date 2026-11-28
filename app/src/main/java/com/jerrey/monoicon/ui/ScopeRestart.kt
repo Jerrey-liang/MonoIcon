@@ -2,7 +2,7 @@ package com.jerrey.monoicon.ui
 
 import android.content.Context
 import android.content.Intent
-import com.jerrey.monoicon.hook.HyperOs4LargeIconPublisher
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.logging.logw
@@ -12,27 +12,21 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "MonoIcon.ScopeRestart"
 
 /**
- * Restarts every app in the module's Xposed scope (Phase 6.5, used by the icon-style
- * page's "重启作用域" action): the HyperOS launcher and SystemUI are persistent
- * processes, so killing them makes the framework bring them straight back — with the
- * hooks reloaded and the new configuration applied.
+ * Restarts the selected launcher and SystemUI processes. Android restarts these persistent
+ * apps with the current module configuration.
  *
  * `killall` is used instead of `am force-stop` because force-stop marks the package as
  * *stopped*, which would leave a scoped system app dead until it is launched again.
  *
- * @param packages scope packages to restart (normally [XposedState.REQUIRED_SCOPE]).
+ * @param packages system apps to restart.
  * @return true when the scope was restarted (or at least killed).
  */
 fun restartScopedApps(context: Context, packages: List<String>): Boolean {
     val scope = packages.filter { it.isNotBlank() }.distinct()
     if (scope.isEmpty()) return false
-    if ("com.miui.home" in scope && !HyperOs4LargeIconPublisher.flushBeforeRestart(context)) {
-        logw(TAG, "Optional large icons could not refresh before the scope restart")
-    }
-
     val allowed = scope.filter { it in listOf("com.miui.home", "com.android.systemui") }
     if (allowed.size != scope.size) return false
-    val prepare = if ("com.miui.home" in scope) {
+    val prepare = if ("com.miui.home" in scope && !HyperOs4Environment.isVersion4()) {
         LauncherSafety.expectedRestartScript(LauncherSafety.launcherUid(context) ?: return false)
     } else "true"
     val killAll = scope.joinToString("\n") {

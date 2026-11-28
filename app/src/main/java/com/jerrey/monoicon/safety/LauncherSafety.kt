@@ -3,8 +3,7 @@ package com.jerrey.monoicon.safety
 import android.content.Context
 import android.content.pm.PackageManager
 import com.jerrey.monoicon.config.ConfigManager
-import com.jerrey.monoicon.hook.HyperOs4LargeIconPublisher
-import com.jerrey.monoicon.hook.HyperOs4Storage
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.logging.logw
 import java.io.File
 import java.util.UUID
@@ -34,19 +33,17 @@ internal object LauncherSafety {
         return ConfigManager.isSafetyBlockedFromUi()
     }
 
-    fun refreshAndPublish(context: Context) {
+    fun refresh(context: Context) {
+        if (HyperOs4Environment.isVersion4()) return
         val app = context.applicationContext
-        worker.execute {
-            synchronize(app)
-            HyperOs4LargeIconPublisher.publish(app)
-        }
+        worker.execute { synchronize(app) }
     }
 
     /** Called off the UI thread on app resume and every protected launcher-start wakeup. */
     @Synchronized fun synchronize(context: Context): Boolean {
         readSucceeded = false
         val uid = launcherUid(context) ?: return ConfigManager.isSafetyBlockedFromUi()
-        val directory = HyperOs4Storage.directory(uid)
+        val directory = storageDirectory(uid)
         val result = root(context, """
             set -e
             if [ -e '$directory/monoicon_safety_state.txt' ]; then
@@ -79,10 +76,16 @@ internal object LauncherSafety {
 
     /** The existing master switch is the sole explicit recovery action; no safety switch exists. */
     @Synchronized fun enable(context: Context) {
+        if (HyperOs4Environment.isVersion4()) {
+            // A user retry after upgrading may release the previous launcher's persisted latch.
+            if (ConfigManager.isSafetyBlockedFromUi()) ConfigManager.setSafetyBlocked(false)
+            ConfigManager.setEnabled(true)
+            return
+        }
         synchronize(context)
         if (ConfigManager.isSafetyBlockedFromUi()) {
             val uid = checkNotNull(launcherUid(context)) { "Launcher is unavailable" }
-            val directory = HyperOs4Storage.directory(uid)
+            val directory = storageDirectory(uid)
             val token = UUID.randomUUID().toString().replace("-", "")
             // An explicit retry repairs corruption to a canonical BLOCKED record,
             // then publishes the fresh retry token. It never deletes an armed record.
@@ -113,13 +116,15 @@ internal object LauncherSafety {
         ConfigManager.setEnabled(true)
     }
 
+    private fun storageDirectory(uid: Int) = "/data/user_de/${uid / 100_000}/com.miui.home/files"
+
     fun launcherUid(context: Context): Int? = runCatching {
         context.packageManager.getApplicationInfo("com.miui.home", PackageManager.ApplicationInfoFlags.of(0)).uid
     }.getOrNull()
 
     /** Include immediately before our own kill. It cannot release an existing safety latch. */
     fun expectedRestartScript(uid: Int): String {
-        val directory = HyperOs4Storage.directory(uid)
+        val directory = storageDirectory(uid)
         return """
             monoicon_expect_restart() {
                 safety='$directory/monoicon_safety_state.txt'

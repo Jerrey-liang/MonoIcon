@@ -5,6 +5,7 @@ import android.content.pm.PackageInfo
 import android.content.res.Configuration
 import android.os.LocaleList
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.logging.loge
 import com.jerrey.monoicon.logging.logi
 import com.jerrey.monoicon.logging.logw
@@ -54,7 +55,9 @@ data class XposedState(
         )
 
         /** Packages MonoIcon needs to be scoped to. */
-        val REQUIRED_SCOPE = listOf("com.miui.home", "com.android.systemui")
+        val requiredScope: List<String>
+            get() = if (HyperOs4Environment.isVersion4()) listOf("com.android.systemui", "system")
+                else listOf("com.miui.home", "com.android.systemui")
 
         /** Reads the current status from the bound framework service. */
         fun snapshot(service: XposedService? = ConfigManager.xposedService()): XposedState {
@@ -103,7 +106,7 @@ data class ScopeApp(
 
         /** `versionName` of the installed [pkg], or null when unavailable. */
         private fun installedVersion(context: Context, pkg: String): String? = try {
-            val info: PackageInfo = context.packageManager.getPackageInfo(pkg, 0)
+            val info: PackageInfo = context.packageManager.getPackageInfo(if (pkg == "system") "android" else pkg, 0)
             // Prefer the human-readable version, falling back to the monotonically
             // increasing versionCode when an app ships no versionName.
             info.versionName?.takeIf { it.isNotBlank() }

@@ -1,7 +1,6 @@
 package com.jerrey.monoicon.hook
 
 import android.content.Context
-import android.os.FileObserver
 import android.os.Handler
 import android.os.HandlerThread
 import com.jerrey.monoicon.logging.logw
@@ -13,8 +12,7 @@ import java.io.File
 /** system_server can see theme replacements, including removal during rights validation. */
 internal object ThemeArchiveObserver {
     private val directory = File("/data/system/theme")
-    private var parentObserver: FileObserver? = null
-    private var iconsObserver: FileObserver? = null
+    private var subscription: ThemeDirectorySubscription? = null
 
     private val icons = File(directory, "icons")
     @Volatile private var rejectedDirectoryInode = -1L
@@ -25,16 +23,23 @@ internal object ThemeArchiveObserver {
         val thread = HandlerThread("MonoIcon-ThemeEvents", android.os.Process.THREAD_PRIORITY_BACKGROUND)
         thread.start()
         val handler = Handler(thread.looper)
-        val checkArchive = Runnable {
+        fun wake(reason: String) {
             runCatching {
                 val activityThread = Class.forName("android.app.ActivityThread")
                 val instance = activityThread.getMethod("currentActivityThread").invoke(null)
                 val system = activityThread.getMethod("getSystemContext").invoke(instance) as Context
-                val reason = if (SystemClock.elapsedRealtime() - lastRejected < 10_000 &&
-                    runCatching { android.system.Os.stat(directory.path).st_ino }.getOrNull() == rejectedDirectoryInode)
-                    HyperOs4ThemeSync.VALIDATION else HyperOs4ThemeSync.CHECK
                 HyperOs4SystemEvents.wake(system, reason)
             }.onFailure { logw("MonoIcon.Theme", "Theme observer delivery failed: ${it.message}") }
+        }
+        val checkArchive = Runnable {
+            val rejected = SystemClock.elapsedRealtime() - lastRejected < 10_000 &&
+                runCatching { android.system.Os.stat(directory.path).st_ino }.getOrNull() == rejectedDirectoryInode
+            wake(if (rejected) HyperOs4ThemeSync.VALIDATION else HyperOs4ThemeSync.CHECK)
+        }
+        val checkLarge = Runnable { wake(HyperOs4ThemeSync.LARGE) }
+        fun largeChanged() {
+            handler.removeCallbacks(checkLarge)
+            handler.postDelayed(checkLarge, 900)
         }
         fun changed() {
             handler.removeCallbacks(checkArchive)
@@ -62,23 +67,11 @@ internal object ThemeArchiveObserver {
                 }
             }
         }.onFailure { logw("MonoIcon.Theme", "Vendor validation reporting unavailable: ${it.message}") }
-        fun watchIcons() {
-            iconsObserver?.stopWatching()
-            iconsObserver = object : FileObserver(directory, MOVED_TO or MOVED_FROM or CREATE or DELETE or CLOSE_WRITE) {
-                override fun onEvent(event: Int, path: String?) {
-                    if (path == "icons") changed()
-                }
-            }.also { it.startWatching() }
-        }
         handler.post {
             runCatching {
-                if (parentObserver != null) return@runCatching
-                parentObserver = object : FileObserver(directory.parentFile!!, MOVED_TO or CREATE or MOVED_FROM or DELETE) {
-                    override fun onEvent(event: Int, path: String?) {
-                        if (path == "theme") handler.post { watchIcons(); changed() }
-                    }
-                }.also { it.startWatching() }
-                watchIcons()
+                if (subscription != null) return@runCatching
+                subscription = ThemeDirectorySubscription(directory, handler, ::changed, ::largeChanged)
+                    .also(ThemeDirectorySubscription::start)
             }.onFailure { logw("MonoIcon.Theme", "Theme observer unavailable: ${it.message}") }
         }
     }

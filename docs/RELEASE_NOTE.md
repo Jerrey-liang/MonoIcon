@@ -3,9 +3,9 @@
 ## 未发布 / Unreleased
 
 - **HyperOS 4 普通应用图标**通过 Root 写入系统主题归档。更换系统主题后，可在「运行诊断」将 MonoIcon 应用到当前主题。系统移除归档且备份仍有效时，可以停用 MonoIcon 并恢复原图标。
-- **HyperOS 4 大图标**只在匹配内置支持的桌面上自动启用。旧版 Profile 导入、选择和手动确认入口已移除。 [使用与兼容性](hyperos4.md)
+- **HyperOS 4 大图标**使用系统主题资源，支持桌面正在使用的 2×1、1×2 和 2×2 单应用静态图标。移除了 NativeHook 和对应的 Profile。 [使用与兼容性](hyperos4.md#large-icons)
 - **Regular app icons on HyperOS 4** use the system theme archive, which MonoIcon updates with root access. After switching themes, use **Diagnostics** to apply MonoIcon to the current theme. If the system removes the archive and a valid backup remains, you can turn off MonoIcon and restore the original icons.
-- **Large icons on HyperOS 4** activate automatically when built-in support matches. Profile import, selection and manual approval have been removed. [Setup and compatibility (Chinese)](hyperos4.md)
+- **Large icons on HyperOS 4** use system theme resources for static, single-app 2×1, 1×2 and 2×2 icons already in use on the home screen. NativeHook and its profiles have been removed. [Setup and compatibility (Chinese)](hyperos4.md#large-icons)
 
 ## 2.4.0
 

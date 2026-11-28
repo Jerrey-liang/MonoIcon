@@ -10,15 +10,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /** SystemUI survives launcher restarts, including restarts outside our settings UI. */
-internal object HyperOs4LauncherMonitor {
-    const val ACTION_RESTARTED = "com.jerrey.monoicon.action.HYPEROS4_LAUNCHER_RESTARTED"
+internal object LauncherSafetyMonitor {
+    const val ACTION_RESTARTED = "com.jerrey.monoicon.action.LAUNCHER_SAFETY_STARTED"
 
     fun start(context: Context, launcherUid: Int) {
         val activityManager = context.getSystemService(ActivityManager::class.java) ?: return
         // Keep Binder queries off SystemUI's main thread. This is installed only
-        // once for either launcher generation by HyperOs4SystemEvents.register().
+        // once on systems that use the Java launcher hooks.
         val worker = Executors.newSingleThreadScheduledExecutor { task ->
-            Thread(task, "MonoIcon-Hos4Launcher").apply { isDaemon = true }
+            Thread(task, "MonoIcon-LauncherSafety").apply { isDaemon = true }
         }
         var deliveredPid = 0
         var reportedFailure = false
@@ -36,7 +36,7 @@ internal object HyperOs4LauncherMonitor {
                     deliveredPid = 0
                 } else if (pid != deliveredPid) {
                     // The receiver is protected by STATUS_BAR_SERVICE. The job
-                    // checks the safety latch before any native ACK/icon refresh.
+                    // reads the startup guard written by the new launcher process.
                     context.sendBroadcast(Intent(ACTION_RESTARTED)
                         .putExtra("launcher_pid", pid)
                         .setComponent(ComponentName("com.jerrey.monoicon", HyperOs4RefreshReceiver::class.java.name))
@@ -45,7 +45,7 @@ internal object HyperOs4LauncherMonitor {
                 }
                 reportedFailure = false
             } catch (failure: Exception) {
-                if (!reportedFailure) logw("MonoIcon.HyperOS4", "launcher observer failed: ${failure.message}")
+                if (!reportedFailure) logw("MonoIcon.Safety", "launcher observer failed: ${failure.message}")
                 reportedFailure = true
             }
         }, 0, 2, TimeUnit.SECONDS)
