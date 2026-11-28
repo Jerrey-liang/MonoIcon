@@ -1,61 +1,5 @@
-// MonoIcon's LSPosed native_init payload for the dex-less HyperOS 4 launcher.
-//
-// Why this exists
-// ---------------
-// On HyperOS 4 the launcher is not an ART process. `hyos_spawner`
-// (/system_ext/bin/hyos_spawner) is exec'd as `usap64`, and it spawns
-// `com.miui.home` without a Java runtime, so LSPosed's Java module callbacks
-// (onModuleLoaded / onPackageReady / onPackageLoaded) and `System.loadLibrary`
-// from Kotlin can never run there. Verified on the test device: the launcher
-// process maps no `app_process`, no `libart`, no `libdexfile`, and its parent is
-// the native spawner rather than zygote.
-//
-// LSPosed's `META-INF/xposed/native_init.list` mechanism is the supported way
-// into those processes. LSPosed loads each listed library and calls the exported
-// `native_init(entries)`. That call happens in the root spawner (cmdline
-// `usap64`, executable /system_ext/bin/hyos_spawner) before it forks the package
-// child, and the value returned from `native_init` becomes the module's
-// on-library-loaded callback for later `dlopen`/`android_dlopen_ext` calls.
-//
-// The chain this payload uses
-// ---------------------------
-//   native_init(entries)                     <- in the HYOS spawner process
-//     -> return OnLibraryLoaded               <- LSPosed arms it as the hook
-//   dlopen("libapp_launcher.so")              <- spawner loads the launcher entry
-//     -> OnLibraryLoaded(name, handle)
-//        -> dlsym(handle, "app_entry_point")  <- the launcher's native entry point
-//   dlopen("libapp.so")                       <- Dart AOT snapshot
-//     -> OnLibraryLoaded(name, handle)
-//
-// Because the spawner can preload those images *before* LSPosed invokes
-// `native_init`, the callback only sees later loads; the already-loaded set is
-// replayed with `RTLD_NOLOAD`, which never causes a new dependency to load.
-//
-// Evidence sinks
-// --------------
-// Two independent records are written on the device:
-//   1. logcat, tag `MonoIcon.HYOS`;
-//   2. a status file, `monoicon_hyos_init.txt`, in the first writable location
-//      found (the launcher's own files dir first, then /data/local/tmp).
-// The file exists because a HYOS spawner's logcat output can be lost; the file is
-// readable from adb as root and therefore cannot be silently dropped.
-// `monoicon_hyos_status` is also exported so the same state can be read out of
-// /proc/<pid>/mem.
-//
-// A launch-breaking experiment switch is included on purpose: with
-// MONOICON_HYOS_EXIT_PROBE=1 in the spawner environment, native_init terminates
-// the process immediately. If the launcher stops starting, native_init provably
-// ran; with the variable unset the payload never exits.
-//
-// Scope: loader lifecycle, process identity and startup dispatch. The verified
-// transaction stays in hyperos4_palette_install.cpp. A child loading its Dart
-// image completes the first transaction before that load returns; later updates
-// belong to the background worker. The spawner never applies icon patches.
-//
-// Reference: wxxsfxyzm/MiuiBackGestureHook (miui-home-hyos-native/) and
-// zilewang7/HyperOS4SmallWindowInputFilter, which use the same LSPosed
-// native_init contract.
-
+#include "hyperos4_builtin.h"
+#include <sys/system_properties.h>
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -84,7 +28,6 @@ constexpr char kLauncherEntrySymbol[] = "app_entry_point";
 constexpr char kDartLibrary[] = "libapp.so";
 
 constexpr char kStatusFileName[] = "monoicon_hyos_init.txt";
-constexpr char kExitProbeEnv[] = "MONOICON_HYOS_EXIT_PROBE";
 
 // ---------------------------------------------------------------------------
 // LSPosed native_init API. Layout confirmed against the reference modules:
@@ -326,8 +269,7 @@ void OnLibraryLoaded(const char* name, void* handle);
 // primitive; this module never writes machine code itself.
 extern "C" void monoicon_hyos_hook_backend_init(const void* entries);
 // The profile engine validates all mapped identities before installing code.
-extern "C" uint32_t monoicon_hyos_palette_install();
-extern "C" uint32_t monoicon_hyos_palette_startup();
+extern "C" uint32_t monoicon_hyos_start_large_icons();
 
 bool DartImageMapped() {
     bool mapped = false;
@@ -367,7 +309,7 @@ void HandleLauncherLibrary(void* handle) {
     }
     // A child can inherit a preloaded Dart image. Apply before the newly loaded
     // launcher entry runs. Otherwise the Dart callback owns the first pass.
-    if (IsLauncherChildProcess() && DartImageMapped()) monoicon_hyos_palette_startup();
+    if (IsLauncherChildProcess() && DartImageMapped()) monoicon_hyos_start_large_icons();
     NextSequence();
     WriteStatusFile("launcher-library");
 }
@@ -378,7 +320,7 @@ void HandleDartLibrary(void* handle) {
     Logf(ANDROID_LOG_INFO, "Dart snapshot image loaded (handle=%p)", handle);
     // This callback precedes return from loading libapp.so: do not let Dart's
     // first icon requests outrun the initial verified transaction.
-    monoicon_hyos_palette_startup();
+    monoicon_hyos_start_large_icons();
     NextSequence();
     WriteStatusFile("dart-library");
 }
@@ -397,7 +339,7 @@ void OnLibraryLoaded(const char* name, void* handle) {
     }
     // Late/inherited image discovery may happen on an application thread. Use
     // the worker there; never patch synchronously from an arbitrary Dart call.
-    if (IsLauncherChildProcess() && DartImageMapped()) monoicon_hyos_palette_install();
+    if (IsLauncherChildProcess() && DartImageMapped()) monoicon_hyos_start_large_icons();
 }
 
 // The spawner may dlopen the launcher images before LSPosed calls native_init,
@@ -422,6 +364,10 @@ extern "C" __attribute__((visibility("default"))) NativeOnModuleLoaded
 native_init(const NativeAPIEntries* entries) {
     const bool spawner = IsHyosSpawnerProcess();
     const bool launcherChild = IsLauncherChildProcess();
+    if (!spawner && !launcherChild) return nullptr;
+    char firmware[PROP_VALUE_MAX]{};
+    __system_property_get("ro.build.version.incremental", firmware);
+    if (strcmp(firmware, monoicon::profile::kLargeIconFirmware) != 0) return nullptr;
     gNativeInitPid.store(static_cast<uint32_t>(getpid()), std::memory_order_release);
 
     __atomic_store_n(&monoicon_hyos_status.api_version,
@@ -447,24 +393,6 @@ native_init(const NativeAPIEntries* entries) {
     // Recorded before any rejection path, so the file alone proves the entry ran.
     WriteStatusFile(spawner ? "native_init-spawner" : "native_init");
 
-    // Launch-breaking experiment, opt-in only. With MONOICON_HYOS_EXIT_PROBE=1 in
-    // the spawner environment, a launcher that fails to start is direct proof that
-    // native_init executed. Unset (the default) this is never taken.
-    const char* probe = getenv(kExitProbeEnv);
-    if (probe != nullptr && probe[0] == '1') {
-        Log(ANDROID_LOG_WARN,
-            "MONOICON_HYOS_EXIT_PROBE=1: terminating the HYOS process to prove native_init ran");
-        _exit(99);
-    }
-
-    // LSPosed only installs the native_init entry for the injections it owns; the
-    // executable check keeps this payload inert if it is ever loaded elsewhere.
-    if (!spawner && !launcherChild) {
-        Log(ANDROID_LOG_WARN,
-            "native_init rejected a non-HYOS process; MonoIcon native entry stays inert");
-        return nullptr;
-    }
-
     // Hand the LSPosed hook primitive to the backend before anything else can try
     // to use it. Failing here leaves the launcher completely untouched.
     monoicon_hyos_hook_backend_init(entries);
@@ -473,7 +401,7 @@ native_init(const NativeAPIEntries* entries) {
     BackfillLoadedLibrary(kDartLibrary);
     // RTLD_NOLOAD may fail to resolve a basename across namespaces even though
     // dl_iterate_phdr can see it. native_init itself is still a startup entry.
-    if (launcherChild && DartImageMapped()) monoicon_hyos_palette_startup();
+    if (launcherChild && DartImageMapped()) monoicon_hyos_start_large_icons();
 
     Log(ANDROID_LOG_INFO,
         "MonoIcon native_init armed the HYOS library callback");

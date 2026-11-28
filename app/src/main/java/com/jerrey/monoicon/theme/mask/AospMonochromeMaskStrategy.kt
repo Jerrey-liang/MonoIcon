@@ -36,6 +36,8 @@ class AospMonochromeMaskStrategy(
     private val generatedBorderRatio: Float? = null,
     private val sourceStyle: IconSourceStyle? = null,
     private val allowLawniconsFallback: Boolean? = null,
+    /** Offline rendering supplies the raw drawable and the actual destination resolution. */
+    private val apkRenderSize: Int? = null,
 ) : MaskStrategy {
 
     private var themeId: String = ""
@@ -47,9 +49,10 @@ class AospMonochromeMaskStrategy(
     }
 
     override fun generate(d: Drawable, identity: String?): GenerateResult? {
-        val preferences = ConfigManager.getEffectiveIconStyle(identity)
-        val borderRatio = generatedBorderRatio ?: preferences.generatedBorderRatio
-        val style = sourceStyle ?: preferences.style
+        val preferences = if (generatedBorderRatio == null || sourceStyle == null)
+            ConfigManager.getEffectiveIconStyle(identity) else null
+        val borderRatio = generatedBorderRatio ?: checkNotNull(preferences).generatedBorderRatio
+        val style = sourceStyle ?: checkNotNull(preferences).style
         var source = MaskStrategy.SOURCE_LUMINANCE
         var rawUsed = false
         var keyBitmap: Bitmap? = null
@@ -61,12 +64,12 @@ class AospMonochromeMaskStrategy(
         // available. The generic HyperOS drawable remains the compatibility
         // fallback when identity/raw capture is unavailable.
         try {
-            val rawCached = if (identity != null) IconDrawableCache.get(identity) else null
+            val rawCached = if (apkRenderSize == null && identity != null) IconDrawableCache.get(identity) else null
             val preferred = rawCached ?: d
             rawUsed = rawCached != null && rawCached !== d
 
             val adaptiveSource = preferred as? AdaptiveIconDrawable
-            val size = aospTargetSize(preferred, d)
+            val size = apkRenderSize ?: aospTargetSize(preferred, d)
             fun nativeMask(): Bitmap? = adaptiveSource?.let { this.nativeMask(it, size) }
             fun packMask(): Bitmap? = if (style.permitsLawniconsFallback &&
                 (allowLawniconsFallback ?: (sourceStyle != null || ConfigManager.permitsLawniconsFallback(identity))))
@@ -109,11 +112,10 @@ class AospMonochromeMaskStrategy(
                     logd(TAG, "[AospMask] source=AOSP_ADAPTIVE raw=$rawUsed")
                 }
             } else if (
-                rawCached != null ||
+                apkRenderSize != null || rawCached != null ||
                     d is BitmapDrawable ||
                     d is VectorDrawable
             ) {
-                val size = aospTargetSize(preferred, d)
                 val wrapped = DrawableConverter.wrapAospLegacyIcon(preferred, size)
                 if (wrapped != null) {
                     source = MaskStrategy.SOURCE_AOSP_LEGACY
@@ -131,7 +133,7 @@ class AospMonochromeMaskStrategy(
         // are neither raw legacy inputs nor Adaptive Icons.
         if (mask == null) {
             source = MaskStrategy.SOURCE_LUMINANCE
-            val render = DrawableConverter.renderToBitmap(d)
+            val render = DrawableConverter.renderToBitmap(d, apkRenderSize)
             mask = render?.let {
                 LabMonochromeExtractor.extractFromBitmap(
                     it, LabMonochromeExtractor.estimateLuminanceDelta(it), borderRatio)
@@ -144,6 +146,9 @@ class AospMonochromeMaskStrategy(
 
         val tonal = source != MaskStrategy.SOURCE_NATIVE && source != MaskStrategy.SOURCE_LAWNICONS &&
             mask.config == Bitmap.Config.ARGB_8888
+        // Offline PNGs already have a versioned package cache. Reuse the actual mask just
+        // computed, even when an updated APK matches the launcher's sampled bitmap fingerprint.
+        if (apkRenderSize != null) return GenerateResult(mask, source, rawUsed, cacheHit = false, tonal = tonal)
         val cacheKey = MonochromeCache.shared.buildKey(
             "generated_v7_visible_plate_${borderRatio.toBits()}_$themeId", contextStr, identity, keyBitmap ?: mask, source)
         if (cacheKey != null) {
@@ -197,17 +202,26 @@ class AospMonochromeMaskStrategy(
     companion object {
         private const val TAG = "MonoIcon.AospMask"
 
-        internal fun hasUsableGlyph(mask: Bitmap): Boolean {
+        internal fun hasUsableGlyph(mask: Bitmap, tonal: Boolean = false): Boolean {
             val pixels = IntArray(mask.width * mask.height)
             mask.getPixels(pixels, 0, mask.width, 0, 0, mask.width, mask.height)
             var min = 255
             var max = 0
+            var minTone = 255
+            var maxTone = 0
             for (pixel in pixels) {
                 val alpha = pixel ushr 24
                 min = minOf(min, alpha)
                 max = maxOf(max, alpha)
+                if (tonal && alpha >= 32) {
+                    // Fully opaque generated artwork can carry its entire glyph in RGB.
+                    val tone = pixel ushr 16 and 255
+                    minTone = minOf(minTone, tone)
+                    maxTone = maxOf(maxTone, tone)
+                }
+                if (max >= 32 && (max - min >= 16 || maxTone - minTone >= 16)) return true
             }
-            return max >= 32 && max - min >= 16
+            return false
         }
     }
 }

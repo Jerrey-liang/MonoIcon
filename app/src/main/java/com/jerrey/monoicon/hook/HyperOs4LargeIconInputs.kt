@@ -2,7 +2,6 @@ package com.jerrey.monoicon.hook
 
 import android.content.Context
 import com.jerrey.monoicon.profile.CompatibilityProfile
-import com.jerrey.monoicon.profile.ProfileIconRules
 import com.jerrey.monoicon.profile.ProfileRepository
 import org.json.JSONArray
 import java.io.File
@@ -23,7 +22,7 @@ internal data class HyperOs4LargeIconInputs(
         private val diagnostics = HyperOs4LargeIconDiagnostics()
 
         fun read(context: Context, profile: CompatibilityProfile?, launcherUid: Int): HyperOs4LargeIconInputs {
-            val prefixes = profile?.icons?.largeIconPrefixes.orEmpty()
+            val prefixes = profile?.largeIconPrefixes.orEmpty()
             if (prefixes.isEmpty()) return EMPTY
             val geometry = HyperOs4LargeIconGeometry.read(context, checkNotNull(profile), launcherUid) ?: return EMPTY
             val output = File.createTempFile("hyperos4-large-configs-", ".json", context.cacheDir)
@@ -89,7 +88,7 @@ internal data class HyperOs4LargeIconInputs(
                     if (icon.optBoolean("isPairApp")) continue
                     val pkg = icon.optString("packageName")
                     val path = icon.optString("path").let { if (it.startsWith('/')) it else "/$it" }.trimEnd('/')
-                    if (!ProfileIconRules.safeIconName("$pkg.png") || '.' !in pkg ||
+                    if ((!ThemeIconEntries.validPackage(pkg) || pkg.length + 4 > 255) || '.' !in pkg ||
                         path.length !in 2..980 || ".." in path || "//" in path || '\\' in path ||
                         path.any { it.code !in 32..126 } || prefixes.none { path.startsWith(it) && path.length > it.length }) continue
                     val previous = entries.putIfAbsent(path, pkg)

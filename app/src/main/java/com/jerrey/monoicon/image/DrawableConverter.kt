@@ -153,7 +153,8 @@ object DrawableConverter {
      * @param drawable The drawable to render (any type).
      * @return The rendered bitmap, or `null` on failure.
      */
-    fun renderToBitmap(drawable: Drawable): Bitmap? {
+    @JvmOverloads
+    fun renderToBitmap(drawable: Drawable, targetSize: Int? = null): Bitmap? {
         return try {
             val width = drawable.intrinsicWidth.coerceAtLeast(1)
             val height = drawable.intrinsicHeight.coerceAtLeast(1)
@@ -166,7 +167,7 @@ object DrawableConverter {
             // makes the scale factors equal so the foreground stays undistorted;
             // the background (usually a solid color) absorbs the non-uniform
             // scaling.
-            val size = maxOf(width, height)
+            val size = targetSize ?: maxOf(width, height)
 
             val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             synchronized(reusableCanvas) {

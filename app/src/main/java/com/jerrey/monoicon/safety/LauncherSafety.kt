@@ -3,7 +3,7 @@ package com.jerrey.monoicon.safety
 import android.content.Context
 import android.content.pm.PackageManager
 import com.jerrey.monoicon.config.ConfigManager
-import com.jerrey.monoicon.hook.HyperOs4PalettePublisher
+import com.jerrey.monoicon.hook.HyperOs4LargeIconPublisher
 import com.jerrey.monoicon.hook.HyperOs4Storage
 import com.jerrey.monoicon.logging.logw
 import java.io.File
@@ -38,7 +38,7 @@ internal object LauncherSafety {
         val app = context.applicationContext
         worker.execute {
             synchronize(app)
-            HyperOs4PalettePublisher.publish(app)
+            HyperOs4LargeIconPublisher.publish(app)
         }
     }
 

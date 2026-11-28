@@ -51,7 +51,6 @@ internal object HyperOs4LargeIconGeometry {
     @Synchronized
     fun read(context: Context, profile: CompatibilityProfile, launcherUid: Int): Geometry? {
         if (Looper.myLooper() == Looper.getMainLooper()) return unavailable("main-thread")
-        if (profile.icons.geometryBridge == null) return unavailable("profile-bridge-missing")
         if (launcherUid < 0 || !HEX_64.matches(profile.digest)) return unavailable("invalid-request-identity")
         if (context.resources.configuration.smallestScreenWidthDp !in 1..599) return unavailable("unsupported-screen-width")
         val nonce = UUID.randomUUID().toString().replace("-", "")

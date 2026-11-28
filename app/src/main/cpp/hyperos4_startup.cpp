@@ -13,9 +13,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-extern "C" bool monoicon_hyos_palette_started();
-extern "C" uint32_t monoicon_hyos_palette_startup();
-extern "C" uint32_t monoicon_hyos_palette_install();
+extern "C" bool monoicon_hyos_large_icons_started();
+extern "C" uint32_t monoicon_hyos_start_large_icons();
 
 namespace {
 using CreateThread = int (*)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
@@ -47,12 +46,9 @@ bool LauncherReady() {
 
 int Create(pthread_t* thread, const pthread_attr_t* attributes, void* (*entry)(void*), void* argument) {
     const int saved = errno;
-    if (!entering && !monoicon_hyos_palette_started()) {
+    if (!entering && !monoicon_hyos_large_icons_started()) {
         entering = true;
-        if (LauncherReady()) {
-            if (syscall(SYS_gettid) == getpid()) monoicon_hyos_palette_startup();
-            else monoicon_hyos_palette_install();
-        }
+        if (LauncherReady()) monoicon_hyos_start_large_icons();
         entering = false;
     }
     errno = saved;

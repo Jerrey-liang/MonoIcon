@@ -51,8 +51,6 @@ import com.jerrey.monoicon.theme.color.dynamic.Material2025ColorEngine
 import com.jerrey.monoicon.ui.AppLanguage
 import com.jerrey.monoicon.ui.AppStrings
 import com.jerrey.monoicon.ui.MonoIconApp
-import com.jerrey.monoicon.ui.screens.ConfigurationDiagnosticsRepository
-import com.jerrey.monoicon.ui.screens.LauncherEngine
 import com.jerrey.monoicon.ui.stringsFor
 import com.jerrey.monoicon.ui.systemPrefersChinese
 import com.jerrey.monoicon.ui.theme.paletteStyleForVariant
@@ -119,34 +117,23 @@ class SettingsScreenComposeTest {
 
         val centers = labels(strings).map { tab(it).fetchSemanticsNode().boundsInRoot.center.x }
         centers.zipWithNext().forEach { (left, right) ->
-            assertTrue("Home, style, configuration and module settings must appear in order", left < right)
+            assertTrue("Home, style, diagnostics and module settings must appear in order", left < right)
         }
     }
 
     @Test
-    fun bottomBarOpensConfigurationAndSettings() {
+    fun bottomBarOpensDiagnosticsAndSettings() {
         val strings = currentStrings()
         composeRule.setContent { MonoIconApp() }
 
-        tab(strings.configurationManagement).performClick()
+        tab(strings.runtimeDiagnostics).performClick()
         assertNavigation(strings, selectedIndex = 2)
         composeRule.onNodeWithTag("configuration-environment").assertIsDisplayed()
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        if (ConfigurationDiagnosticsRepository.environment(context).engine == LauncherEngine.NATIVE) {
-            composeRule.waitUntil(20_000) {
-                composeRule.onAllNodes(hasText(strings.profileImport)).fetchSemanticsNodes().isNotEmpty()
-            }
-            composeRule.onNodeWithText(strings.profiles).assertIsDisplayed()
-            composeRule.onNodeWithText(strings.profileImport).assertIsDisplayed()
-        } else {
-            composeRule.onNodeWithText(strings.profiles).assertIsNotDisplayed()
-            composeRule.onNodeWithText(strings.profileImport).assertIsNotDisplayed()
-        }
+        composeRule.onAllNodes(hasText("Import Profile") or hasText("导入 Profile")).assertCountEquals(0)
 
         tab(strings.moduleSettings).performClick()
         assertNavigation(strings, selectedIndex = 3)
         composeRule.onNodeWithText(strings.about).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(strings.profileImport).assertIsNotDisplayed()
 
         tab(strings.overview).performClick()
         assertNavigation(strings, selectedIndex = 0)
@@ -209,7 +196,7 @@ class SettingsScreenComposeTest {
         assertNavigation(strings, selectedIndex = 0)
         composeRule.mainClock.autoAdvance = false
         try {
-            listOf(strings.iconStyle, strings.moduleSettings, strings.configurationManagement, strings.overview, strings.iconStyle)
+            listOf(strings.iconStyle, strings.moduleSettings, strings.runtimeDiagnostics, strings.overview, strings.iconStyle)
                 .forEach { label ->
                     tab(label).performClick()
                     composeRule.mainClock.advanceTimeBy(64)
@@ -236,7 +223,7 @@ class SettingsScreenComposeTest {
         val originalY = anchor.fetchSemanticsNode().positionInRoot.y
         assertTrue("The style page must actually scroll before checking restoration", originalY < unscrolledY - 1f)
 
-        tab(strings.configurationManagement).performClick()
+        tab(strings.runtimeDiagnostics).performClick()
         assertNavigation(strings, selectedIndex = 2)
         tab(strings.iconStyle).performClick()
         assertNavigation(strings, selectedIndex = 1)
@@ -410,7 +397,7 @@ class SettingsScreenComposeTest {
         assertNavigation(strings, selectedIndex = 3)
         longPressDrag(strings.moduleSettings, strings.overview, true) { assertNavigation(strings, 3) }
         assertNavigation(strings, selectedIndex = 3)
-        tab(strings.configurationManagement).performTouchInput { click() }
+        tab(strings.runtimeDiagnostics).performTouchInput { click() }
         assertNavigation(strings, selectedIndex = 2)
         activateWithKey(strings.iconStyle, Key.Enter)
         assertNavigation(strings, selectedIndex = 1)
@@ -464,7 +451,7 @@ class SettingsScreenComposeTest {
     private val isTab = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and
         !hiddenFromAccessibility and !hasAnyAncestor(hiddenFromAccessibility)
     private fun tab(label: String) = composeRule.onNode(isTab and hasText(label))
-    private fun labels(strings: AppStrings) = listOf(strings.overview, strings.iconStyle, strings.configurationManagement, strings.moduleSettings)
+    private fun labels(strings: AppStrings) = listOf(strings.overview, strings.iconStyle, strings.runtimeDiagnostics, strings.moduleSettings)
 
     private fun currentStrings(): AppStrings {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

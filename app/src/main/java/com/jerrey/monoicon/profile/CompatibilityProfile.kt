@@ -41,47 +41,9 @@ internal data class ProfileEnvironment(
 )
 
 internal data class ProfileImage(val library: String, val size: Long, val sha256: String)
-internal data class ProfileRefresh(val action: String, val packageExtra: String)
-
-internal data class ProfileIconRules(
-    val names: List<String>,
-    val aliases: Map<String, String>,
-    val largeIconPrefixes: List<String> = emptyList(),
-    val geometryBridge: String? = null,
-) {
-    fun componentNames(pkg: String, cls: String): List<String> = names.mapNotNull {
-        when (it) {
-            "class" -> "$cls.png"
-            "component" -> "$pkg#$cls.png"
-            "qualified" -> if (cls.startsWith(pkg)) "$cls.png" else "$pkg#$cls.png"
-            else -> null // Package fallback is assigned to the primary launch activity.
-        }
-    }.distinct().filter(::safeIconName)
-
-    companion object {
-        private val safe = Regex("[A-Za-z0-9_.$#-]+\\.png")
-        fun safeIconName(name: String) = name.length <= 255 && ".." !in name && safe.matches(name)
-    }
-}
-
 internal data class CompatibilityProfile(
-    val id: String,
-    val name: String,
-    val revision: Int,
-    val official: Boolean,
-    val source: ByteArray,
     val digest: String,
     val match: ProfileMatch,
     val images: List<ProfileImage>,
-    val icons: ProfileIconRules,
-    val settingsKey: String,
-    val refresh: ProfileRefresh? = null,
+    val largeIconPrefixes: List<String>,
 )
-
-internal object ProfileSelection {
-    /** An explicit choice never silently falls back to another profile. */
-    fun choose(matches: List<CompatibilityProfile>, selected: String?, approvedDigests: Set<String> = emptySet()): CompatibilityProfile? =
-        if (selected != null) matches.singleOrNull {
-            it.id == selected && (it.match.systemVersions != null || it.digest in approvedDigests)
-        } else matches.filter { it.match.systemVersions != null }.singleOrNull()
-}

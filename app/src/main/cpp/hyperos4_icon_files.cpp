@@ -26,14 +26,12 @@ constexpr size_t kPathCapacity = 1024;
 std::atomic<pid_t> gInstalledPid{0};
 std::atomic_flag gInstalling = ATOMIC_FLAG_INIT;
 std::atomic<unsigned> gHookCount{0};
-std::atomic<unsigned> gRedirectCount{0};
 std::atomic<unsigned> gLargeRedirectCount{0};
-std::atomic<unsigned> gMissingCount{0};
 std::atomic<bool> gComplete{false};
 monoicon::hyos::diagnostics::HookPoint gHookDiagnostics[] = {
     {"open"}, {"openat"}, {"__open_2"}, {"__openat_2"},
     {"stat"}, {"stat64"}, {"lstat64"}, {"fstatat64"}, {"fstatat"},
-    {"access"}, {"faccessat"}, {"fopen"}, {"opendir"}, {"madvise"},
+    {"access"}, {"faccessat"}, {"fopen"}, {"opendir"},
 };
 pthread_mutex_t gDirectoryMutex = PTHREAD_MUTEX_INITIALIZER;
 char gDirectory[256]{};
@@ -59,10 +57,6 @@ AccessAtFn gFaccessAt{};
 FopenFn gFopen{};
 using OpenDirFn = DIR* (*)(const char*);
 OpenDirFn gOpenDir{};
-using MadviseFn = int (*)(void*, size_t, int);
-MadviseFn gMadvise{};
-std::atomic<uintptr_t> gProtectedPages[monoicon::profile::kMaxPatches]{};
-std::atomic<size_t> gProtectedPageSize{0};
 
 bool IsLauncherChild() {
     const int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD,
@@ -84,7 +78,7 @@ void WriteStatus(const char* phase, const char* basename = "") {
     const int count = snprintf(body, sizeof(body),
         "phase=%s pid=%d hooks=%u redirects=%u large_redirects=%u last=%s\n", phase,
         static_cast<int>(getpid()), gHookCount.load(std::memory_order_relaxed),
-        gRedirectCount.load(std::memory_order_relaxed), gLargeRedirectCount.load(std::memory_order_relaxed), basename);
+        0u, gLargeRedirectCount.load(std::memory_order_relaxed), basename);
     if (count > 0 && static_cast<size_t>(count) < sizeof(body)) {
         const int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD,
             statusPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600));
@@ -100,21 +94,6 @@ void WriteStatus(const char* phase, const char* basename = "") {
         }
     }
     errno = savedErrno;
-}
-
-bool ValidBasename(const char* name) {
-    if (!name || !name[0]) return false;
-    size_t length = 0;
-    for (; name[length] && length < 512; ++length) {
-        const unsigned char c = static_cast<unsigned char>(name[length]);
-        // Package/class identifiers plus the launcher's documented '#' separator.
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '$' ||
-              c == '#' || c == '-')) return false;
-    }
-    return length > 4 && length < 512 &&
-           std::strcmp(name + length - 4, ".png") == 0 &&
-           std::strstr(name, "..") == nullptr;
 }
 
 bool RawPng(const char* path) {
@@ -187,63 +166,6 @@ const char* RedirectLarge(const char* path, char (&replacement)[kPathCapacity]) 
     return valid ? replacement : path;
 }
 
-const char* Redirect(const char* path, char (&replacement)[kPathCapacity]) {
-    if (!path || !monoicon_hyos_icons_enabled()) return path;
-    if (const char* large = RedirectLarge(path, replacement); large != path) return large;
-    const char* basename = nullptr;
-    for (const auto& prefix : monoicon_hyos_active_profile()->icons.prefixes) {
-        const size_t length = prefix.size();
-        if (std::strncmp(path, prefix.c_str(), length) == 0) {
-            basename = path + length;
-            break;
-        }
-    }
-    if (!ValidBasename(basename)) return path;
-    const int savedErrno = errno;
-    pthread_mutex_lock(&gDirectoryMutex);
-    const int length = gDirectory[0] ? snprintf(replacement, sizeof(replacement), "%s/%s",
-                                gDirectory, basename) : -1;
-    pthread_mutex_unlock(&gDirectoryMutex);
-    if (length <= 0 || static_cast<size_t>(length) >= sizeof(replacement)) {
-        errno = savedErrno;
-        return path;
-    }
-    // A raw syscall avoids re-entering the libc hooks. Only existing regular PNG
-    // files published by MonoIcon are eligible; a missing/bad export falls back.
-    const int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, replacement,
-        O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0));
-    bool valid = false;
-    if (fd >= 0) {
-        struct stat metadata{};
-        unsigned char signature[8]{};
-        const bool regular = syscall(SYS_fstat, fd, &metadata) == 0 &&
-                             S_ISREG(metadata.st_mode) && metadata.st_size > 8;
-        ssize_t count = -1;
-        if (regular) {
-            do { count = read(fd, signature, sizeof(signature)); }
-            while (count < 0 && errno == EINTR);
-        }
-        valid = count == static_cast<ssize_t>(sizeof(signature)) &&
-                std::memcmp(signature, kPngSignature, sizeof(signature)) == 0;
-        close(fd);
-    }
-    if (valid) {
-        const unsigned count = gRedirectCount.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (count <= 16 || (count & (count - 1)) == 0) WriteStatus("redirecting", basename);
-    } else {
-        const unsigned missing = gMissingCount.fetch_add(1, std::memory_order_relaxed);
-        if (missing < 128) {
-            char path[192];
-            monoicon::hyos::LauncherFilePath(path, sizeof(path), "monoicon_hyos_icon_misses.txt");
-            const int out = static_cast<int>(syscall(SYS_openat, AT_FDCWD, path,
-                O_WRONLY | O_CREAT | O_CLOEXEC | (missing == 0 ? O_TRUNC : O_APPEND), 0600));
-            if (out >= 0) { write(out, basename, std::strlen(basename)); write(out, "\n", 1); close(out); }
-        }
-    }
-    errno = savedErrno;
-    return valid ? replacement : path;
-}
-
 bool ReadOnly(int flags) {
     return (flags & O_ACCMODE) == O_RDONLY &&
            (flags & (O_CREAT | O_TRUNC | O_TMPFILE)) == 0;
@@ -260,7 +182,7 @@ int Open(const char* path, int flags, ...) {
         mode = static_cast<mode_t>(va_arg(arguments, int)); va_end(arguments);
     }
     char replacement[kPathCapacity];
-    return gOpen(ReadOnly(flags) ? Redirect(path, replacement) : path, flags, mode);
+    return gOpen(ReadOnly(flags) ? RedirectLarge(path, replacement) : path, flags, mode);
 }
 int OpenAt(int directory, const char* path, int flags, ...) {
     mode_t mode = 0;
@@ -269,46 +191,46 @@ int OpenAt(int directory, const char* path, int flags, ...) {
         mode = static_cast<mode_t>(va_arg(arguments, int)); va_end(arguments);
     }
     char replacement[kPathCapacity];
-    return gOpenAt(directory, ReadOnly(flags) ? Redirect(path, replacement) : path, flags, mode);
+    return gOpenAt(directory, ReadOnly(flags) ? RedirectLarge(path, replacement) : path, flags, mode);
 }
 int Open2(const char* path, int flags) {
     char replacement[kPathCapacity];
-    return gOpen2(ReadOnly(flags) ? Redirect(path, replacement) : path, flags);
+    return gOpen2(ReadOnly(flags) ? RedirectLarge(path, replacement) : path, flags);
 }
 int OpenAt2(int directory, const char* path, int flags) {
     char replacement[kPathCapacity];
-    return gOpenAt2(directory, ReadOnly(flags) ? Redirect(path, replacement) : path, flags);
+    return gOpenAt2(directory, ReadOnly(flags) ? RedirectLarge(path, replacement) : path, flags);
 }
 int Stat(const char* path, struct stat* metadata) {
-    char replacement[kPathCapacity]; return gStat(Redirect(path, replacement), metadata);
+    char replacement[kPathCapacity]; return gStat(RedirectLarge(path, replacement), metadata);
 }
 int Stat64(const char* path, struct stat* metadata) {
-    char replacement[kPathCapacity]; return gStat64(Redirect(path, replacement), metadata);
+    char replacement[kPathCapacity]; return gStat64(RedirectLarge(path, replacement), metadata);
 }
 int Lstat64(const char* path, struct stat* metadata) {
-    char replacement[kPathCapacity]; return gLstat64(Redirect(path, replacement), metadata);
+    char replacement[kPathCapacity]; return gLstat64(RedirectLarge(path, replacement), metadata);
 }
 int FstatAt64(int directory, const char* path, struct stat* metadata, int flags) {
     char replacement[kPathCapacity];
-    return gFstatAt64(directory, Redirect(path, replacement), metadata, flags);
+    return gFstatAt64(directory, RedirectLarge(path, replacement), metadata, flags);
 }
 int FstatAt(int directory, const char* path, struct stat* metadata, int flags) {
     char replacement[kPathCapacity];
-    return gFstatAt(directory, Redirect(path, replacement), metadata, flags);
+    return gFstatAt(directory, RedirectLarge(path, replacement), metadata, flags);
 }
 int Access(const char* path, int mode) {
     char replacement[kPathCapacity];
-    return gAccess((mode & (W_OK | X_OK)) == 0 ? Redirect(path, replacement) : path, mode);
+    return gAccess((mode & (W_OK | X_OK)) == 0 ? RedirectLarge(path, replacement) : path, mode);
 }
 int FaccessAt(int directory, const char* path, int mode, int flags) {
     char replacement[kPathCapacity];
     return gFaccessAt(directory,
-        (mode & (W_OK | X_OK)) == 0 ? Redirect(path, replacement) : path, mode, flags);
+        (mode & (W_OK | X_OK)) == 0 ? RedirectLarge(path, replacement) : path, mode, flags);
 }
 FILE* Fopen(const char* path, const char* mode) {
     char replacement[kPathCapacity];
     const bool readOnly = mode && mode[0] == 'r' && !std::strchr(mode, '+');
-    return gFopen(readOnly ? Redirect(path, replacement) : path, mode);
+    return gFopen(readOnly ? RedirectLarge(path, replacement) : path, mode);
 }
 
 DIR* OpenDir(const char* path) {
@@ -316,37 +238,7 @@ DIR* OpenDir(const char* path) {
     return gOpenDir(RedirectLarge(path, replacement));
 }
 
-int Madvise(void* address, size_t length, int advice) {
-    const size_t pageSize = gProtectedPageSize.load(std::memory_order_acquire);
-    const uintptr_t start = reinterpret_cast<uintptr_t>(address);
-    if (!pageSize || (advice != MADV_DONTNEED && advice != MADV_FREE) ||
-        start % pageSize || length > UINTPTR_MAX - start || !length) {
-        return gMadvise(address, length, advice);
-    }
-    // Do not discard the private code pages containing our verified patches.
-    // Forward all non-overlapping portions, preserving the caller's reclamation.
-    const uintptr_t end = start + length;
-    uintptr_t cursor = start;
-    while (cursor < end) {
-        uintptr_t next = end;
-        for (const auto& slot : gProtectedPages) {
-            const uintptr_t page = slot.load(std::memory_order_relaxed);
-            if (page >= cursor && page < next) next = page;
-        }
-        if (next > cursor && gMadvise(reinterpret_cast<void*>(cursor), next - cursor, advice) != 0) return -1;
-        if (next == end) return 0;
-        cursor = next > UINTPTR_MAX - pageSize ? end : next + pageSize;
-    }
-    return 0;
-}
-
-}  // namespace
-
-extern "C" void monoicon_hyos_protect_code_pages(const uintptr_t* pages, size_t count, size_t pageSize) {
-    if (!pages || !pageSize || count > monoicon::profile::kMaxPatches) return;
-    for (size_t i = 0; i < monoicon::profile::kMaxPatches; ++i) gProtectedPages[i].store(i < count ? pages[i] : 0, std::memory_order_relaxed);
-    gProtectedPageSize.store(pageSize, std::memory_order_release);
-}
+} // namespace
 
 extern "C" bool monoicon_hyos_icon_generation_ready(const char* generation) {
     if (!generation || std::strlen(generation) != 34 || generation[0] != 'g' || generation[1] != '-') return false;
@@ -426,7 +318,6 @@ extern "C" bool monoicon_hyos_install_icon_files(MonoiconNativeHook hook) {
         {"faccessat", reinterpret_cast<void*>(FaccessAt), reinterpret_cast<void**>(&gFaccessAt)},
         {"fopen", reinterpret_cast<void*>(Fopen), reinterpret_cast<void**>(&gFopen)},
         {"opendir", reinterpret_cast<void*>(OpenDir), reinterpret_cast<void**>(&gOpenDir)},
-        {"madvise", reinterpret_cast<void*>(Madvise), reinterpret_cast<void**>(&gMadvise)},
     };
     static_assert(sizeof(entries) / sizeof(entries[0]) == sizeof(gHookDiagnostics) / sizeof(gHookDiagnostics[0]));
     void* targets[sizeof(entries) / sizeof(entries[0])]{};
@@ -463,7 +354,7 @@ extern "C" bool monoicon_hyos_install_icon_files(MonoiconNativeHook hook) {
                 "failed to hook %s: %d", entry.name, result);
         }
     }
-    const bool installed = gOpen && gOpenAt && gStat && gAccess && gOpenDir && gMadvise;
+    const bool installed = gOpen && gOpenAt && gStat && gAccess && gOpenDir;
     gComplete.store(installed, std::memory_order_release);
     // Partial successful hooks remain safe pass-throughs and must never be
     // installed twice. A launcher restart retries an incomplete installation.

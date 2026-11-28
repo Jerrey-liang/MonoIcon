@@ -1,3 +1,4 @@
+#include "hyperos4_builtin.h"
 #include "hyperos4_profile_runtime.h"
 #include "profile_sha256.h"
 #include "hyperos4_paths.h"
@@ -346,39 +347,10 @@ bool Runtime::validate(const Profile& p, const std::vector<uint32_t>& current, u
 }
 bool ValidDigest(const std::string& s) { return s.size() == 64 && std::all_of(s.begin(),s.end(),[](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); }
 bool LoadProfile(const char* digest, Profile& profile, std::string& error) {
-    if (!digest || !ValidDigest(digest)) { error = "missing or invalid profile digest"; return false; }
-    char path[256], name[96]; snprintf(name,sizeof(name),"monoicon_profiles/%s.json",digest);
-    monoicon::hyos::LauncherFilePath(path,sizeof(path),name);
-    File input(open(path,O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)); struct stat st{};
-    if (input.fd < 0 || fstat(input.fd,&st) || !S_ISREG(st.st_mode) || st.st_size <= 0 || st.st_size > static_cast<off_t>(kMaxProfileBytes)) { error = "profile file missing or invalid"; return false; }
-    std::string source(static_cast<size_t>(st.st_size),'\0');
-    if (!ReadAt(input.fd,0,source.data(),source.size())) { error = "profile read failed"; return false; }
-    Sha256 hash; hash.update(source.data(),source.size());
-    if (hash.finish() != digest) { error = "profile content digest mismatch"; return false; }
-    if (!Parse(source,profile,error) || !MatchSystem(profile,error)) return false;
-    if (profile.match.systemVersions.empty()) {
-        // This check must run in the launcher: a previous published commit may
-        // outlive an app upgrade or OTA and be loaded before the module UI runs.
-        const auto fingerprint = SystemProperty("ro.build.fingerprint");
-        const auto incremental = SystemProperty("ro.build.version.incremental");
-        const auto sdk = SystemProperty("ro.build.version.sdk");
-        if (fingerprint.empty() || incremental.empty() || sdk.empty()) {
-            error = "system identity unavailable for legacy Profile approval"; return false;
-        }
-        const std::string identity = fingerprint + '\n' + incremental + '\n' + std::to_string(strtoul(sdk.c_str(),nullptr,10));
-        Sha256 approvalHash; approvalHash.update(identity.data(),identity.size());
-        const std::string expected = approvalHash.finish();
-        snprintf(name,sizeof(name),"monoicon_profiles/%s.system",digest);
-        monoicon::hyos::LauncherFilePath(path,sizeof(path),name);
-        File approval(open(path,O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
-        char actual[64]; struct stat approvalStat{};
-        if (approval.fd < 0 || fstat(approval.fd,&approvalStat) || !S_ISREG(approvalStat.st_mode) ||
-            approvalStat.st_size != 64 || !ReadAt(approval.fd,0,actual,sizeof(actual)) ||
-            memcmp(actual,expected.data(),sizeof(actual)) != 0) {
-            error = "legacy Profile requires manual approval for this system build"; return false;
-        }
+    if (!digest || strcmp(digest, kLargeIconDigest) != 0) {
+        error = "large icon descriptor does not match this module"; return false;
     }
-    return true;
+    return Parse(kLargeIconDescriptor, profile, error) && MatchSystem(profile, error);
 }
 bool MatchSystem(const Profile& p, std::string& error) {
     char sdk[PROP_VALUE_MAX]{}; __system_property_get("ro.build.version.sdk",sdk);

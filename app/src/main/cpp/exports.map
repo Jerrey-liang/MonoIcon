@@ -2,8 +2,6 @@ MONOICON_HYOS_1.0 {
     global:
         native_init;
         monoicon_hyos_status;
-        monoicon_hyos_palette;
-        monoicon_hyos_palette_install;
     local:
         *;
 };

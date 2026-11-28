@@ -8,11 +8,17 @@ target_compile_options(monoicon_hyperos4 PRIVATE -Wall -Wextra -fvisibility=hidd
 target_link_options(monoicon_hyperos4 PRIVATE "-Wl,-z,now")
 
 if("${ANDROID_ABI}" STREQUAL "arm64-v8a")
+    set(LARGE_ICON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../assets/hyperos4/profiles/hyperos4-6144.json")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${LARGE_ICON_SOURCE}")
+    file(SHA256 "${LARGE_ICON_SOURCE}" LARGE_ICON_DIGEST)
+    file(READ "${LARGE_ICON_SOURCE}" LARGE_ICON_DESCRIPTOR)
+    string(JSON LARGE_ICON_FIRMWARE GET "${LARGE_ICON_DESCRIPTOR}" match systemVersions 0)
+    configure_file(hyperos4_builtin.h.in hyperos4_builtin.h @ONLY)
     add_library(monoicon_hyperos4_native_init SHARED
         hyperos4_native_init.cpp
         hyperos4_startup.cpp
         hyperos4_hook_backend.cpp
-        hyperos4_palette_install.cpp
+        hyperos4_large_icons.cpp
         hyperos4_icon_files.cpp
         hyperos4_geometry_bridge.cpp
         hyperos4_profile.cpp
@@ -20,6 +26,7 @@ if("${ANDROID_ABI}" STREQUAL "arm64-v8a")
         launcher_safety.cpp
     )
 
+    target_include_directories(monoicon_hyperos4_native_init PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_compile_features(monoicon_hyperos4_native_init PRIVATE cxx_std_17)
     target_compile_options(monoicon_hyperos4_native_init PRIVATE
         -fno-exceptions

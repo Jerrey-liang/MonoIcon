@@ -8,7 +8,7 @@ MonoIcon is licensed under the **GNU General Public License, version 3 or (at yo
 
 MonoIcon adapts its interface from KernelSU Manager at revision `2fe188310309bd7a7c9b5a80beed6f14469c6cd2`. [KernelSU source](https://github.com/tiann/KernelSU/tree/2fe188310309bd7a7c9b5a80beed6f14469c6cd2)
 
-KernelSU's README licenses its manager and other non-kernel code under **GPL-3.0-or-later**. The adapted navigation, home, settings, theme, About, background effects, dialogs and blur helpers retain that licence and their upstream copyright notices. MonoIcon adapted these components for its LSPosed status, compatibility profiles, release feed, logs and project links. [KernelSU GPL terms](licenses/KernelSU-GPL-3.0.txt)
+KernelSU's README licenses its manager and other non-kernel code under **GPL-3.0-or-later**. The adapted navigation, home, settings, theme, About, background effects, dialogs and blur helpers retain that licence and their upstream copyright notices. MonoIcon adapted these components for its LSPosed status, runtime diagnostics, release feed, logs and project links. [KernelSU GPL terms](licenses/KernelSU-GPL-3.0.txt)
 
 KernelSU's `FloatingBottomBar.kt` attributes the compose-miuix-ui code to Apache-2.0. MonoIcon retains that notice in `LiquidGlassNavigationBar.kt`.
 
@@ -20,7 +20,7 @@ MonoIcon paths are relative to its Kotlin source directory. [Browse MonoIcon sou
 | --- | --- |
 | `ui/screens/SettingsScreen.kt` | `ui/MainActivity.kt`, `ui/component/bottombar/BottomBar.kt`, `BottomBarMiuix.kt` |
 | `ui/screens/OverviewScreen.kt`, `HomeSystemInfo.kt`, `HomeTopBarActions.kt` | `ui/screen/home/HomeMiuix.kt`, home view model, reboot popup |
-| `ui/screens/ModuleSettingsScreen.kt`, `ProfileSettings.kt` | `ui/screen/settings/SettingsMiuix.kt`, dialog components |
+| `ui/screens/ModuleSettingsScreen.kt` | `ui/screen/settings/SettingsMiuix.kt`, dialog components |
 | `ui/screens/ConfigurationRuntimeContent.kt` | `ui/screen/settings/SettingsMiuix.kt` card and preference layout |
 | `ui/screens/ThemeSettingsScreen.kt`, `ui/theme/Theme.kt` | `ui/screen/colorpalette/ColorPaletteScreenMiuix.kt`, `ui/theme/MiuixTheme.kt` |
 | `ui/screens/LawniconsAppsScreen.kt`, `AppIconSettingsScreen.kt`, `IconStyleScreen.kt`, `IconStyleParameterScreen.kt`, `IconStylePreview.kt` | `ui/screen/superuser/SuperUserMiuix.kt`, `ui/screen/settings/SettingsMiuix.kt`, `ui/screen/colorpalette/ColorPaletteScreenMiuix.kt`, Miuix preference components |
@@ -29,6 +29,12 @@ MonoIcon paths are relative to its Kotlin source directory. [Browse MonoIcon sou
 | `ui/settings/SendLogDialog.kt` | `ui/component/miuix/SendLogDialog.kt` |
 | `ui/liquid/BlurredBar.kt` | `ui/util/BlurExt.kt` |
 | `ui/liquid/LiquidGlassNavigationBar.kt` | `ui/component/FloatingBottomBar.kt` |
+
+## Hyper Icon Pack
+
+MonoIcon 的 HyperOS 4 主题图标实现参考了 Hyper Icon Pack 的原生主题图标归档格式和系统读取流程。APK 内附 Hyper Icon Pack 的版权声明和 MIT 许可证全文。 [参考源码](https://github.com/yungui314/HyperIconPack/tree/546e79b9781f5127285e19d5b7edf1d01b4ece2d) [MIT 许可证](../app/src/main/assets/licenses/HyperIconPack-MIT.txt)
+
+MonoIcon's HyperOS 4 theme icon implementation references Hyper Icon Pack for the native theme icon archive format and system loading behavior. The APK includes Hyper Icon Pack's copyright notice and the full MIT License text. [Reference source](https://github.com/yungui314/HyperIconPack/tree/546e79b9781f5127285e19d5b7edf1d01b4ece2d) [MIT License](../app/src/main/assets/licenses/HyperIconPack-MIT.txt)
 
 ## Lawnicons 图案 / Lawnicons artwork
 

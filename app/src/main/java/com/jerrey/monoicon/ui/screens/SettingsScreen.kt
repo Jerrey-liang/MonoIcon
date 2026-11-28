@@ -66,13 +66,13 @@ import top.yukonga.miuix.kmp.utils.springAnimateToPage
 private enum class MainTab(val icon: ImageVector) {
     HOME(MonoIcons.Home),
     ICON_STYLE(MonoIcons.IconStyle),
-    CONFIGURATION(MonoIcons.Configuration),
+    CONFIGURATION(MonoIcons.Diagnostics),
     MODULE(MonoIcons.Settings);
 
     fun label(strings: AppStrings): String = when (this) {
         HOME -> strings.overview
         ICON_STYLE -> strings.iconStyle
-        CONFIGURATION -> strings.configurationManagement
+        CONFIGURATION -> strings.runtimeDiagnostics
         MODULE -> strings.moduleSettings
     }
 }

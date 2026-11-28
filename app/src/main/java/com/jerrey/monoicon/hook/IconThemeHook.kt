@@ -124,6 +124,12 @@ class IconThemeHook : XposedModule() {
         android.util.Log.i(TAG, "onModuleLoaded: process=${param.processName} systemServer=${param.isSystemServer}")
     }
 
+    override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
+        runCatching { ThemeArchiveObserver.start(this, param.classLoader) }.onFailure {
+            logw(TAG, "Theme archive monitoring unavailable: ${it.message}")
+        }
+    }
+
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
         HyperOs4NativeHooks.onPackageReady(this, param, isLauncherMainProcess)
     }
@@ -142,7 +148,7 @@ class IconThemeHook : XposedModule() {
         // The no-DEX launcher is handled by onPackageReady; its Java icon classes
         // do not exist. Preserve the legacy and SystemUI hook paths below.
         if (pkg == "com.miui.home" &&
-            param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0
+            (param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0 || HyperOs4Environment.isVersion4())
         ) return
 
         // Phase 4.1: load configuration before installing hooks — a disabled

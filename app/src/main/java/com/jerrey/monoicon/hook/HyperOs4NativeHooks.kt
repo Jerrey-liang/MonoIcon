@@ -16,7 +16,7 @@ internal object HyperOs4NativeHooks {
         if (isLauncherProcess && param.isFirstPackage && param.packageName == "com.miui.home" &&
             param.applicationInfo.flags and ApplicationInfo.FLAG_HAS_CODE == 0) {
             HookDiagnostics.start(api, "com.miui.home", "com.miui.home", nativeLauncher = true)
-            Log.i("MonoIcon.HyperOS4", "Native launcher uses the published Profile through LSPosed native_init")
+            Log.i("MonoIcon.HyperOS4", "Theme archive handles app icons; native_init is for optional large icons")
         }
     }
 }

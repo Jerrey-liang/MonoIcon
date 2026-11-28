@@ -3,6 +3,7 @@ package com.jerrey.monoicon.theme.render
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import com.jerrey.monoicon.config.ConfigManager
+import com.jerrey.monoicon.config.EffectiveIconStyle
 import com.jerrey.monoicon.theme.IconContext
 import com.jerrey.monoicon.theme.ThemeManager
 
@@ -84,8 +85,10 @@ object ThemedIconBuilder {
      * Appearance is read here rather than cached in the recipe; the resulting
      * drawable also follows geometry changes at draw time.
      */
-    fun drawable(recipe: Recipe): Result {
-        val preferences = ConfigManager.getEffectiveIconStyle(recipe.identity)
+    fun drawable(recipe: Recipe): Result =
+        drawable(recipe, ConfigManager.getEffectiveIconStyle(recipe.identity), dynamicColors = true)
+
+    internal fun drawable(recipe: Recipe, preferences: EffectiveIconStyle, dynamicColors: Boolean): Result {
         return Result(
             drawable = ColoredMonochromeDrawable(
                 recipe.mask,
@@ -93,6 +96,7 @@ object ThemedIconBuilder {
                 recipe.plate,
                 roundnessPercent = preferences.roundnessPercent,
                 sizePercent = preferences.sizePercent,
+                dynamicColors = dynamicColors,
                 generatedBorderRatio = preferences.generatedBorderRatio,
                 generatedArtworkRadiusFraction = preferences.generatedArtworkRadiusFraction,
                 adjustGeneratedBorder = adjustsGeneratedBorder(recipe.source),

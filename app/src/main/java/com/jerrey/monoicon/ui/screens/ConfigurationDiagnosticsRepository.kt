@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import com.jerrey.monoicon.config.ConfigManager
 import com.jerrey.monoicon.hook.HookDiagnostics
-import com.jerrey.monoicon.profile.CompatibilityProfile
+import com.jerrey.monoicon.hook.HyperOs4Environment
 import com.jerrey.monoicon.profile.ProfileMatch
 import com.jerrey.monoicon.profile.ProfileNative
 import com.jerrey.monoicon.profile.ProfileRepository
@@ -24,6 +24,8 @@ internal data class LauncherEnvironment(
     val uid: Int? = null,
     val sdk: Int = Build.VERSION.SDK_INT,
     val abi: String = Build.SUPPORTED_ABIS.joinToString(),
+    val isHyperOs4: Boolean = false,
+    val themeArchiveAvailable: Boolean = false,
 )
 internal data class RuntimeHookPoint(
     val id: String,
@@ -31,7 +33,7 @@ internal data class RuntimeHookPoint(
     val member: String,
     val status: String = "UNKNOWN",
     val detail: String = "",
-    val hit: Boolean = false,
+    val hit: Boolean? = null,
     val fields: List<Pair<String, String>> = emptyList(),
 )
 internal data class RuntimeHookProcess(
@@ -48,13 +50,15 @@ internal data class ConfigurationRuntime(
     val enabled: Boolean = false,
     val safetyBlocked: Boolean = false,
     val processes: List<RuntimeHookProcess> = emptyList(),
+    val nativeExtensionMatched: Boolean? = null,
 )
 
 /** Worker-only observation; neither querying nor refreshing changes icon configuration. */
 internal object ConfigurationDiagnosticsRepository {
     private val packages = listOf("com.miui.home", "com.android.systemui")
-    private val libcPoints = listOf("open", "openat", "__open_2", "__openat_2", "stat", "stat64",
-        "lstat64", "fstatat64", "fstatat", "access", "faccessat", "fopen", "opendir", "madvise")
+    private val nativePoints = listOf(RuntimeHookPoint("pthread_create", "startup-hook", "pthread_create")) +
+        listOf("open", "openat", "__open_2", "__openat_2", "stat", "stat64", "lstat64", "fstatat64",
+            "fstatat", "access", "faccessat", "fopen", "opendir").map { RuntimeHookPoint(it, "libc-hook", it) }
 
     fun environment(context: Context): LauncherEnvironment {
         val info = runCatching {
@@ -70,15 +74,19 @@ internal object ConfigurationDiagnosticsRepository {
             system = runCatching { ProfileNative.systemProperty(ProfileMatch.SYSTEM_VERSION_PROPERTY) }.getOrDefault(""),
             launcher = info?.let { "${it.versionName.orEmpty()} (${it.longVersionCode})" }.orEmpty(),
             uid = app?.uid,
+            isHyperOs4 = HyperOs4Environment.isVersion4(),
+            themeArchiveAvailable = HyperOs4Environment.isSupported(context),
         )
     }
 
-    suspend fun load(context: Context): ConfigurationRuntime {
+    suspend fun load(context: Context, environment: LauncherEnvironment): ConfigurationRuntime {
         val app = context.applicationContext
-        val environment = environment(app)
+        val resolution = if (environment.isHyperOs4 && environment.engine == LauncherEngine.NATIVE) {
+            runCatching { ProfileRepository.resolve(app) }.getOrNull()
+        } else null
         val nonce = HookDiagnostics.requestSnapshots(app)
         val native = if (environment.engine == LauncherEngine.NATIVE && environment.uid != null) {
-            readNative(app, environment.uid)
+            readNative(app, environment.uid, resolution?.profile?.digest)
         } else null
         // Give the already-running Java hosts time to answer without doing IO in their hook callbacks.
         delay(650)
@@ -99,50 +107,44 @@ internal object ConfigurationDiagnosticsRepository {
                         point.firstHitElapsedMs.takeIf { it > 0 }?.let { "firstHitElapsedMs" to it.toString() },
                     ))
             }
-            RuntimeHookProcess(pkg + " · Java", report?.pid, current, report?.capturedAtMillis ?: 0,
-                report?.let { "${it.processName} · ${it.moduleVersion}" }.orEmpty(), points)
+            RuntimeHookProcess("$pkg (Java)", report?.pid, current, report?.capturedAtMillis ?: 0,
+                report?.moduleVersion.orEmpty(), points)
         }.toMutableList()
         if (native != null) processes.add(0, native)
-        return ConfigurationRuntime(environment, ConfigManager.isEnabledFromUi(), ConfigManager.isSafetyBlockedFromUi(), processes)
-    }
-
-    private fun expectedNativePoints(profile: CompatibilityProfile?): List<RuntimeHookPoint> {
-        val points = (listOf("pthread_create") + libcPoints).map {
-            RuntimeHookPoint(it, if (it == "pthread_create") "startup-hook" else "libc-hook", it)
-        }.toMutableList()
-        if (profile == null) return points
-        runCatching {
-            val root = JSONObject(profile.source.toString(Charsets.UTF_8))
-            val images = root.getJSONArray("images").let { array -> (0 until array.length()).associate {
-                val image = array.getJSONObject(it); image.getString("id") to image.getString("library")
-            } }
-            val functions = root.getJSONArray("functions").let { array -> (0 until array.length()).associate {
-                val function = array.getJSONObject(it); function.getString("id") to function
-            } }
-            val patches = root.getJSONArray("patches")
-            for (index in 0 until patches.length()) {
-                val patch = patches.getJSONObject(index)
-                val function = functions.getValue(patch.getString("function"))
-                val offset = number(function.get("address")) + number(patch.get("offset"))
-                points += RuntimeHookPoint(patch.getString("id"), "profile-patch", function.getString("id"),
-                    fields = listOf("library" to images.getValue(function.getString("image")),
-                        "profileRva" to "0x${offset.toString(16)}"))
-            }
+        val nativeExtensionMatched = when (environment.engine) {
+            LauncherEngine.JAVA -> false
+            LauncherEngine.NATIVE -> resolution?.let { it.profile != null }
+            LauncherEngine.UNKNOWN -> null
         }
-        return points
+        return ConfigurationRuntime(
+            environment = environment,
+            enabled = ConfigManager.isEnabledFromUi(),
+            safetyBlocked = ConfigManager.isSafetyBlockedFromUi(),
+            processes = processes,
+            nativeExtensionMatched = nativeExtensionMatched,
+        )
     }
 
-    private fun number(value: Any): Long = value.toString().let {
-        if (it.startsWith("0x")) it.drop(2).toLong(16) else it.toLong()
+    /** Keep only installed-build points when reading persisted reports from previous module versions. */
+    internal fun nativeHookPoints(report: JSONObject): List<RuntimeHookPoint> {
+        val pointArray = report.optJSONArray("points")
+        val reported = (0 until minOf(pointArray?.length() ?: 0, 512)).mapNotNull { index ->
+            pointArray?.optJSONObject(index)
+        }.associateBy { it.optString("kind") to it.optString("id") }
+        return nativePoints.map { expected ->
+            val point = reported[expected.group to expected.id] ?: return@map expected
+            val status = point.optString("state", "UNKNOWN")
+            expected.copy(
+                status = status,
+                detail = point.optString("detail").takeUnless { it == status }.orEmpty(),
+                fields = listOf(
+                    "library", "offset", "target", "loadBias", "original", "replacement", "aliasOf", "originPid", "resultCode",
+                ).mapNotNull { field -> point.optString(field).takeIf(String::isNotBlank)?.let { field to it } },
+            )
+        }
     }
 
-    private fun readNative(context: Context, uid: Int): RuntimeHookProcess {
-        val resolution = runCatching { ProfileRepository.resolve(context) }.getOrNull()
-        val profile = resolution?.profile ?: runCatching {
-            val selected = ProfileRepository.selected(context)
-            ProfileRepository.catalog(context).profiles.firstOrNull { it.id == selected }
-        }.getOrNull()
-        val expected = expectedNativePoints(profile)
+    private fun readNative(context: Context, uid: Int, expectedProfileDigest: String?): RuntimeHookProcess {
         val nonce = UUID.randomUUID().toString().replace("-", "")
         val user = uid / 100_000
         val script = """
@@ -177,7 +179,7 @@ internal object ConfigurationDiagnosticsRepository {
                 output.readText()
             } finally { if (process.isAlive) process.destroyForcibly() }
         } catch (failure: Exception) {
-            return RuntimeHookProcess("com.miui.home · Native", detail = failure.message.orEmpty(), points = expected)
+            return RuntimeHookProcess("com.miui.home (Native)", detail = failure.message.orEmpty(), points = nativePoints)
         } finally { output.delete() }
         val boot = text.lineSequence().firstOrNull { it.startsWith("@BOOT ") }?.removePrefix("@BOOT ")?.trim().orEmpty()
         val processes = text.lineSequence().filter { it.startsWith("@PROCESS ") }.mapNotNull { line ->
@@ -193,23 +195,13 @@ internal object ConfigurationDiagnosticsRepository {
             currentNativeReport(it.optInt("pid"), it.optLong("startTicks"), it.optString("bootId"),
                 boot, it.optString("requestNonce"), nonce, processes)
         } ?: candidates.firstOrNull { it.optString("requestNonce") == nonce } ?: candidates.firstOrNull()
-            ?: return RuntimeHookProcess("com.miui.home · Native", points = expected,
+            ?: return RuntimeHookProcess("com.miui.home (Native)", points = nativePoints,
                 detail = text.take(800).trim())
         val current = currentNativeReport(root.optInt("pid"), root.optLong("startTicks"), root.optString("bootId"),
             boot, root.optString("requestNonce"), nonce, processes)
-        val pointArray = root.optJSONArray("points")
-        val points = (0 until minOf(pointArray?.length() ?: 0, 512)).map { index ->
-            val point = pointArray!!.getJSONObject(index)
-            RuntimeHookPoint(point.optString("id"), point.optString("kind"), point.optString("function"),
-                point.optString("state", "UNKNOWN"), point.optString("detail"), fields = listOf(
-                    "library", "offset", "target", "loadBias", "original", "replacement", "observed", "committed", "valueType", "aliasOf", "originPid", "resultCode",
-                ).mapNotNull { field -> point.optString(field).takeIf(String::isNotBlank)?.let { field to it } })
-        }.toMutableList()
-        val known = points.mapTo(mutableSetOf()) { it.group to it.id }
-        points += expected.filter { (it.group to it.id) !in known }
         val fields = mutableListOf("profileId" to root.optString("profileId"), "profileDigest" to root.optString("profileDigest"),
             "phase" to root.optString("phase"), "result" to root.optString("result"), "startTicks" to root.optString("startTicks"))
-        listOf("reason", "installerStopped", "iconsEnabled", "requestedProfileDigest", "foregroundPage").forEach {
+        listOf("reason", "installerStopped", "iconsEnabled", "requestedProfileDigest").forEach {
             root.optString(it).takeIf(String::isNotBlank)?.let { value -> fields += it to value }
         }
         root.optJSONObject("nativeInit")?.let { init ->
@@ -219,12 +211,13 @@ internal object ConfigurationDiagnosticsRepository {
         root.optJSONArray("images")?.let { images -> for (i in 0 until images.length()) {
             val image = images.getJSONObject(i)
             listOf("loadBias", "path", "fileOffset", "inode").forEach { field ->
-                fields += "${image.optString("library", image.optString("id"))} · $field" to image.optString(field)
+                fields += "${image.optString("library", image.optString("id"))} / $field" to image.optString(field)
             }
         } }
-        val warning = if (resolution?.profile?.digest != null && resolution.profile.digest != root.optString("profileDigest"))
-            "Profile digest differs from the current configuration" else ""
-        return RuntimeHookProcess("com.miui.home · Native", root.optInt("pid"), current,
-            root.optLong("capturedAtMillis"), warning, points, fields.filter { it.second.isNotBlank() })
+        val digest = root.optString("profileDigest")
+        val warning = if (expectedProfileDigest != null && digest.isNotBlank() && expectedProfileDigest != digest)
+            "Reported large-icon configuration differs from the built-in match" else ""
+        return RuntimeHookProcess("com.miui.home (Native)", root.optInt("pid"), current,
+            root.optLong("capturedAtMillis"), warning, nativeHookPoints(root), fields.filter { it.second.isNotBlank() })
     }
 }

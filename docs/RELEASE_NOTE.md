@@ -2,8 +2,10 @@
 
 ## 未发布 / Unreleased
 
-- **HyperOS 4 配置导入**。在「配置管理」中，「导入 Profile」位于「运行环境」卡片下方、桌面和 SystemUI 的运行报告之前。应用识别运行环境后就会显示导入入口，诊断继续在后台加载。
-- **HyperOS 4 profile import** now appears in **Configurations**, directly below **Runtime environment** and above the Launcher and SystemUI reports. The action appears as soon as MonoIcon detects the environment, while diagnostics load in the background.
+- **HyperOS 4 普通应用图标**通过 Root 写入系统主题归档。更换系统主题后，可在「运行诊断」将 MonoIcon 应用到当前主题。系统移除归档且备份仍有效时，可以停用 MonoIcon 并恢复原图标。
+- **HyperOS 4 大图标**只在匹配内置支持的桌面上自动启用。旧版 Profile 导入、选择和手动确认入口已移除。 [使用与兼容性](hyperos4.md)
+- **Regular app icons on HyperOS 4** use the system theme archive, which MonoIcon updates with root access. After switching themes, use **Diagnostics** to apply MonoIcon to the current theme. If the system removes the archive and a valid backup remains, you can turn off MonoIcon and restore the original icons.
+- **Large icons on HyperOS 4** activate automatically when built-in support matches. Profile import, selection and manual approval have been removed. [Setup and compatibility (Chinese)](hyperos4.md)
 
 ## 2.4.0
 
@@ -28,7 +30,7 @@ versionCode 6 · [GitHub Release](https://github.com/Jerrey-liang/MonoIcon/relea
 
 #### 兼容性
 
-内置 HyperOS 4 配置的验证环境为 Redmi K50（22041211AC）、HyperOS 4 OS4.0.0.3.XAACNXM、Android 17、系统桌面 RELEASE-8.01.02.6144-260818-08251107-R。其他系统或桌面版本、平板及折叠屏需单独验证。日历和时钟使用静态图案，动态壁纸取色取决于系统能否捕获可见帧。文件夹、最近任务、通知入口和返回动画的验证范围有限。[配置指南](<HyperOS4 profile编写指南.md>)
+内置 HyperOS 4 配置的验证环境为 Redmi K50（22041211AC）、HyperOS 4 OS4.0.0.3.XAACNXM、Android 17、系统桌面 RELEASE-8.01.02.6144-260818-08251107-R。其他系统或桌面版本、平板及折叠屏需单独验证。日历和时钟使用静态图案，动态壁纸取色取决于系统能否捕获可见帧。文件夹、最近任务、通知入口和返回动画的验证范围有限。
 
 ### English
 
@@ -49,7 +51,7 @@ After upgrading from 2.3.0 or earlier, open MonoIcon once, wait for settings mig
 
 #### Compatibility
 
-The bundled HyperOS 4 Profile was verified on Redmi K50 (22041211AC), HyperOS 4 OS4.0.0.3.XAACNXM, Android 17 and launcher RELEASE-8.01.02.6144-260818-08251107-R. Other system or launcher builds, tablets and foldables need separate validation. Calendar and Clock use static artwork. Live wallpaper colours depend on the system allowing a visible frame to be captured. Folders, recents, notification entry points and return animations have limited visual coverage. [Configuration guide](<HyperOS4 profile编写指南.md>)
+The bundled HyperOS 4 Profile was verified on Redmi K50 (22041211AC), HyperOS 4 OS4.0.0.3.XAACNXM, Android 17 and launcher RELEASE-8.01.02.6144-260818-08251107-R. Other system or launcher builds, tablets and foldables need separate validation. Calendar and Clock use static artwork. Live wallpaper colours depend on the system allowing a visible frame to be captured. Folders, recents, notification entry points and return animations have limited visual coverage.
 
 ## 项目许可 / Project licence
 
